@@ -1,0 +1,9 @@
+parte1/
+parte2/
+CALENDARIO_POSTEO/
+videos_finales/
+videos_finales . copia/
+# Videos
+*.mp4
+*.mov
+*.avi

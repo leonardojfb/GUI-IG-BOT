@@ -1,0 +1,10 @@
+REPORTE DE CAMUFLAJE - 2026-04-19 21:21:19
+Total detectados: 306 | Suicide: 117 | Promo: 189
+----------------------------------------------------------------------
+Dia_01: 46/46 | Suicide: 22 | Promo: 24
+Dia_02: 46/46 | Suicide: 22 | Promo: 24
+Dia_03: 46/46 | Suicide: 22 | Promo: 24
+Dia_04: 46/46 | Suicide: 22 | Promo: 24
+Dia_05: 46/46 | Suicide: 22 | Promo: 24
+Dia_06: 46/46 | Suicide: 07 | Promo: 39
+Dia_07: 30/46 | Suicide: 00 | Promo: 30
