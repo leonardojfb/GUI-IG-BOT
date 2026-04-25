@@ -4,6 +4,9 @@ import sys
 import random
 from collections import defaultdict
 
+# Importar módulo de base de datos
+from database import DatabaseManager
+
 # --- CONFIGURACIÓN DE RUTAS ---
 base_dir = os.path.dirname(os.path.abspath(__file__))
 # Origen: Carpetas creadas por el nuevo videos.py
@@ -12,8 +15,64 @@ output_root = os.path.join(base_dir, "CALENDARIO_POSTEO")
 
 # Parámetros de distribución diaria (Ajustables según volumen)
 DAILY_GOAL = 46
-PREF_SUICIDE = 22
-PREF_PROMO = 24
+
+
+def get_distribution_config():
+    """Obtiene la configuración de distribución desde la base de datos."""
+    try:
+        db = DatabaseManager()
+        
+        # Obtener todos los tipos de video activos
+        video_types = db.get_video_types()
+        
+        if not video_types:
+            # Fallback si no hay tipos en DB
+            db.close()
+            return {
+                'SUICIDE': 22,
+                'PROMO': 24
+            }
+        
+        # Calcular distribución automática basada en los tipos registrados
+        config = {}
+        total_types = len(video_types)
+        
+        if total_types > 0:
+            # Distribución equitativa
+            base分配 = DAILY_GOAL // total_types
+            remainder = DAILY_GOAL % total_types
+            
+            for i, vt in enumerate(video_types):
+                category = vt['type_name'].upper()
+                # Asignar distribución base más distribución extra si hay remainder
+                config[category] = base分配 + (1 if i < remainder else 0)
+        
+        db.close()
+        return config if config else {'SUICIDE': 22, 'PROMO': 24}
+        
+    except Exception as e:
+        print(f"⚠️ Error consultando DB, usando configuración por defecto: {e}")
+        return {'SUICIDE': 22, 'PROMO': 24}
+
+
+def get_categories_from_db():
+    """Obtiene las categorías dinámicas desde la base de datos."""
+    try:
+        db = DatabaseManager()
+        video_types = db.get_video_types()
+        db.close()
+        
+        # Retornar diccionario con categorías y sus tipos
+        categories = {}
+        for vt in video_types:
+            if vt.get('is_active', 1):
+                categories[vt['type_name'].upper()] = vt['type_name'].lower()
+        
+        return categories if categories else {'SUICIDE': 'suicide', 'PROMO': 'promo'}
+    except Exception as e:
+        print(f"⚠️ Error consultando DB, usando categorías por defecto: {e}")
+        return {'SUICIDE': 'suicide', 'PROMO': 'promo'}
+
 
 print("🔍 --- INICIANDO ORGANIZACIÓN POR ENTROPÍA (MODO PERSISTENTE) ---")
 
@@ -26,16 +85,16 @@ def ensure_structure():
 # --- 1. INDEXACIÓN Y CLASIFICACIÓN ---
 def get_inventory():
     """Escanea las subcarpetas de origen y agrupa por P1ID."""
-    inventory = {
-        "SUICIDE": defaultdict(list),
-        "PROMO": defaultdict(list)
-    }
+    # Obtener categorías dinámicas desde la base de datos
+    categories = get_categories_from_db()
     
-    for cat in ["suicide", "promo"]:
-        cat_path = os.path.join(source_root, cat)
+    # Inicializar inventario con las categorías de la DB
+    inventory = {cat: defaultdict(list) for cat in categories.keys()}
+    
+    for cat_key, cat_folder in categories.items():
+        cat_path = os.path.join(source_root, cat_folder)
         if not os.path.exists(cat_path): continue
         
-        cat_key = cat.upper()
         files = [f for f in os.listdir(cat_path) if f.lower().endswith(('.mp4', '.mov'))]
         
         for f in files:
@@ -81,28 +140,44 @@ def distribute():
     ensure_structure()
     bins = get_inventory()
     
-    print(f"📊 Grupos P1: {len(bins['SUICIDE'])} en Suicide, {len(bins['PROMO'])} en Promo")
+    # Obtener configuración dinámica desde la DB
+    distribution_config = get_distribution_config()
+    categories = get_categories_from_db()
+    
+    # Mostrar configuración actual
+    config_str = ", ".join([f"{k}:{v}" for k, v in distribution_config.items()])
+    print(f"📊 Configuración dinámica: {config_str}")
+    
+    # Contar grupos por categoría
+    grupos_info = ", ".join([f"{k}:{len(bins[k])}" for k in bins.keys()])
+    print(f"📊 Grupos P1: {grupos_info}")
     
     dia = 1
     # Seguir distribuyendo mientras haya videos en cualquiera de los bins
-    while any(bins["SUICIDE"].values()) or any(bins["PROMO"].values()):
+    while any(bins[cat].values() for cat in bins):
         folder_dia = os.path.join(output_root, f"Dia_{dia}")
-        sub_s = os.path.join(folder_dia, "suicide")
-        sub_p = os.path.join(folder_dia, "promo")
         
-        os.makedirs(sub_s, exist_ok=True)
-        os.makedirs(sub_p, exist_ok=True)
+        # Crear subcarpetas dinámicamente según las categorías de la DB
+        for cat_key, cat_folder in categories.items():
+            sub_path = os.path.join(folder_dia, cat_folder)
+            os.makedirs(sub_path, exist_ok=True)
 
-        # Selección balanceada diaria
-        dia_suicide = pick_balanced(bins["SUICIDE"], PREF_SUICIDE)
-        dia_promo = pick_balanced(bins["PROMO"], PREF_PROMO)
+        # Selección balanceada diaria usando configuración dinámica
+        daily_selected = {}
+        for cat_key, count in distribution_config.items():
+            if cat_key in bins:
+                daily_selected[cat_key] = pick_balanced(bins[cat_key], count)
         
         # Relleno de emergencia si falta stock para llegar al DAILY_GOAL
-        total_actual = len(dia_suicide) + len(dia_promo)
-        if total_actual < DAILY_GOAL and (any(bins["SUICIDE"].values()) or any(bins["PROMO"].values())):
+        total_actual = sum(len(v) for v in daily_selected.values())
+        if total_actual < DAILY_GOAL:
+            remaining_categories = [k for k in bins if any(bins[k].values())]
             gap = DAILY_GOAL - total_actual
-            dia_suicide += pick_balanced(bins["SUICIDE"], gap // 2)
-            dia_promo += pick_balanced(bins["PROMO"], gap - (gap // 2))
+            fill_per_cat = gap // len(remaining_categories) if remaining_categories else 0
+            
+            for cat in remaining_categories:
+                if fill_per_cat > 0:
+                    daily_selected[cat] = daily_selected.get(cat, []) + pick_balanced(bins[cat], fill_per_cat)
 
         def move_files(files, category, target_path):
             for f in files:
@@ -110,10 +185,14 @@ def distribute():
                 dst = os.path.join(target_path, f) # MANTIENE NOMBRE ORIGINAL
                 shutil.move(src, dst)
 
-        move_files(dia_suicide, "SUICIDE", sub_s)
-        move_files(dia_promo, "PROMO", sub_p)
+        # Mover archivos a sus carpetas correspondientes
+        for cat_key, cat_folder in categories.items():
+            if cat_key in daily_selected:
+                target_path = os.path.join(folder_dia, cat_folder)
+                move_files(daily_selected[cat_key], cat_key, target_path)
 
-        print(f"✅ Dia_{dia:02d}: {len(dia_suicide) + len(dia_promo)} videos organizados con nombre persistente.")
+        total_dia = sum(len(v) for v in daily_selected.values())
+        print(f"✅ Dia_{dia:02d}: {total_dia} videos organizados con nombre persistente.")
         dia += 1
 
 if __name__ == "__main__":

@@ -3,6 +3,9 @@ import subprocess
 import json
 import sys
 
+# Importar módulo de base de datos
+from database import DatabaseManager
+
 # --- CONFIGURACIÓN DE RUTAS ---
 # Se utiliza la ruta del archivo para evitar conflictos en VS Code
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -17,9 +20,26 @@ FPS = "30"
 # Metadata Spoofing: iPhone 15 Pro @ USA
 LAT, LON = "+34.0522", "-118.2437"
 
+
+def get_categories_from_db():
+    """Consulta la base de datos para obtener las categorías dinámicas."""
+    try:
+        db = DatabaseManager()
+        video_types = db.get_video_types()
+        db.close()
+        
+        # Retornar lista de categorías (en minúsculas para rutas)
+        categories = [vt['type_name'].lower() for vt in video_types if vt.get('is_active', 1)]
+        return categories if categories else ["promo", "suicide"]  # Fallback
+    except Exception as e:
+        print(f"⚠️ Error consultando DB, usando categorías por defecto: {e}")
+        return ["promo", "suicide"]
+
+
 def ensure_structure():
     """Crea la jerarquía de carpetas de salida de forma recursiva."""
-    for cat in ["promo", "suicide"]:
+    categories = get_categories_from_db()
+    for cat in categories:
         path = os.path.join(folder_output_root, cat)
         if not os.path.exists(path):
             os.makedirs(path)
@@ -47,7 +67,9 @@ def run_render():
         return
 
     v1_list = [f for f in os.listdir(folder_p1) if f.lower().endswith(('.mp4', '.mov', '.mkv'))]
-    categories = ["promo", "suicide"]
+    
+    # Obtener categorías dinámicamente desde la base de datos
+    categories = get_categories_from_db()
 
     print(f"🚀 Renderizando en i5-12th Gen (Arquitectura Alder Lake)...")
 
