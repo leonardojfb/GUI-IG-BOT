@@ -99,7 +99,7 @@ def run_render():
 
 
 def process_tandas(db: DatabaseManager, tandas: list):
-    """Procesar videos usando Tandas activas desde la base de datos."""
+    """Procesar videos usando Tandas activas haciendo un cruce total (Producto Cartesiano)."""
     for tanda in tandas:
         tanda_name = tanda['tanda_name']
         p1_folder = tanda['p1_folder']
@@ -130,34 +130,32 @@ def process_tandas(db: DatabaseManager, tandas: list):
             print(f"⚠️ Tanda {tanda_name}: carpetas vacías")
             continue
         
-        random.shuffle(v1_list)
-        random.shuffle(v2_list)
+        total_videos = len(v1_list) * len(v2_list)
+        print(f"🔄 Modo Cruce Total: Generando {total_videos} combinaciones ({len(v1_list)} P1 x {len(v2_list)} P2)")
         
-        limit = 50
-        for i in range(limit):
-            v1 = v1_list[i % len(v1_list)]
-            v2 = v2_list[i % len(v2_list)]
-            
-            p1_id = os.path.splitext(v1)[0].replace(" ", "_")
-            p2_id = os.path.splitext(v2)[0].replace(" ", "_")
-            
-            name_out = f"{tanda_name}__{p1_id}__{p2_id}.mp4"
-            out_path = os.path.join(out_dir, name_out)
-            
-            if os.path.exists(out_path):
-                continue
-            
-            caption = get_caption_for_video(tanda)
-            
-            render_video_pair(
-                os.path.join(p1_dir, v1),
-                os.path.join(p2_dir, v2),
-                out_path,
-                tanda_name,
-                p1_id,
-                p2_id
-            )
-
+        # Bucle anidado: Por cada video en P1, recorre todos los videos en P2
+        for v1 in v1_list:
+            for v2 in v2_list:
+                p1_id = os.path.splitext(v1)[0].replace(" ", "_")
+                p2_id = os.path.splitext(v2)[0].replace(" ", "_")
+                
+                name_out = f"{tanda_name}__{p1_id}__{p2_id}.mp4"
+                out_path = os.path.join(out_dir, name_out)
+                
+                # Si la combinación ya se renderizó antes, la salta
+                if os.path.exists(out_path):
+                    continue
+                
+                caption = get_caption_for_video(tanda)
+                
+                render_video_pair(
+                    os.path.join(p1_dir, v1),
+                    os.path.join(p2_dir, v2),
+                    out_path,
+                    tanda_name,
+                    p1_id,
+                    p2_id
+                )
 
 def process_mix_rules(db: DatabaseManager, rules: list):
     """Procesar videos usando reglas de mezcla legacy."""
@@ -235,10 +233,11 @@ def render_video_pair(path_v1, path_v2, out_path, cat, p1_id, p2_id):
         f"[v0][a0][v1][a1]concat=n=2:v=1:a=1[outv][outa]"
     )
     
+# Usamos tu configuración NVIDIA original de alto rendimiento
     cmd = [
         'ffmpeg', '-y', '-hwaccel', 'cuda',
         '-i', path_v1, '-i', path_v2,
-        '-f', 'lavfi', '-i', 'anullsrc=cl=stereo:sr=44100',
+        '-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100', # <-- AQUÍ ESTÁ LA CORRECCIÓN
         '-filter_complex', filter_complex,
         '-map', '[outv]', '-map', '[outa]',
         '-c:v', 'h264_nvenc', '-preset', 'p4', '-cq:v', '20',
@@ -249,9 +248,37 @@ def render_video_pair(path_v1, path_v2, out_path, cat, p1_id, p2_id):
     ]
     
     name_out = os.path.basename(out_path)
-    print(f"🎬 Generando: {name_out}")
-    subprocess.run(cmd, capture_output=True)
-
+    print(f"🎬 Acelerando por hardware (NVIDIA): {name_out}...")
+    
+    # Capturamos el resultado para ver si falla
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    
+    if result.returncode != 0:
+        print(f"❌ ERROR CRÍTICO de FFmpeg al generar {name_out}:")
+        print(result.stderr) # Esto imprimirá por qué tu NVIDIA rechazó el comando
+    else:
+        print(f"✅ ¡Video renderizado con éxito!")
+def render_tanda(tanda_name: str) -> str:
+    """Función puente llamada desde la Interfaz Gráfica (GUI) para procesar una tanda específica."""
+    db = DatabaseManager()
+    
+    # Buscamos la tanda por su nombre
+    tandas = db.get_all_tandas()
+    tanda_activa = next((t for t in tandas if t['tanda_name'] == tanda_name), None)
+    
+    if not tanda_activa:
+        db.close()
+        raise Exception(f"No se encontró la tanda '{tanda_name}' en la base de datos.")
+        
+    try:
+        print(f"🎬 Iniciando renderizado desde GUI para la tanda: {tanda_name}")
+        # Reutilizamos tu motor de procesamiento que ya funciona perfecto
+        process_tandas(db, [tanda_activa])
+        db.close()
+        return f"✅ Tanda '{tanda_name}' procesada y renderizada con éxito."
+    except Exception as e:
+        db.close()
+        raise Exception(f"Fallo durante el procesamiento (FFMPEG/Carpetas): {str(e)}")
 
 if __name__ == "__main__":
     run_render()

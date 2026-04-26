@@ -25,11 +25,14 @@ class WorkerThread(threading.Thread):
         try:
             res = self.task(*self.args, **self.kwargs)
             if self.callback: 
-                self.root.after(0, lambda: self.callback(True, res))
+                # Congelamos el resultado en la variable 'r'
+                self.root.after(0, lambda r=res: self.callback(True, r))
         except Exception as e:
+            # Capturamos el texto exacto antes de que Python destruya el objeto 'e'
+            error_msg = str(e)
             if self.callback: 
-                self.root.after(0, lambda: self.callback(False, str(e)))
-
+                # Congelamos el mensaje de error en la variable 'm'
+                self.root.after(0, lambda m=error_msg: self.callback(False, m))
 # ==========================================
 # DIÁLOGO DE SELECCIÓN INTELIGENTE
 # ==========================================
