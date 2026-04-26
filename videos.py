@@ -1,137 +1,254 @@
 import os
 import subprocess
 import json
-import sys
-
-# Importar módulo de base de datos
+import sqlite3
+import random
+import re
 from database import DatabaseManager
 
-# --- CONFIGURACIÓN DE RUTAS ---
-# Se utiliza la ruta del archivo para evitar conflictos en VS Code
-base_dir = os.path.dirname(os.path.abspath(__file__))
-folder_p1 = os.path.join(base_dir, "parte1")
-folder_p2_root = os.path.join(base_dir, "parte2")
-folder_output_root = os.path.join(base_dir, "videos_finales")
+# --- CONFIGURACIÓN ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Cambiamos las carpetas para que coincidan con tu nueva estructura
+FOLDER_INPUTS = os.path.join(BASE_DIR, "inputs") 
+FOLDER_OUTPUT_ROOT = os.path.join(BASE_DIR, "videos_finales")
 
-# Parámetros técnicos IG Reel (1080x1920)
 RES_W, RES_H = 1080, 1920
 FPS = "30"
-
-# Metadata Spoofing: iPhone 15 Pro @ USA
+# Metadata Spoofing
 LAT, LON = "+34.0522", "-118.2437"
 
+# ==================== SISTEMA DE CAPTIONS ====================
+def load_captions_from_file(file_path: str) -> list:
+    """Cargar captions desde archivo .txt"""
+    if not os.path.exists(file_path):
+        return []
+    
+    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+        content = f.read()
+    
+    # Extraer bloques de captions
+    pattern = r'\[\d{1,2}.*?\].*?:\s*(.*?)(?=\s*\[\d{1,2}|$)'
+    blocks = re.findall(pattern, content, flags=re.DOTALL)
+    return [b.strip() for b in blocks if b.strip()]
 
-def get_categories_from_db():
-    """Consulta la base de datos para obtener las categorías dinámicas."""
-    try:
-        db = DatabaseManager()
-        video_types = db.get_video_types()
-        db.close()
-        
-        # Retornar lista de categorías (en minúsculas para rutas)
-        categories = [vt['type_name'].lower() for vt in video_types if vt.get('is_active', 1)]
-        return categories if categories else ["promo", "suicide"]  # Fallback
-    except Exception as e:
-        print(f"⚠️ Error consultando DB, usando categorías por defecto: {e}")
-        return ["promo", "suicide"]
+
+def process_caption_with_anti_collision(caption: str) -> str:
+    """
+    Algoritmo Anti-Choque de Texto:
+    1. Separar texto base de hashtags
+    2. Mezclar aleatoriamente el orden de los hashtags
+    3. Seleccionar solo un subconjunto (70% aprox)
+    4. Unir al texto base
+    """
+    # Extraer hashtags
+    hashtags = re.findall(r'#\w+', caption)
+    if not hashtags:
+        return caption
+    
+    # Texto sin hashtags
+    text_no_hashes = re.sub(r'#\w+', '', caption).strip()
+    
+    # Mezclar hashtags aleatoriamente
+    random.shuffle(hashtags)
+    
+    # Seleccionar subconjunto (70% de los hashtags)
+    num_to_keep = max(1, int(len(hashtags) * 0.7))
+    selected_hashtags = hashtags[:num_to_keep]
+    
+    # Unir texto con hashtags mezclados
+    return f"{text_no_hashes}\n\n{' '.join(selected_hashtags)}"
 
 
-def ensure_structure():
-    """Crea la jerarquía de carpetas de salida de forma recursiva."""
-    categories = get_categories_from_db()
-    for cat in categories:
-        path = os.path.join(folder_output_root, cat)
-        if not os.path.exists(path):
-            os.makedirs(path)
-            print(f"📁 Subcarpeta creada: {path}")
+def get_caption_for_video(tanda: dict) -> str:
+    """Obtener un caption procesado para un video de la tanda"""
+    captions_path = tanda.get('captions_file_path')
+    
+    if not captions_path or not os.path.exists(captions_path):
+        # Caption por defecto
+        return "¡Nuevo post! 🔥 #viral #trending"
+    
+    captions = load_captions_from_file(captions_path)
+    if not captions:
+        return "¡Nuevo post! 🔥 #viral #trending"
+    
+    # Seleccionar caption aleatorio
+    base_caption = random.choice(captions)
+    
+    # Aplicar algoritmo anti-choque
+    return process_caption_with_anti_collision(base_caption)
+
 
 def get_audio(file_path):
-    """Verifica la existencia de pistas de audio para evitar errores de renderizado."""
-    cmd = [
-        'ffprobe', '-v', 'error', '-select_streams', 'a', 
-        '-show_entries', 'stream=codec_type', '-of', 'json', file_path
-    ]
+    cmd = ['ffprobe', '-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=codec_type', '-of', 'json', file_path]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True)
-        data = json.loads(result.stdout)
-        return len(data.get('streams', [])) > 0
-    except:
-        return False
+        return len(json.loads(result.stdout).get('streams', [])) > 0
+    except: return False
+
 
 def run_render():
-    ensure_structure()
+    db = DatabaseManager()
     
-    # Carga de fondos (Parte 1)
-    if not os.path.exists(folder_p1):
-        print(f"❌ ERROR: No se encuentra la carpeta {folder_p1}")
-        return
-
-    v1_list = [f for f in os.listdir(folder_p1) if f.lower().endswith(('.mp4', '.mov', '.mkv'))]
+    # Primero: intentar leer Tandas (batch_tandas)
+    tandas = db.get_tandas(active_only=True)
     
-    # Obtener categorías dinámicamente desde la base de datos
-    categories = get_categories_from_db()
+    if tandas:
+        # Modo Tandas (nuevo sistema)
+        print(f"🎬 Modo Tandas: {len(tandas)} tanda(s) encontrada(s)")
+        process_tandas(db, tandas)
+    else:
+        # Fallback: usar reglas de mezcla legacy
+        print("⚠️ No hay Tandas activas. Usando reglas de mezcla legacy...")
+        rules = db.get_mix_rules(active_only=True)
+        if not rules:
+            print("⚠️ No hay reglas de mezcla activas en la base de datos.")
+            db.close()
+            return
+        process_mix_rules(db, rules)
+    
+    db.close()
 
-    print(f"🚀 Renderizando en i5-12th Gen (Arquitectura Alder Lake)...")
 
-    for cat in categories:
-        p2_dir = os.path.join(folder_p2_root, cat)
-        out_dir = os.path.join(folder_output_root, cat)
+def process_tandas(db: DatabaseManager, tandas: list):
+    """Procesar videos usando Tandas"""
+    for tanda in tandas:
+        tanda_name = tanda['tanda_name']
+        p1_folder = tanda['p1_folder']
+        p2_folder = tanda['p2_folder']
         
-        if not os.path.exists(p2_dir):
-            print(f"⚠️ Saltando {cat}: No existe la carpeta de origen en parte2.")
+        print(f"\n📦 Procesando Tanda: {tanda_name}")
+        
+        p1_dir = os.path.join(FOLDER_INPUTS, p1_folder)
+        p2_dir = os.path.join(FOLDER_INPUTS, p2_folder)
+        out_dir = os.path.join(FOLDER_OUTPUT_ROOT, tanda_name)
+        
+        os.makedirs(out_dir, exist_ok=True)
+        
+        if not os.path.exists(p1_dir) or not os.path.exists(p2_dir):
+            print(f"❌ Error: No se encuentran carpetas para tanda {tanda_name}")
+            continue
+        
+        v1_list = [f for f in os.listdir(p1_dir) if f.lower().endswith(('.mp4', '.mov'))]
+        v2_list = [f for f in os.listdir(p2_dir) if f.lower().endswith(('.mp4', '.mov'))]
+        
+        if not v1_list or not v2_list:
+            print(f"⚠️ Tanda {tanda_name}: carpetas vacías")
+            continue
+        
+        random.shuffle(v1_list)
+        random.shuffle(v2_list)
+        
+        # Generar hasta 50 videos por tanda
+        limit = 50
+        for i in range(limit):
+            v1 = v1_list[i % len(v1_list)]
+            v2 = v2_list[i % len(v2_list)]
+            
+            p1_id = os.path.splitext(v1)[0].replace(" ", "_")
+            p2_id = os.path.splitext(v2)[0].replace(" ", "_")
+            
+            name_out = f"{tanda_name}__{p1_id}__{p2_id}.mp4"
+            out_path = os.path.join(out_dir, name_out)
+            
+            if os.path.exists(out_path):
+                continue
+            
+            # Obtener caption procesado
+            caption = get_caption_for_video(tanda)
+            
+            # Renderizar video
+            render_video_pair(
+                os.path.join(p1_dir, v1),
+                os.path.join(p2_dir, v2),
+                out_path,
+                tanda_name,
+                p1_id,
+                p2_id
+            )
+            
+            # Guardar caption en DB (para uso posterior en Telegram)
+            # Esto se guarda cuando se publica, no aquí
+
+
+def process_mix_rules(db: DatabaseManager, rules: list):
+    """Procesar videos usando reglas de mezcla legacy"""
+    for rule in rules:
+        target_cat = rule['target_category']
+        p1_dir = os.path.join(FOLDER_INPUTS, rule['p1_source'])
+        p2_dir = os.path.join(FOLDER_INPUTS, rule['p2_source'])
+        out_dir = os.path.join(FOLDER_OUTPUT_ROOT, target_cat)
+        
+        os.makedirs(out_dir, exist_ok=True)
+        
+        if not os.path.exists(p1_dir) or not os.path.exists(p2_dir):
+            print(f"❌ Error: No se encuentran carpetas para regla {target_cat}")
             continue
 
-        v2_list = [f for f in os.listdir(p2_dir) if f.lower().endswith(('.mp4', '.mov', '.mkv'))]
-        cat_tag = cat.upper()
+        v1_list = [f for f in os.listdir(p1_dir) if f.lower().endswith(('.mp4', '.mov'))]
+        v2_list = [f for f in os.listdir(p2_dir) if f.lower().endswith(('.mp4', '.mov'))]
+        
+        if not v1_list or not v2_list: continue
 
-        for v1 in v1_list:
-            path_v1 = os.path.join(folder_p1, v1)
-            p1_id = os.path.splitext(v1)[0].replace(" ", "_")
-            p1_has_audio = get_audio(path_v1)
+        if rule['combination_order'] == 'random':
+            random.shuffle(v1_list)
+            random.shuffle(v2_list)
+        else:
+            v1_list.sort()
+            v2_list.sort()
+
+        limit = rule['max_videos']
+        pairs = []
+        for i in range(limit):
+            v1 = v1_list[i % len(v1_list)]
+            v2 = v2_list[i % len(v2_list)]
+            pairs.append((v1, v2))
+
+        for v1, v2 in pairs:
+            path_v1 = os.path.join(p1_dir, v1)
+            path_v2 = os.path.join(p2_dir, v2)
             
-            for v2 in v2_list:
-                path_v2 = os.path.join(p2_dir, v2)
-                p2_id = os.path.splitext(v2)[0].replace(" ", "_")
-                p2_has_audio = get_audio(path_v2)
-                
-                # --- ESTÁNDAR DE SALIDA: CATEGORIA__P1__P2 ---
-                # Este formato permite al Orquestador evitar colisiones visuales
-                name_out = f"{cat_tag}__{p1_id}__{p2_id}.mp4"
-                out_path = os.path.join(out_dir, name_out)
+            p1_id = os.path.splitext(v1)[0].replace(" ", "_")
+            p2_id = os.path.splitext(v2)[0].replace(" ", "_")
+            
+            name_out = f"{target_cat}__{p1_id}__{p2_id}.mp4"
+            out_path = os.path.join(out_dir, name_out)
 
-                # Lógica de audio para clips mudos
-                a1_src = "[0:a]" if p1_has_audio else "[2:a]"
-                a2_src = "[1:a]" if p2_has_audio else "[2:a]"
-                null_audio = "anullsrc=channel_layout=stereo:sample_rate=44100"
+            if os.path.exists(out_path): continue
 
-                filter_complex = (
-                    f"[0:v]scale={RES_W}:{RES_H}:force_original_aspect_ratio=increase,crop={RES_W}:{RES_H},setsar=1,fps={FPS},format=yuv420p[v0];"
-                    f"[1:v]scale={RES_W}:{RES_H}:force_original_aspect_ratio=increase,crop={RES_W}:{RES_H},setsar=1,fps={FPS},format=yuv420p[v1];"
-                    f"{a1_src}aresample=44100[a0]; {a2_src}aresample=44100[a1];"
-                    f"[v0][a0][v1][a1]concat=n=2:v=1:a=1[outv][outa]"
-                )
+            render_video_pair(path_v1, path_v2, out_path, target_cat, p1_id, p2_id)
 
-                cmd = [
-                    'ffmpeg', '-y',
-                    '-hwaccel', 'cuda',               # Aceleración NVIDIA
-                    '-i', path_v1,                         
-                    '-i', path_v2,                         
-                    '-f', 'lavfi', '-i', null_audio, 
-                    '-filter_complex', filter_complex,
-                    '-map', '[outv]', '-map', '[outa]',
-                    '-c:v', 'h264_nvenc', '-preset', 'p4', '-cq:v', '20', '-b:v', '0', 
-                    '-c:a', 'aac', '-b:a', '128k',
-                    '-metadata', 'make=Apple',                   
-                    '-metadata', 'model=iPhone 15 Pro',          
-                    '-metadata', f'location={LAT}{LON}/',        
-                    '-metadata', 'handler_name=Core Media Video',
-                    '-movflags', 'faststart',                    
-                    out_path
-                ]
 
-                print(f"🎬 Generando: {name_out}", end="\r")
-                subprocess.run(cmd, capture_output=True)
+def render_video_pair(path_v1, path_v2, out_path, cat, p1_id, p2_id):
+    """Renderizar un par de videos"""
+    p1_audio = get_audio(path_v1)
+    p2_audio = get_audio(path_v2)
+    a1 = "[0:a]" if p1_audio else "[2:a]"
+    a2 = "[1:a]" if p2_audio else "[2:a]"
+    
+    filter_complex = (
+        f"[0:v]scale={RES_W}:{RES_H}:force_original_aspect_ratio=increase,crop={RES_W}:{RES_H},setsar=1,fps={FPS},format=yuv420p[v0];"
+        f"[1:v]scale={RES_W}:{RES_H}:force_original_aspect_ratio=increase,crop={RES_W}:{RES_H},setsar=1,fps={FPS},format=yuv420p[v1];"
+        f"{a1}aresample=44100[a0]; {a2}aresample=44100[a1];"
+        f"[v0][a0][v1][a1]concat=n=2:v=1:a=1[outv][outa]"
+    )
+
+    cmd = [
+        'ffmpeg', '-y', '-hwaccel', 'cuda', '-i', path_v1, '-i', path_v2,
+        '-f', 'lavfi', '-i', 'anullsrc=cl=stereo:sr=44100',
+        '-filter_complex', filter_complex, '-map', '[outv]', '-map', '[outa]',
+        '-c:v', 'h264_nvenc', '-preset', 'p4', '-cq:v', '20',
+        '-metadata', 'make=Apple', '-metadata', 'model=iPhone 15 Pro',
+        '-metadata', f'location={LAT}{LON}/', out_path
+    ]
+    
+    name_out = os.path.basename(out_path)
+    print(f"🎬 Generando: {name_out}")
+    subprocess.run(cmd, capture_output=True)
+                '-metadata', f'location={LAT}{LON}/', out_path
+            ]
+            
+            print(f"🎬 Generando: {name_out}")
+            subprocess.run(cmd, capture_output=True)
 
 if __name__ == "__main__":
     run_render()
-    print("\n--- ✅ PROCESO COMPLETADO: VIDEOS CATEGORIZADOS Y NOMBRADOS ---")
