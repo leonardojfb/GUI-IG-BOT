@@ -1,21 +1,19 @@
 import os
 import subprocess
 import json
-import sqlite3
 import random
 import re
 from database import DatabaseManager
 
 # --- CONFIGURACIÓN ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Cambiamos las carpetas para que coincidan con tu nueva estructura
-FOLDER_INPUTS = os.path.join(BASE_DIR, "inputs") 
+FOLDER_INPUTS = os.path.join(BASE_DIR, "inputs")
 FOLDER_OUTPUT_ROOT = os.path.join(BASE_DIR, "videos_finales")
 
 RES_W, RES_H = 1080, 1920
 FPS = "30"
-# Metadata Spoofing
 LAT, LON = "+34.0522", "-118.2437"
+
 
 # ==================== SISTEMA DE CAPTIONS ====================
 def load_captions_from_file(file_path: str) -> list:
@@ -26,7 +24,6 @@ def load_captions_from_file(file_path: str) -> list:
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
         content = f.read()
     
-    # Extraer bloques de captions
     pattern = r'\[\d{1,2}.*?\].*?:\s*(.*?)(?=\s*\[\d{1,2}|$)'
     blocks = re.findall(pattern, content, flags=re.DOTALL)
     return [b.strip() for b in blocks if b.strip()]
@@ -40,22 +37,15 @@ def process_caption_with_anti_collision(caption: str) -> str:
     3. Seleccionar solo un subconjunto (70% aprox)
     4. Unir al texto base
     """
-    # Extraer hashtags
     hashtags = re.findall(r'#\w+', caption)
     if not hashtags:
         return caption
     
-    # Texto sin hashtags
     text_no_hashes = re.sub(r'#\w+', '', caption).strip()
-    
-    # Mezclar hashtags aleatoriamente
     random.shuffle(hashtags)
-    
-    # Seleccionar subconjunto (70% de los hashtags)
     num_to_keep = max(1, int(len(hashtags) * 0.7))
     selected_hashtags = hashtags[:num_to_keep]
     
-    # Unir texto con hashtags mezclados
     return f"{text_no_hashes}\n\n{' '.join(selected_hashtags)}"
 
 
@@ -64,40 +54,39 @@ def get_caption_for_video(tanda: dict) -> str:
     captions_path = tanda.get('captions_file_path')
     
     if not captions_path or not os.path.exists(captions_path):
-        # Caption por defecto
         return "¡Nuevo post! 🔥 #viral #trending"
     
     captions = load_captions_from_file(captions_path)
     if not captions:
         return "¡Nuevo post! 🔥 #viral #trending"
     
-    # Seleccionar caption aleatorio
     base_caption = random.choice(captions)
-    
-    # Aplicar algoritmo anti-choque
     return process_caption_with_anti_collision(base_caption)
 
 
 def get_audio(file_path):
-    cmd = ['ffprobe', '-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=codec_type', '-of', 'json', file_path]
+    """Verifica si un archivo de video contiene stream de audio."""
+    cmd = [
+        'ffprobe', '-v', 'error', '-select_streams', 'a',
+        '-show_entries', 'stream=codec_type', '-of', 'json', file_path
+    ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True)
         return len(json.loads(result.stdout).get('streams', [])) > 0
-    except: return False
+    except Exception:
+        return False
 
 
 def run_render():
+    """Punto de entrada principal para el renderizado de videos."""
     db = DatabaseManager()
     
-    # Primero: intentar leer Tandas (batch_tandas)
     tandas = db.get_tandas(active_only=True)
     
     if tandas:
-        # Modo Tandas (nuevo sistema)
         print(f"🎬 Modo Tandas: {len(tandas)} tanda(s) encontrada(s)")
         process_tandas(db, tandas)
     else:
-        # Fallback: usar reglas de mezcla legacy
         print("⚠️ No hay Tandas activas. Usando reglas de mezcla legacy...")
         rules = db.get_mix_rules(active_only=True)
         if not rules:
@@ -110,7 +99,7 @@ def run_render():
 
 
 def process_tandas(db: DatabaseManager, tandas: list):
-    """Procesar videos usando Tandas"""
+    """Procesar videos usando Tandas activas desde la base de datos."""
     for tanda in tandas:
         tanda_name = tanda['tanda_name']
         p1_folder = tanda['p1_folder']
@@ -128,8 +117,14 @@ def process_tandas(db: DatabaseManager, tandas: list):
             print(f"❌ Error: No se encuentran carpetas para tanda {tanda_name}")
             continue
         
-        v1_list = [f for f in os.listdir(p1_dir) if f.lower().endswith(('.mp4', '.mov'))]
-        v2_list = [f for f in os.listdir(p2_dir) if f.lower().endswith(('.mp4', '.mov'))]
+        v1_list = [
+            f for f in os.listdir(p1_dir)
+            if f.lower().endswith(('.mp4', '.mov'))
+        ]
+        v2_list = [
+            f for f in os.listdir(p2_dir)
+            if f.lower().endswith(('.mp4', '.mov'))
+        ]
         
         if not v1_list or not v2_list:
             print(f"⚠️ Tanda {tanda_name}: carpetas vacías")
@@ -138,7 +133,6 @@ def process_tandas(db: DatabaseManager, tandas: list):
         random.shuffle(v1_list)
         random.shuffle(v2_list)
         
-        # Generar hasta 50 videos por tanda
         limit = 50
         for i in range(limit):
             v1 = v1_list[i % len(v1_list)]
@@ -153,10 +147,8 @@ def process_tandas(db: DatabaseManager, tandas: list):
             if os.path.exists(out_path):
                 continue
             
-            # Obtener caption procesado
             caption = get_caption_for_video(tanda)
             
-            # Renderizar video
             render_video_pair(
                 os.path.join(p1_dir, v1),
                 os.path.join(p2_dir, v2),
@@ -165,13 +157,10 @@ def process_tandas(db: DatabaseManager, tandas: list):
                 p1_id,
                 p2_id
             )
-            
-            # Guardar caption en DB (para uso posterior en Telegram)
-            # Esto se guarda cuando se publica, no aquí
 
 
 def process_mix_rules(db: DatabaseManager, rules: list):
-    """Procesar videos usando reglas de mezcla legacy"""
+    """Procesar videos usando reglas de mezcla legacy."""
     for rule in rules:
         target_cat = rule['target_category']
         p1_dir = os.path.join(FOLDER_INPUTS, rule['p1_source'])
@@ -183,26 +172,33 @@ def process_mix_rules(db: DatabaseManager, rules: list):
         if not os.path.exists(p1_dir) or not os.path.exists(p2_dir):
             print(f"❌ Error: No se encuentran carpetas para regla {target_cat}")
             continue
-
-        v1_list = [f for f in os.listdir(p1_dir) if f.lower().endswith(('.mp4', '.mov'))]
-        v2_list = [f for f in os.listdir(p2_dir) if f.lower().endswith(('.mp4', '.mov'))]
         
-        if not v1_list or not v2_list: continue
-
+        v1_list = [
+            f for f in os.listdir(p1_dir)
+            if f.lower().endswith(('.mp4', '.mov'))
+        ]
+        v2_list = [
+            f for f in os.listdir(p2_dir)
+            if f.lower().endswith(('.mp4', '.mov'))
+        ]
+        
+        if not v1_list or not v2_list:
+            continue
+        
         if rule['combination_order'] == 'random':
             random.shuffle(v1_list)
             random.shuffle(v2_list)
         else:
             v1_list.sort()
             v2_list.sort()
-
+        
         limit = rule['max_videos']
         pairs = []
         for i in range(limit):
             v1 = v1_list[i % len(v1_list)]
             v2 = v2_list[i % len(v2_list)]
             pairs.append((v1, v2))
-
+        
         for v1, v2 in pairs:
             path_v1 = os.path.join(p1_dir, v1)
             path_v2 = os.path.join(p2_dir, v2)
@@ -212,43 +208,50 @@ def process_mix_rules(db: DatabaseManager, rules: list):
             
             name_out = f"{target_cat}__{p1_id}__{p2_id}.mp4"
             out_path = os.path.join(out_dir, name_out)
-
-            if os.path.exists(out_path): continue
-
+            
+            if os.path.exists(out_path):
+                continue
+            
             render_video_pair(path_v1, path_v2, out_path, target_cat, p1_id, p2_id)
 
 
 def render_video_pair(path_v1, path_v2, out_path, cat, p1_id, p2_id):
-    """Renderizar un par de videos"""
+    """
+    Renderiza un par de videos concatenados usando ffmpeg.
+    Aplica escalado, unificación de audio y spoofing de metadata.
+    """
     p1_audio = get_audio(path_v1)
     p2_audio = get_audio(path_v2)
+    
     a1 = "[0:a]" if p1_audio else "[2:a]"
     a2 = "[1:a]" if p2_audio else "[2:a]"
     
     filter_complex = (
-        f"[0:v]scale={RES_W}:{RES_H}:force_original_aspect_ratio=increase,crop={RES_W}:{RES_H},setsar=1,fps={FPS},format=yuv420p[v0];"
-        f"[1:v]scale={RES_W}:{RES_H}:force_original_aspect_ratio=increase,crop={RES_W}:{RES_H},setsar=1,fps={FPS},format=yuv420p[v1];"
-        f"{a1}aresample=44100[a0]; {a2}aresample=44100[a1];"
+        f"[0:v]scale={RES_W}:{RES_H}:force_original_aspect_ratio=increase,"
+        f"crop={RES_W}:{RES_H},setsar=1,fps={FPS},format=yuv420p[v0];"
+        f"[1:v]scale={RES_W}:{RES_H}:force_original_aspect_ratio=increase,"
+        f"crop={RES_W}:{RES_H},setsar=1,fps={FPS},format=yuv420p[v1];"
+        f"{a1}aresample=44100[a0];{a2}aresample=44100[a1];"
         f"[v0][a0][v1][a1]concat=n=2:v=1:a=1[outv][outa]"
     )
-
+    
     cmd = [
-        'ffmpeg', '-y', '-hwaccel', 'cuda', '-i', path_v1, '-i', path_v2,
+        'ffmpeg', '-y', '-hwaccel', 'cuda',
+        '-i', path_v1, '-i', path_v2,
         '-f', 'lavfi', '-i', 'anullsrc=cl=stereo:sr=44100',
-        '-filter_complex', filter_complex, '-map', '[outv]', '-map', '[outa]',
+        '-filter_complex', filter_complex,
+        '-map', '[outv]', '-map', '[outa]',
         '-c:v', 'h264_nvenc', '-preset', 'p4', '-cq:v', '20',
-        '-metadata', 'make=Apple', '-metadata', 'model=iPhone 15 Pro',
-        '-metadata', f'location={LAT}{LON}/', out_path
+        '-metadata', 'make=Apple',
+        '-metadata', 'model=iPhone 15 Pro',
+        '-metadata', f'location={LAT}{LON}/',
+        out_path
     ]
     
     name_out = os.path.basename(out_path)
     print(f"🎬 Generando: {name_out}")
     subprocess.run(cmd, capture_output=True)
-                '-metadata', f'location={LAT}{LON}/', out_path
-            ]
-            
-            print(f"🎬 Generando: {name_out}")
-            subprocess.run(cmd, capture_output=True)
+
 
 if __name__ == "__main__":
     run_render()
