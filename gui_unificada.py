@@ -234,31 +234,38 @@ class InstagramOrganizerGUI:
             else:
                 messagebox.showerror("Error", "No se pudo realizar la actualización masiva.")
     def create_widgets(self):
+        # 1. Cabecera principal
         header = tk.Frame(self.root, bg="#2d2d44", height=60)
         header.pack(fill=tk.X)
         
         lbl_header = tk.Label(header, text="⚙️ PANEL DE CONTROL V6", font=("Arial", 16, "bold"), bg="#2d2d44", fg="white")
         lbl_header.pack(pady=15)
         
+        # 2. Notebook (Contenedor de pestañas)
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         self.notebook.bind("<<NotebookTabChanged>>", lambda e: self.reload_dist_lists())
         
+        # 3. Creación de los Frames (Las 5 pestañas físicas)
         self.tab_dash = tk.Frame(self.notebook, bg="#1e1e2e")
         self.tab_team = tk.Frame(self.notebook, bg="#1e1e2e")
         self.tab_mix = tk.Frame(self.notebook, bg="#1e1e2e")
         self.tab_dist = tk.Frame(self.notebook, bg="#1e1e2e")
+        self.tab_tg = tk.Frame(self.notebook, bg="#1e1e2e") # <--- AQUI NACE LA 5
         
+        # 4. Añadir las pestañas a la barra superior
         self.notebook.add(self.tab_dash, text="📊 1. Dashboard")
         self.notebook.add(self.tab_team, text="👥 2. Equipo y Listas")
         self.notebook.add(self.tab_mix, text="🎬 3. Creador de Tandas")
-        self.notebook.add(self.tab_dist, text="🚀 4. Logística y Envíos")
+        self.notebook.add(self.tab_dist, text="🚀 4. Logística")
+        self.notebook.add(self.tab_tg, text="📲 5. Bot Telegram") # <--- AQUI SE MUESTRA
         
+        # 5. Inyectar el contenido dentro de cada pestaña
         self.build_dashboard_tab()
         self.build_team_tab()
         self.build_mix_tab()
         self.build_dist_tab()
-
+        self.build_tg_tab() # <--- AQUI SE LLAMA AL CONTENIDO
     # ==========================================
     # PESTAÑA 1: DASHBOARD
     # ==========================================
@@ -450,30 +457,52 @@ class InstagramOrganizerGUI:
         self.txt_accounts = tk.Text(right, height=8, bg="#1e1e2e", fg="white")
         self.txt_accounts.pack(fill=tk.X, padx=15)
         
+        # --- Controles de asignación rápida ---
         ctrl = tk.Frame(right, bg="#2d2d44")
         ctrl.pack(fill=tk.X, pady=10, padx=15)
         
-        lbl_bulk_cat = tk.Label(ctrl, text="Seleccionar Categoría:", bg="#2d2d44", fg="white")
-        lbl_bulk_cat.pack(side=tk.LEFT)
+        # Fila 1: Categoría
+        tk.Label(ctrl, text="Categoría:", bg="#2d2d44", fg="white").grid(row=0, column=0, sticky="w", pady=5)
+        self.c_bulk_cat = ttk.Combobox(ctrl, state="readonly", width=20)
+        self.c_bulk_cat.grid(row=0, column=1, padx=5, pady=5)
         
-        self.c_bulk_cat = ttk.Combobox(ctrl, state="readonly", postcommand=self.refresh_team_ui)
-        self.c_bulk_cat.pack(side=tk.LEFT, padx=5)
+        # Fila 2: VA Asignado
+        tk.Label(ctrl, text="Asignar a VA:", bg="#2d2d44", fg="white").grid(row=1, column=0, sticky="w", pady=5)
+        self.c_bulk_va = ttk.Combobox(ctrl, state="readonly", width=20)
+        self.c_bulk_va.grid(row=1, column=1, padx=5, pady=5)
         
-        btn_add_bulk = tk.Button(ctrl, text="🚀 Cargar Cuentas", bg="#ff6b6b", fg="white", command=self.add_bulk_accounts)
-        btn_add_bulk.pack(side=tk.LEFT, padx=10)
+        # Botonera
+        btn_f = tk.Frame(right, bg="#2d2d44")
+        btn_f.pack(fill=tk.X, padx=15, pady=5)
         
-        btn_create_cat = tk.Button(ctrl, text="➕ Crear Nueva Categoría", bg="#00d9ff", command=self.add_category_ui)
-        btn_create_cat.pack(side=tk.LEFT)
+        btn_add_bulk = tk.Button(btn_f, text="🚀 CARGAR CUENTAS", bg="#ff6b6b", fg="white", font=("Arial", 10, "bold"), command=self.add_bulk_accounts)
+        btn_add_bulk.pack(side=tk.LEFT, padx=5)
         
-        self.refresh_team_ui()
+        btn_create_cat = tk.Button(btn_f, text="➕ Nueva Categoría", bg="#00d9ff", command=self.add_category_ui)
+        btn_create_cat.pack(side=tk.LEFT, padx=5)
+
+    def refresh_team_ui(self):
+        """Llena los combos de categorías y VAs."""
+        # Cargar Categorías
+        cats = self.db.get_categories()
+        self.c_bulk_cat.config(values=cats)
+        if cats: self.c_bulk_cat.current(0)
+        else: self.c_bulk_cat.set('')
+        
+        # Cargar VAs
+        vas = self.db.get_vas()
+        vas_list = ["Sin Asignar"] + vas
+        self.c_bulk_va.config(values=vas_list)
+        self.c_bulk_va.current(0)
 
     def add_category_ui(self):
         name = simpledialog.askstring("Nueva Categoría", "Nombre de la categoría (Ej: MODELOS, FITNESS):")
         if name:
             cat_upper = name.strip().upper()
             self.db.add_category(cat_upper)
-            messagebox.showinfo("Éxito", f"Categoría '{cat_upper}' creada.")
             self.refresh_dashboard()
+            self.refresh_team_ui() # <--- Agregar esta línea
+            messagebox.showinfo("Éxito", f"Categoría '{cat_upper}' creada.")
 
     def add_va_ui(self):
         name = self.e_va_name.get().strip()
@@ -487,8 +516,41 @@ class InstagramOrganizerGUI:
             self.e_va_name.delete(0, tk.END)
             self.e_va_tg.delete(0, tk.END)
             self.refresh_dashboard()
+            self.refresh_team_ui() # <--- Esto hace que aparezca en el combo de la derecha
+            messagebox.showinfo("✅", f"VA '{name}' guardado correctamente.")
 
     def add_bulk_accounts(self):
+        texto_cuentas = self.txt_accounts.get("1.0", tk.END).strip()
+        if not texto_cuentas:
+            return messagebox.showwarning("⚠️", "No has escrito ninguna cuenta.")
+            
+        users = texto_cuentas.split("\n")
+        ctype = self.c_bulk_cat.get()
+        vname = self.c_bulk_va.get()
+        
+        # Categoría opcional: si no hay, asignamos GENERAL
+        if not ctype: ctype = "GENERAL"
+            
+        cuentas_agregadas = 0
+        for u in users:
+            clean = u.strip().replace("@", "")
+            if clean: 
+                try:
+                    # 1. Crear la cuenta con su categoría
+                    self.db.add_virtual_account(clean, ctype)
+                    
+                    # 2. Vincular al VA si se seleccionó uno distinto a 'Sin Asignar'
+                    if vname and vname != "Sin Asignar":
+                        self.db.update_account(clean, assigned_va=vname)
+                        
+                    cuentas_agregadas += 1
+                except Exception as e:
+                    print(f"⚠️ Error agregando {clean}: {e}")
+                    
+        self.txt_accounts.delete("1.0", tk.END)
+        self.refresh_dashboard()
+        messagebox.showinfo("✅", f"Proceso terminado. {cuentas_agregadas} cuentas vinculadas exitosamente.")
+
         texto_cuentas = self.txt_accounts.get("1.0", tk.END).strip()
         if not texto_cuentas:
             return messagebox.showwarning("⚠️", "No has escrito ninguna cuenta.")
@@ -514,12 +576,22 @@ class InstagramOrganizerGUI:
         messagebox.showinfo("✅", f"Se intentaron añadir las cuentas. {cuentas_agregadas} agregadas exitosamente.")
 
     def refresh_team_ui(self):
+        """Actualiza los desplegables de Categorías y VAs en la Pestaña 2."""
+        # 1. Refrescar Categorías
         cats = self.db.get_categories()
-        self.c_bulk_cat.config(values=cats)
-        if cats: 
-            self.c_bulk_cat.current(0)
-        else:
-            self.c_bulk_cat.set('')
+        if hasattr(self, 'c_bulk_cat'):
+            self.c_bulk_cat.config(values=cats)
+            if cats and not self.c_bulk_cat.get():
+                self.c_bulk_cat.current(0)
+        
+        # 2. Refrescar VAs (Esto es lo que faltaba)
+        vas = self.db.get_vas()
+        vas_list = ["Sin Asignar"] + vas
+        if hasattr(self, 'c_bulk_va'):
+            self.c_bulk_va.config(values=vas_list)
+            # Si no hay nada seleccionado, poner "Sin Asignar" por defecto
+            if not self.c_bulk_va.get():
+                self.c_bulk_va.current(0)
 
     # ==========================================
     # PESTAÑA 3: CREADOR DE TANDAS
@@ -646,12 +718,14 @@ class InstagramOrganizerGUI:
         self.e_quota = tk.Entry(f1, width=10)
         self.e_quota.insert(0, "4")
         self.e_quota.grid(row=1, column=1, sticky="w")
-        lbl_days = tk.Label(f1, text="Días a organizar (o 'MAX'):", bg="#2d2d44", fg="white")
+# Debajo de e_quota
+        lbl_days = tk.Label(f1, text="Días (o 'MAX'):", bg="#2d2d44", fg="white")
         lbl_days.grid(row=1, column=2, padx=10, sticky="e")
         
         self.e_days = tk.Entry(f1, width=10)
         self.e_days.insert(0, "MAX")
         self.e_days.grid(row=1, column=3, sticky="w")
+
         self.fillup_var = tk.BooleanVar()
         chk_fillup = tk.Checkbutton(f1, text="Habilitar 'Fill-up' (Rellenar con historial)", 
                                     variable=self.fillup_var, bg="#2d2d44", fg="#4ecdc4", selectcolor="#1e1e2e")
@@ -688,44 +762,51 @@ class InstagramOrganizerGUI:
             print(f"⚠️ Error al refrescar listas: {e}")
 
     def preview_distribution(self):
-        """Genera la simulación sin mover archivos."""
+        """Genera la simulación detallada sin mover archivos físicos."""
         tanda = self.c_tandas.get()
         dest = self.c_dest.get()
-        days_input = self.e_days.get()
-        try: quota = int(self.e_quota.get())
-        except: return messagebox.showwarning("⚠️", "Cuota diaria inválida.")
+        # Capturamos el nuevo campo de días que añadimos anteriormente
+        days_input = self.e_days.get() if hasattr(self, 'e_days') else "MAX"
+        
+        try: 
+            quota = int(self.e_quota.get())
+        except: 
+            return messagebox.showwarning("⚠️", "Cuota diaria inválida.")
             
-        if not tanda or not dest: return messagebox.showwarning("⚠️", "Faltan datos.")
+        if not tanda or not dest: 
+            return messagebox.showwarning("⚠️", "Selecciona Tanda y Categoría Destino.")
             
         def task():
             import Organizador
-            # Pasamos todos los parámetros a la nueva lógica
-            return Organizador.preview_distribution_tanda(tanda, dest, quota, self.fillup_var.get(), days_input)
-            
-        def task():
-            import Organizador
-            return Organizador.preview_distribution_tanda(tanda, dest, quota, self.fillup_var.get())
+            # Llamamos a la lógica enviando TODOS los parámetros necesarios
+            return Organizador.preview_distribution_tanda(
+                tanda, dest, quota, self.fillup_var.get(), days_input
+            )
             
         def done(success, result):
             if success: 
                 win = tk.Toplevel(self.root)
-                win.title(f"Vista Previa: {tanda}")
-                win.geometry("800x600")
+                win.title(f"📊 Plan de Distribución: {tanda}")
+                win.geometry("900x700")
                 win.configure(bg="#1e1e2e")
-                txt = tk.Text(win, bg="#2d2d44", fg="#4ecdc4", font=("Consolas", 11), padx=15, pady=15)
+                
+                # Usamos una fuente monoespaciada para que las tablas ASCII se vean perfectas
+                txt = tk.Text(win, bg="#2d2d44", fg="#4ecdc4", font=("Consolas", 10), padx=20, pady=20)
                 txt.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
                 txt.insert(tk.END, result)
                 txt.config(state=tk.DISABLED)
             else: 
-                messagebox.showerror("Error", result)
+                messagebox.showerror("Error en Simulación", result)
         
-        messagebox.showinfo("Calculando", "Generando árbol de distribución...")
+        messagebox.showinfo("Calculando", "Analizando inventario y asignación de VAs...")
         WorkerThread(self.root, done, task).start()
 
     def start_distribution(self):
         """Ejecuta la distribución real de videos."""
         tanda = self.c_tandas.get()
         dest = self.c_dest.get()
+        days_input = self.e_days.get() # <--- Capturamos los días ("MAX" o número)
+        
         try:
             quota = int(self.e_quota.get())
         except:
@@ -734,12 +815,13 @@ class InstagramOrganizerGUI:
         if not tanda or not dest: 
             return messagebox.showwarning("⚠️", "Faltan datos.")
         
-        if not messagebox.askyesno("Confirmación", "¿Mover archivos y registrar en DB?"):
+        if not messagebox.askyesno("Confirmación", f"¿Distribuir '{tanda}' a la categoría '{dest}'?"):
             return
             
         def task():
             import Organizador
-            return Organizador.distribute_tanda(tanda, dest, quota, self.fillup_var.get())
+            # Ahora enviamos los 5 parámetros correctos a la lógica de distribución
+            return Organizador.distribute_tanda(tanda, dest, quota, self.fillup_var.get(), days_input)
             
         def done(success, result):
             if success: messagebox.showinfo("Éxito", result)
@@ -753,6 +835,123 @@ class InstagramOrganizerGUI:
         if hasattr(self, 'c_bulk_cat'):
             self.c_bulk_cat.config(values=cats)
 
+    # ==========================================
+    # PESTAÑA 5: COMANDO BOT TELEGRAM
+    # ==========================================
+    def build_tg_tab(self):
+        self.tg_controller = None
+        
+        main = tk.Frame(self.tab_tg, bg="#1e1e2e")
+        main.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        # 1. Configuración de Fecha
+        f_config = tk.LabelFrame(main, text="1. Fecha de Inicio", bg="#2d2d44", fg="#00d9ff", font=("Arial", 11, "bold"))
+        f_config.pack(fill=tk.X, pady=5, padx=10)
+        
+        from datetime import datetime, timedelta
+        # Por defecto sugiere empezar mañana
+        mañana_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        tk.Label(f_config, text="Día 1 de Publicación (YYYY-MM-DD):", bg="#2d2d44", fg="white").pack(side=tk.LEFT, padx=10, pady=10)
+        self.e_tg_date = tk.Entry(f_config, width=15)
+        self.e_tg_date.insert(0, mañana_str)
+        self.e_tg_date.pack(side=tk.LEFT, padx=5)
+        
+        # 2. Selección de Objetivos
+        f_target = tk.LabelFrame(main, text="2. Selección de Cuentas (CALENDARIO_POSTEO)", bg="#2d2d44", fg="#00d9ff", font=("Arial", 11, "bold"))
+        f_target.pack(fill=tk.BOTH, expand=True, pady=5, padx=10)
+        
+        scroll = tk.Scrollbar(f_target)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.lst_tg_accs = tk.Listbox(f_target, selectmode=tk.MULTIPLE, bg="#1e1e2e", fg="white", yscrollcommand=scroll.set, font=("Consolas", 10))
+        self.lst_tg_accs.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        scroll.config(command=self.lst_tg_accs.yview)
+        
+        btn_refresh = tk.Button(f_target, text="🔄 Cargar Cuentas Listas", bg="#4ecdc4", fg="black", command=self.load_organized_accounts)
+        btn_refresh.pack(pady=5)
+        
+        # 3. Controles de Ejecución (Hilos)
+        f_ctrl = tk.Frame(main, bg="#1e1e2e")
+        f_ctrl.pack(pady=15)
+        
+        self.btn_tg_start = tk.Button(f_ctrl, text="▶️ INICIAR ENVÍOS", bg="#20c997", fg="white", font=("Arial", 12, "bold"), width=18, command=self.start_tg_bot)
+        self.btn_tg_start.pack(side=tk.LEFT, padx=10)
+        
+        self.btn_tg_pause = tk.Button(f_ctrl, text="⏸️ PAUSAR", bg="#f39c12", fg="white", font=("Arial", 12, "bold"), width=12, command=self.pause_tg_bot, state=tk.DISABLED)
+        self.btn_tg_pause.pack(side=tk.LEFT, padx=10)
+        
+        self.btn_tg_stop = tk.Button(f_ctrl, text="⏹️ TERMINAR", bg="#ff4757", fg="white", font=("Arial", 12, "bold"), width=12, command=self.stop_tg_bot, state=tk.DISABLED)
+        self.btn_tg_stop.pack(side=tk.LEFT, padx=10)
+
+    def load_organized_accounts(self):
+        """Escanea CALENDARIO_POSTEO para poblar la lista."""
+        self.lst_tg_accs.delete(0, tk.END)
+        base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "CALENDARIO_POSTEO")
+        accs = set()
+        if os.path.exists(base):
+            for d in os.listdir(base):
+                path = os.path.join(base, d)
+                if os.path.isdir(path):
+                    for a in os.listdir(path):
+                        if os.path.isdir(os.path.join(path, a)): accs.add(a)
+        if accs:
+            for a in sorted(list(accs)): self.lst_tg_accs.insert(tk.END, a)
+        else:
+            messagebox.showinfo("Vacío", "Ejecuta la Logística (Pestaña 4) primero para crear carpetas.")
+
+    def start_tg_bot(self):
+        date_str = self.e_tg_date.get().strip()
+        try:
+            from datetime import datetime
+            start_date = datetime.strptime(date_str, "%Y-%m-%d")
+        except ValueError: 
+            return messagebox.showwarning("⚠️", "Usa YYYY-MM-DD.")
+        
+        selected = [self.lst_tg_accs.get(i) for i in self.lst_tg_accs.curselection()]
+        
+        # Si no hay selección, preguntar si enviar todas
+        if not selected:
+            if not messagebox.askyesno("Masivo", "No seleccionaste cuentas. ¿Enviar TODAS las disponibles?"):
+                return
+            selected = None  # Enviar todas
+        
+        self.btn_tg_start.config(state=tk.DISABLED)
+        self.btn_tg_pause.config(state=tk.NORMAL, text="⏸️ PAUSAR")
+        self.btn_tg_stop.config(state=tk.NORMAL)
+        
+        import organizadortg
+        self.tg_controller = organizadortg.TelegramBotController()
+        
+        def task():
+            return organizadortg.execute_telegram_plan(start_date, selected, self.tg_controller)
+            
+        def done(success, result):
+            self.btn_tg_start.config(state=tk.NORMAL)
+            self.btn_tg_pause.config(state=tk.DISABLED)
+            self.btn_tg_stop.config(state=tk.DISABLED)
+            self.tg_controller = None
+            messagebox.showinfo("Bot", result) if success else messagebox.showerror("Error", result)
+            
+        WorkerThread(self.root, done, task).start()
+
+    def pause_tg_bot(self):
+        if not self.tg_controller: return
+        if self.tg_controller.paused.is_set():
+            self.tg_controller.pause()
+            self.btn_tg_pause.config(text="▶️ REANUDAR", bg="#3498db")
+        else:
+            self.tg_controller.resume()
+            self.btn_tg_pause.config(text="⏸️ PAUSAR", bg="#f39c12")
+            
+    def stop_tg_bot(self):
+        if self.tg_controller:
+            self.tg_controller.stop()
+            self.tg_controller.resume()
+
+
+# ==========================================
+# PUNTO DE ENTRADA
+# ==========================================
 if __name__ == "__main__":
     root = tk.Tk()
     app = InstagramOrganizerGUI(root)

@@ -54,39 +54,6 @@ CREATE TABLE IF NOT EXISTS fingerprint_history (
 """
 
 class DatabaseManager:
-    def get_accounts_by_type(self, type_name):
-        """Busca cuentas usando los nombres reales de tu BD V6."""
-        cur = self.conn.cursor()
-        # Usamos account_type que es el nombre real en tu tabla virtual_accounts
-        cur.execute("SELECT * FROM virtual_accounts WHERE UPPER(TRIM(account_type)) = UPPER(TRIM(?))", (type_name,))
-        return [dict(row) for row in cur.fetchall()]
-    def update_accounts_category_bulk(self, new_category):
-        """Actualiza la categoría de todas las cuentas existentes de forma masiva."""
-        try:
-            cursor = self.conn.cursor()
-            cursor.execute("UPDATE accounts SET category = ?", (new_category,))
-            self.conn.commit()
-            return True
-        except Exception as e:
-            print(f"❌ Error en actualización masiva: {e}")
-            return False
-    def update_specific_accounts_category(self, account_ids, new_category):
-        """Actualiza la categoría de una lista de IDs de cuentas específicos."""
-        try:
-            cursor = self.conn.cursor()
-            # Generamos los placeholders (?,?,?) según la cantidad de IDs
-            placeholders = ','.join(['?'] * len(account_ids))
-            query = f"UPDATE accounts SET category = ? WHERE id IN ({placeholders})"
-            
-            # Combinamos la categoría con los IDs para la ejecución
-            params = [new_category] + list(account_ids)
-            cursor.execute(query, params)
-            
-            self.conn.commit()
-            return True
-        except Exception as e:
-            print(f"❌ Error en actualización por selección: {e}")
-            return False
     def __init__(self):
         self.db_path = DB_PATH
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -94,59 +61,15 @@ class DatabaseManager:
         self.initialize()
         
     def initialize(self):
-        """Crea todas las tablas necesarias si no existen."""
-        cursor = self.conn.cursor()
-        
-        # 1. Tabla de Categorías
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS categories (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE,
-                color TEXT
-            )
-        """)
+        """Crea todas las tablas necesarias usando el SCHEMA global."""
+        try:
+            cursor = self.conn.cursor()
+            cursor.executescript(SCHEMA) # <--- Esto crea TODAS las tablas del SCHEMA de un solo golpe
+            self.conn.commit()
+            print("✅ Base de datos V6 sincronizada con el SCHEMA correcto.")
+        except Exception as e:
+            print(f"❌ Error inicializando base de datos: {e}")
 
-        # 2. Tabla de Cuentas (ESTA ES LA QUE FALTA)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS accounts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE,
-                category TEXT,
-                status TEXT DEFAULT 'active',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (category) REFERENCES categories(name)
-            )
-        """)
-
-        # 3. Tabla de Tandas
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS tandas (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tanda_name TEXT UNIQUE,
-                p1_folder TEXT,
-                p2_folder TEXT,
-                captions_file TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-
-        # 4. Tabla de Historial (Fingerprint)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS fingerprint_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                account_id INTEGER,
-                video_name TEXT,
-                category TEXT,
-                p1_source TEXT,
-                p2_source TEXT,
-                posted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (account_id) REFERENCES accounts(id)
-            )
-        """)
-
-        self.conn.commit()
-        print("✅ Base de datos sincronizada y tablas verificadas.")
-        
     def close(self):
         if self.conn: self.conn.close()
 
@@ -180,7 +103,6 @@ class DatabaseManager:
     def delete_va(self, name):
         cur = self.conn.cursor()
         cur.execute("DELETE FROM virtual_assistants WHERE name = ?", (name,))
-        # Si borramos al VA, dejamos sus cuentas "Sin Asignar"
         cur.execute("UPDATE virtual_accounts SET assigned_va = 'Sin Asignar' WHERE assigned_va = ?", (name,))
         self.conn.commit()
 
@@ -225,23 +147,7 @@ class DatabaseManager:
         cur = self.conn.cursor()
         cur.execute("SELECT * FROM batch_tandas ORDER BY created_at DESC")
         return [dict(row) for row in cur.fetchall()]
-    def get_accounts_by_category(self, category_name):
-        """Devuelve la lista de cuentas que pertenecen a una categoría específica."""
-        cursor = self.conn.cursor()
-        # Buscamos en la tabla accounts filtrando por la columna category
-        cursor.execute("SELECT * FROM accounts WHERE category = ?", (category_name,))
-        rows = cursor.fetchall()
-        
-        # Convertimos a lista de diccionarios para que sea fácil de leer
-        accounts = []
-        for row in rows:
-            accounts.append({
-                'id': row['id'],
-                'username': row['username'],
-                'category': row['category'],
-                'status': row['status']
-            })
-        return accounts
+
     def add_tanda(self, name, p1, p2, captions):
         cur = self.conn.cursor()
         cur.execute('''
@@ -250,17 +156,25 @@ class DatabaseManager:
         ''', (name, p1, p2, captions))
         self.conn.commit()
 
-    # ==================== HISTORIAL (ANTI-CHOQUE) ====================
-    def get_account_history(self, account_id):
+    def get_tanda_by_name(self, name):
         cur = self.conn.cursor()
-        cur.execute("SELECT p1_source, p2_source FROM fingerprint_history WHERE account_id = ?", (account_id,))
-        return [dict(row) for row in cur.fetchall()]
-        
+        cur.execute("SELECT * FROM batch_tandas WHERE tanda_name = ?", (name,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    # ==================== HISTORIAL ====================
     def add_video_to_history(self, account_id, video_path, p1, p2, caption, day):
-        cur = self.conn.cursor()
-        cur.execute('''
-            INSERT INTO fingerprint_history (account_id, video_path, p1_source, p2_source, assigned_caption, day_number)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (account_id, video_path, p1, p2, caption, day))
-        cur.execute("UPDATE virtual_accounts SET videos_posted = videos_posted + 1 WHERE id = ?", (account_id,))
-        self.conn.commit()
+        """Registra el envío en el historial con la columna video_path."""
+        try:
+            cur = self.conn.cursor()
+            cur.execute('''
+                INSERT INTO fingerprint_history 
+                (account_id, video_path, p1_source, p2_source, assigned_caption, day_number)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (account_id, video_path, p1, p2, caption, day))
+            
+            # Actualizamos el contador de la cuenta
+            cur.execute("UPDATE virtual_accounts SET videos_posted = videos_posted + 1 WHERE id = ?", (account_id,))
+            self.conn.commit()
+        except sqlite3.OperationalError as e:
+            print(f"❌ Error de columna: {e}. Es necesario resetear la base de datos.")

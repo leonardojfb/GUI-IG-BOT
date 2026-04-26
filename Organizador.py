@@ -17,120 +17,90 @@ from database import DatabaseManager
 import datetime
 import math
 
+import math
+
+import math
+
 def preview_distribution_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to_organize="MAX"):
     """
-    Reporte Pro con Lógica de Cobertura Total y Días Personalizados.
+    Genera un reporte detallado de distribución, detallando VAs y Fill-up por cuenta.
     """
     db = DatabaseManager()
-    accounts = db.get_accounts_by_type(category_dest)
+    # Filtrar cuentas por categoría (account_type en V6)
+    all_accs = db.get_all_accounts()
+    accounts = [a for a in all_accs if a['account_type'].upper() == category_dest.upper()]
     
     if not accounts:
         db.close()
-        return f"❌ ERROR: No hay cuentas para {category_dest}"
+        return f"❌ ERROR: No hay cuentas asignadas a la categoría: {category_dest}"
 
+    # Ubicación de videos en la tanda
     tanda_path = os.path.join(source_root, tanda_name)
     if not os.path.exists(tanda_path):
         db.close()
-        return f"❌ ERROR: Carpeta no encontrada: {tanda_name}"
+        return f"❌ ERROR: No se encuentra la carpeta de la tanda: {tanda_name}"
 
     videos = [f for f in os.listdir(tanda_path) if f.lower().endswith(('.mp4', '.mov'))]
     total_videos = len(videos)
     
-    # --- CÁLCULOS DE LOGÍSTICA ---
+    # --- CÁLCULOS LOGÍSTICOS ---
     num_cuentas = len(accounts)
-    vids_por_dia_grupo = num_cuentas * daily_quota
-    
-    # Días naturales que cubren los videos actuales
-    dias_reales = total_videos / vids_por_dia_grupo if vids_por_dia_grupo > 0 else 0
-    dias_completos = total_videos // vids_por_dia_grupo if vids_por_dia_grupo > 0 else 0
-    sobrante = total_videos % vids_por_dia_grupo if vids_por_dia_grupo > 0 else 0
+    vids_dia_grupo = num_cuentas * daily_quota
+    dias_alcance_real = total_videos / vids_dia_grupo if vids_dia_grupo > 0 else 0
 
-    # Determinar objetivo de días
+    # Lógica de Días "MAX": Redondeo hacia arriba para completar el último día
     if str(days_to_organize).upper() == "MAX":
-        target_days = math.ceil(dias_reales) # Redondea hacia arriba (ej: 10.25 -> 11)
+        target_days = math.ceil(dias_alcance_real)
     else:
-        target_days = int(days_to_organize)
+        try: target_days = int(days_to_organize)
+        except: target_days = math.floor(dias_alcance_real)
 
-    total_necesario = target_days * vids_por_dia_grupo
-    vids_a_generar = max(0, total_necesario - total_videos) if use_fillup else 0
+    total_necesario = target_days * vids_dia_grupo
+    vids_faltantes_total = max(0, total_necesario - total_videos)
 
-    # --- REPORTE DETALLADO ---
-    resumen =  f"╔══════════════════════════════════════════════════════════╗\n"
-    resumen += f"║   🚀 PLANIFICACIÓN ESTRATÉGICA: {tanda_name:<15} ║\n"
-    resumen += f"╚══════════════════════════════════════════════════════════╝\n\n"
+    # --- CONSTRUCCIÓN DEL REPORTE ---
+    resumen =  f"╔════════════════════════════════════════════════════════════════════╗\n"
+    resumen += f"║   🎬 REPORTE ESTRATÉGICO DE DISTRIBUCIÓN: {tanda_name:<16} ║\n"
+    resumen += f"╚════════════════════════════════════════════════════════════════════╝\n\n"
     
-    resumen += f"📊 ESTADO DEL INVENTARIO:\n"
-    resumen += f"  ├─ Cuentas Destino:    {num_cuentas}\n"
-    resumen += f"  ├─ Cuota por Cuenta:   {daily_quota} vids/día\n"
+    resumen += f"📈 RESUMEN DE INVENTARIO:\n"
+    resumen += f"  ├─ Categoría Destino:  {category_dest}\n"
     resumen += f"  ├─ Videos Disponibles: {total_videos}\n"
-    resumen += f"  └─ Videos/Día Total:   {vids_por_dia_grupo}\n\n"
+    resumen += f"  ├─ Consumo del Grupo:  {vids_dia_grupo} videos/día\n"
+    resumen += f"  └─ Alcance Natural:    {dias_alcance_real:.2f} días\n\n"
 
-    resumen += f"🗓️ PROYECCIÓN DE CALENDARIO:\n"
-    resumen += f"  ├─ Días Objetivo:      {target_days} días\n"
-    resumen += f"  ├─ Videos Necesarios:  {total_necesario}\n"
-    if vids_a_generar > 0:
-        resumen += f"  ├─ ⚡ FILL-UP ACTIVO:  Generando {vids_a_generar} videos para completar el día {target_days}\n"
-    resumen += f"  └─ Cobertura:          Del Día 1 al Día {target_days}\n\n"
+    resumen += f"🗓️ PLANIFICACIÓN (Modo: {'MÁXIMO' if days_to_organize == 'MAX' else 'FIJO'}):\n"
+    resumen += f"  ├─ Objetivo:           {target_days} días completos\n"
+    resumen += f"  ├─ Necesidad Total:    {total_necesario} videos\n"
+    if use_fillup:
+        resumen += f"  ├─ ⚡ FILL-UP:         ACTIVO (Generará {vids_faltantes_total} videos extras)\n"
+    resumen += f"  └─ Estado Final:       Todas las cuentas sincronizadas hasta el Día {target_days}\n\n"
 
-    resumen += f"👥 EQUIPO Y ASIGNACIÓN (VAs):\n"
-    resumen += f"{'CUENTA':<20} | {'ASISTENTE (VA)':<15} | {'TOTAL VIDS'}\n"
-    resumen += f"{'-'*55}\n"
+    resumen += f"👥 DETALLE POR CUENTA Y ASISTENTE (VA):\n"
+    resumen += f"{'CUENTA':<18} | {'VA ASIGNADO':<15} | {'REAL':<6} | {'FILL-UP'}\n"
+    resumen += f"{'-'*68}\n"
 
+    vids_stock_restante = total_videos
     for acc in accounts:
         user = f"@{acc['username']}"
-        va = acc.get('assigned_va', 'N/A')
-        vids_acc = target_days * daily_quota
-        resumen += f"{user:<20} | {va:<15} | {vids_acc} vids\n"
+        va = acc.get('assigned_va', '⚠️ SIN VA')
+        
+        # Reparto equitativo del stock real
+        meta_acc = target_days * daily_quota
+        vids_reales = min(meta_acc, vids_stock_restante // (num_cuentas - accounts.index(acc)))
+        vids_stock_restante -= vids_reales
+        
+        # Cálculo de fill-up por cuenta
+        necesita_fill = meta_acc - vids_reales
+        fill_str = f"➕ {necesita_fill} vids" if necesita_fill > 0 else "✅ OK"
+        
+        resumen += f"{user[:18]:<18} | {va[:15]:<15} | {vids_reales:<6} | {fill_str}\n"
 
-    resumen += f"\n{'='*55}\n"
-    resumen += f"💡 INFO: Todas las cuentas terminarán sincronizadas el día {target_days}.\n"
+    resumen += f"\n{'='*68}\n"
+    resumen += f"💡 EL CONTENIDO ALCANZA PARA QUE TODO EL EQUIPO PUBLIQUE POR {target_days} DÍAS.\n"
     
     db.close()
     return resumen
-def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup):
-    """
-    Ejecuta la distribución real, mueve archivos y registra en la DB.
-    """
-    db = DatabaseManager()
-    tanda_folder = os.path.join(base_dir, "videos_finales", tanda_name)
-    output_root = os.path.join(base_dir, "CALENDARIO_POSTEO")
-    
-    accounts = db.get_accounts_by_category(category_dest)
-    videos = [f for f in os.listdir(tanda_folder) if f.endswith('.mp4')]
-    
-    if not accounts or not videos:
-        return "Faltan cuentas o videos para proceder."
-
-    count = 0
-    # Agrupamos videos por P1 para rotarlos (Tu lógica de bins)
-    for acc in accounts:
-        acc_folder = os.path.join(output_root, acc['username'])
-        os.makedirs(acc_folder, exist_ok=True)
-        
-        # Tomamos una porción de videos para esta cuenta
-        # (Aquí puedes integrar tu lógica de pick_balanced)
-        for i in range(daily_quota):
-            if not videos: break
-            vid = videos.pop(0)
-            
-            src = os.path.join(tanda_folder, vid)
-            dst = os.path.join(acc_folder, vid)
-            
-            # Movimiento físico
-            shutil.copy(src, dst) # Usamos copy para no vaciar la tanda original por ahora
-            
-            # Registro en DB para evitar colisiones futuras
-            # Extraemos P1 y P2 del nombre: TANDA__P1__P2.mp4
-            parts = vid.replace(".mp4", "").split("__")
-            p1 = parts[1] if len(parts) > 1 else "unknown"
-            p2 = parts[2] if len(parts) > 2 else "unknown"
-            
-            db.add_video_to_history(acc['id'], vid, category_dest, p1, p2)
-            count += 1
-
-    db.close()
-    return f"🚀 ¡Éxito! Se distribuyeron {count} videos en la carpeta CALENDARIO_POSTEO."
-
 def get_distribution_config():
     """Obtiene la configuración de distribución desde la base de datos."""
     try:
@@ -298,7 +268,36 @@ def check_collision(account_id: int, p1_id: str, p2_id: str) -> bool:
 # ==========================================
 global_used_p1 = {}
 global_used_p2 = {}
+import random
+import string
 
+def change_video_metadata(file_path):
+    """
+    Cambia el hash del archivo y limpia metadatos básicos 
+    añadiendo un pequeño comentario aleatorio al final del archivo.
+    """
+    try:
+        # Generamos una cadena aleatoria pequeña
+        random_str = "".join(random.choices(string.ascii_letters + string.digits, k=16))
+        with open(file_path, "ab") as f:
+            # Escribimos al final del archivo (no rompe el video, pero cambia el MD5/Hash)
+            f.write(f"\n# ID_{random_str}".encode())
+        return True
+    except Exception as e:
+        print(f"⚠️ Error limpiando metadatos en {file_path}: {e}")
+        return False
+
+# MODIFICADO: Solo rastreamos P1 globalmente
+global_used_p1 = {} 
+
+def is_p1_collision_global(day, p1):
+    """Verifica si el clip de inicio P1 ya se usó hoy en OTRA cuenta."""
+    return p1 in global_used_p1.get(day, set())
+
+def mark_p1_used_global(day, p1):
+    """Registra que este P1 ya no puede usarse por hoy en otras cuentas."""
+    if day not in global_used_p1: global_used_p1[day] = set()
+    global_used_p1[day].add(p1)
 
 def is_p1_used_today(day_number: int, p1_id: str) -> bool:
     """Verificar si un P1 ya fue usado hoy (globalmente)."""
@@ -745,85 +744,91 @@ def distribute(daily_goal: int = None, fill_up: bool = None):
 import math
 import datetime
 
-def preview_distribution_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to_organize="MAX"):
-    """
-    Reporte de Logística Avanzado con Lógica de Cobertura Total y Mapeo de VAs.
-    """
+def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to_organize="MAX"):
+    global global_used_p1
+    global_used_p1 = {} # Reset de colisiones diarias
+    
     db = DatabaseManager()
-    # Usamos los nombres reales de tu BD V6: virtual_accounts y account_type
-    accounts = db.get_accounts_by_type(category_dest) 
+    all_accs = db.get_all_accounts()
+    accounts = [a for a in all_accs if a['account_type'].upper() == category_dest.upper()]
     
     if not accounts:
         db.close()
-        return f"❌ ERROR: No hay cuentas asignadas a la categoría: {category_dest}"
+        return "❌ Error: No hay cuentas para esta categoría."
 
-    # Ubicación de videos finales
-    tanda_path = os.path.join(source_root, tanda_name) 
-    if not os.path.exists(tanda_path):
-        db.close()
-        return f"❌ ERROR: No existe la carpeta para la tanda: {tanda_name}"
-
-    videos = [f for f in os.listdir(tanda_path) if f.lower().endswith(('.mp4', '.mov'))]
-    total_videos = len(videos)
+    tanda_path = os.path.join(source_root, tanda_name)
+    videos_originales = [f for f in os.listdir(tanda_path) if f.lower().endswith(('.mp4', '.mov'))]
+    random.shuffle(videos_originales)
     
-    # --- CÁLCULOS DE LOGÍSTICA ---
+    # Cálculo de días (Mismo que antes)
     num_cuentas = len(accounts)
-    vids_por_dia_grupo = num_cuentas * daily_quota
-    
-    # Días que cubren los videos actuales (ej: 10.125)
-    dias_float = total_videos / vids_por_dia_grupo if vids_por_dia_grupo > 0 else 0
-    dias_completos = total_videos // vids_por_dia_grupo if vids_por_dia_grupo > 0 else 0
-
-    # Determinación del objetivo de días
+    vids_dia_total = num_cuentas * daily_quota
     if str(days_to_organize).upper() == "MAX":
-        # Lógica pedida: si es 10.125, completamos hasta el día 11 para todos
-        target_days = math.ceil(dias_float) 
+        target_days = math.ceil(len(videos_originales) / vids_dia_total) if vids_dia_total > 0 else 1
     else:
         try: target_days = int(days_to_organize)
-        except: target_days = dias_completos
+        except: target_days = 1
 
-    total_necesario = target_days * vids_por_dia_grupo
-    vids_fillup = max(0, total_necesario - total_videos) if use_fillup else 0
-
-    # --- DISEÑO DEL REPORTE ---
-    resumen =  f"╔══════════════════════════════════════════════════════════╗\n"
-    resumen += f"║   🚀 PLANIFICACIÓN ESTRATÉGICA: {tanda_name:<15} ║\n"
-    resumen += f"╚══════════════════════════════════════════════════════════╝\n\n"
+    total_movidos = 0
+    os.makedirs(output_root, exist_ok=True)
     
-    resumen += f"📊 MÉTRICAS DEL INVENTARIO:\n"
-    resumen += f"  ├─ Cuentas en {category_dest:<8}: {num_cuentas}\n"
-    resumen += f"  ├─ Cuota diaria/cuenta:  {daily_quota} reels/día\n"
-    resumen += f"  ├─ Videos en Stock:      {total_videos}\n"
-    resumen += f"  └─ Consumo total:        {vids_por_dia_grupo} videos/día\n\n"
+    for day in range(1, target_days + 1):
+        day_label = f"Dia_{day}"
+        for acc in accounts:
+            acc_id = acc['id']
+            acc_name = acc['username']
+            acc_history = get_account_used_combinations(acc_id) # Historial de esta cuenta específica
+            
+            target_dir = os.path.join(output_root, day_label, acc_name)
+            os.makedirs(target_dir, exist_ok=True)
+            
+            videos_hoy = 0
+            while videos_hoy < daily_quota:
+                vid_name = None
+                
+                # ESTRATEGIA 1: Buscar video en la tanda que no choque GLOBALMENTE hoy (solo P1)
+                for i, v in enumerate(videos_originales):
+                    p1, p2 = parse_combination_from_filename(v)
+                    if not is_p1_collision_global(day, p1):
+                        vid_name = videos_originales.pop(i)
+                        mark_p1_used_global(day, p1)
+                        break
+                
+                # ESTRATEGIA 2: Si no hay en stock o hay choques, forzar FILL-UP con metadatos nuevos
+                if not vid_name and use_fillup:
+                    # Buscamos en la tanda CUALQUIER video cuyo P1 no haya sido usado por ESTA cuenta nunca
+                    # y que no haya sido usado GLOBALMENTE hoy.
+                    videos_tanda = [f for f in os.listdir(tanda_path) if f.lower().endswith(('.mp4', '.mov'))]
+                    random.shuffle(videos_tanda)
+                    
+                    for v_alt in videos_tanda:
+                        p1_alt, p2_alt = parse_combination_from_filename(v_alt)
+                        # Condición: P1 no usado por la cuenta nunca Y P1 no usado por nadie hoy
+                        if (p1_alt, p2_alt) not in acc_history and not is_p1_collision_global(day, p1_alt):
+                            vid_name = v_alt
+                            mark_p1_used_global(day, p1_alt)
+                            break
 
-    resumen += f"🗓️ PROYECCIÓN DE CALENDARIO:\n"
-    resumen += f"  ├─ Días a organizar:     {target_days} días\n"
-    resumen += f"  ├─ Videos Requeridos:    {total_necesario}\n"
-    
-    if vids_fillup > 0:
-        resumen += f"  ├─ ⚡ MODO FILL-UP:      Generando {vids_fillup} videos para completar el día {target_days}\n"
-    else:
-        resumen += f"  ├─ 📦 STOCK SUFICIENTE:  No requiere generación extra\n"
-    
-    resumen += f"  └─ COBERTURA FINAL:      Hasta el día {target_days} inclusive\n\n"
+                if vid_name:
+                    src = os.path.join(tanda_path, vid_name)
+                    dst = os.path.join(target_dir, vid_name)
+                    shutil.copy2(src, dst)
+                    
+                    # CAMBIO DE METADATA: Hacemos el video "único" físicamente
+                    change_video_metadata(dst)
+                    
+                    # Registro en DB
+                    p1, p2 = parse_combination_from_filename(vid_name)
+                    db.add_video_to_history(acc_id, dst, p1, p2, "Auto-Generated", day)
+                    
+                    videos_hoy += 1
+                    total_movidos += 1
+                else:
+                    # Si llega aquí, es que realmente se acabaron los P1 únicos para hoy
+                    break 
 
-    resumen += f"👥 EQUIPO Y ASIGNACIÓN (VAs):\n"
-    resumen += f"{'CUENTA':<20} | {'VA RESPONSABLE':<15} | {'TOTAL VIDS'}\n"
-    resumen += f"{'-'*55}\n"
-
-    for acc in accounts:
-        user = f"@{acc['username']}"
-        va = acc.get('assigned_va', '⚠️ SIN VA') #
-        vids_acc = target_days * daily_quota
-        resumen += f"{user:<20} | {va:<15} | {vids_acc} vids\n"
-
-    resumen += f"\n{'='*58}\n"
-    resumen += f"💡 INFO: Todas las cuentas terminarán sincronizadas el día {target_days}.\n"
-    
     db.close()
-    return resumen
-
-def distribute_tanda(tanda_name: str, dest_category: str, daily_quota: int, fillup: bool):
+    return f"🚀 Logística terminada. {total_movidos} videos procesados (Metadata actualizada en duplicados)."
     """Ejecución real de la distribución, moviendo archivos y guardando en DB."""
     try:
         db = DatabaseManager()
@@ -889,51 +894,6 @@ def distribute_tanda(tanda_name: str, dest_category: str, daily_quota: int, fill
         return f"✅ Distribución completada. {total_asignados} videos asignados a la categoría {dest_category} siguiendo el algoritmo anti-choque global."
     except Exception as e:
         return f"Error crítico durante la distribución: {str(e)}"
-def preview_distribution_tanda(tanda_name, category_dest, daily_quota, use_fillup):
-    """Lógica de vista previa para la Pestaña 4."""
-    db = DatabaseManager()
-    # Usamos el nuevo método con los nombres reales
-    accounts = db.get_accounts_by_type(category_dest)
-    
-    if not accounts:
-        db.close()
-        return f"❌ No hay cuentas asignadas a la categoría: {category_dest}"
-
-    # Verificar si existen videos para esa tanda
-    # En tu V6, las tandas están en 'videos_finales/NOMBRE_TANDA'
-    tanda_path = os.path.join(source_root, tanda_name) 
-    if not os.path.exists(tanda_path):
-        db.close()
-        return f"❌ No existe la carpeta de videos para la tanda: {tanda_name}"
-
-    videos = [f for f in os.listdir(tanda_path) if f.lower().endswith(('.mp4', '.mov'))]
-    
-    resumen = f"📊 SIMULACIÓN PARA: {category_dest}\n"
-    resumen += f"✅ Cuentas encontradas: {len(accounts)}\n"
-    resumen += f"🎥 Videos disponibles: {len(videos)}\n"
-    resumen += "-"*30 + "\n"
-    
-    for acc in accounts:
-        resumen += f"👤 @{acc['username']} -> Recibirá aprox {daily_quota} videos.\n"
-    
-    db.close()
-    return resumen
-
-def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup):
-    """Lógica de distribución real para la Pestaña 4."""
-    db = DatabaseManager()
-    accounts = db.get_accounts_by_type(category_dest)
-    
-    if not accounts:
-        db.close()
-        return f"❌ Error: No hay cuentas para {category_dest}"
-
-    # Aquí se ejecuta tu lógica de movimiento de archivos similar a tu función distribute()
-    # Pero filtrada por la tanda y categoría seleccionada en la GUI
-    # ... (el resto de tu lógica de shutil.move)
-    
-    db.close()
-    return f"🚀 Distribución de {tanda_name} completada para {len(accounts)} cuentas."
 if __name__ == "__main__":
     print("🔍 --- INICIANDO ORGANIZACIÓN CON ANTI-CHOQUE GLOBAL ---")
     
