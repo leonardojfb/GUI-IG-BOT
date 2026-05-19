@@ -63,6 +63,9 @@ TIMEZONE_OPTIONS = [
     "Europe/London",
 ]
 
+DAY_NAMES = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+DEFAULT_CATEGORIES = ["promo", "suicide", "general"]
+
 _USER_AGENTS = [
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Mobile/15E148 Safari/604.1",
     "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
@@ -2006,7 +2009,7 @@ class InstagramAutoPro(ctk.CTk):
         # ── Panel Izquierdo: Cuentas y Controles ────────────────────────
         ctrl_card = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
         ctrl_card.grid(row=1, column=0, sticky="nsew", padx=(24, 12), pady=10)
-        ctrl_card.grid_rowconfigure(2, weight=1)
+        ctrl_card.grid_rowconfigure(4, weight=1)
         ctrl_card.grid_columnconfigure(0, weight=1)
 
         # Fila 0: título + botón cargar
@@ -2037,15 +2040,31 @@ class InstagramAutoPro(ctk.CTk):
                       border_width=1, border_color=BORDER, hover_color=BORDER,
                       command=lambda: self.list_tg.selection_clear(0, "end")).pack(side="left")
 
-        # Fila 2: listbox con selección múltiple
+        # Fila 2: toggle "Configurar Horarios"
+        self._schedule_panel_expanded = False
+        sched_header = ctk.CTkFrame(ctrl_card, fg_color="transparent")
+        sched_header.grid(row=2, column=0, sticky="ew", padx=20, pady=(4, 0))
+        sched_header.grid_columnconfigure(0, weight=1)
+        self.btn_toggle_sched = ctk.CTkButton(
+            sched_header, text="▶ Configurar Horarios", anchor="w",
+            fg_color=BG_CARD2, text_color=TEXT_BODY, hover_color=BORDER,
+            command=self._toggle_schedule_panel,
+        )
+        self.btn_toggle_sched.grid(row=0, column=0, sticky="ew")
+
+        # Fila 3: panel de horarios (oculto inicialmente)
+        self.sched_panel = ctk.CTkScrollableFrame(ctrl_card, fg_color=BG_INPUT, height=160)
+        # NO se ejecuta .grid() aquí — se invoca en _toggle_schedule_panel al expandir
+
+        # Fila 4: listbox con selección múltiple
         self.list_tg = tk.Listbox(ctrl_card, bg=BG_INPUT, fg=TEXT_BODY, selectbackground=NEON_PURPLE,
                                   selectmode=tk.EXTENDED,
                                   borderwidth=0, highlightthickness=1, highlightbackground=BORDER, font=FONT_BODY)
-        self.list_tg.grid(row=2, column=0, sticky="nsew", padx=20, pady=(0, 10))
+        self.list_tg.grid(row=4, column=0, sticky="nsew", padx=20, pady=(0, 10))
 
         # Controles inferiores
         bot_ctrl = ctk.CTkFrame(ctrl_card, fg_color="transparent")
-        bot_ctrl.grid(row=3, column=0, sticky="ew", padx=20, pady=(10, 20))
+        bot_ctrl.grid(row=5, column=0, sticky="ew", padx=20, pady=(10, 20))
         
         ctk.CTkLabel(bot_ctrl, text="Fecha Inicio (YYYY-MM-DD):", text_color=TEXT_MUTED).pack(side="left")
         self.e_date_tg = ctk.CTkEntry(bot_ctrl, fg_color=BG_INPUT, border_color=BORDER, width=120)
@@ -2053,7 +2072,7 @@ class InstagramAutoPro(ctk.CTk):
         self.e_date_tg.insert(0, datetime.now().strftime("%Y-%m-%d"))
 
         btn_row = ctk.CTkFrame(ctrl_card, fg_color="transparent")
-        btn_row.grid(row=4, column=0, sticky="ew", padx=20, pady=(0, 20))
+        btn_row.grid(row=6, column=0, sticky="ew", padx=20, pady=(0, 20))
         
         self.btn_start_tg = ctk.CTkButton(btn_row, text="▶ INICIAR", fg_color=SUCCESS, text_color=BG_APP,
                                           hover_color=self._darken(SUCCESS), font=ctk.CTkFont(weight="bold"),
@@ -2091,6 +2110,133 @@ class InstagramAutoPro(ctk.CTk):
         self.pb_tg = ctk.CTkProgressBar(log_card, fg_color=BG_INPUT, progress_color=NEON_CYAN)
         self.pb_tg.grid(row=2, column=0, sticky="ew", padx=20, pady=(0, 20))
         self.pb_tg.set(0)
+
+    # ── Horarios: toggle / editor de grilla ─────────────────────────────────
+
+    def _toggle_schedule_panel(self):
+        """Expande o colapsa el panel de configuración de horarios."""
+        self._schedule_panel_expanded = not self._schedule_panel_expanded
+        if self._schedule_panel_expanded:
+            self.btn_toggle_sched.configure(text="▼ Configurar Horarios")
+            self.sched_panel.grid(row=3, column=0, sticky="ew", padx=20, pady=(4, 4))
+            self._refresh_schedule_panel()
+        else:
+            self.btn_toggle_sched.configure(text="▶ Configurar Horarios")
+            self.sched_panel.grid_forget()
+
+    def _refresh_schedule_panel(self):
+        """Reconstruye la grilla de sets × días con los slots actuales (o 'default')."""
+        for w in self.sched_panel.winfo_children():
+            w.destroy()
+
+        vas = self.db.get_vas()
+        cats = self.db.get_categories() or DEFAULT_CATEGORIES
+
+        # Header
+        header = ctk.CTkFrame(self.sched_panel, fg_color="transparent")
+        header.pack(fill="x", pady=(0, 4))
+        ctk.CTkLabel(header, text="Set (VA / Categoría)", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11, weight="bold"), width=180,
+                     anchor="w").pack(side="left", padx=(4, 4))
+        for d in DAY_NAMES:
+            ctk.CTkLabel(header, text=d, text_color=TEXT_MUTED,
+                         font=ctk.CTkFont(size=11, weight="bold"), width=70).pack(side="left")
+        ctk.CTkLabel(header, text="", width=120).pack(side="left")  # espacio botones
+
+        # Filas por VA × categoría
+        for va in vas:
+            for cat in cats:
+                self._render_set_row(va, cat)
+
+    def _render_set_row(self, va_name: str, category: str):
+        import json
+        r = ctk.CTkFrame(self.sched_panel, fg_color=BG_CARD2, corner_radius=4)
+        r.pack(fill="x", pady=2, padx=2)
+        ctk.CTkLabel(r, text=f"{va_name} / {category}", text_color=TEXT_BODY,
+                     font=ctk.CTkFont(size=11), width=180, anchor="w").pack(side="left", padx=(4, 4))
+
+        for dow in range(7):
+            row_data = self.db.get_schedule_config(va_name, category, dow)
+            if row_data:
+                slots = json.loads(row_data["time_slots"])
+                txt = ",".join(s.replace(":00 ", "").replace(" AM", "a").replace(" PM", "p") for s in slots)
+                color = TEXT_BODY
+            else:
+                txt = "default"
+                color = TEXT_MUTED
+            ctk.CTkLabel(r, text=txt, text_color=color,
+                         font=ctk.CTkFont(size=10), width=70).pack(side="left")
+
+        ctk.CTkButton(r, text="Editar", width=56, height=22, fg_color=NEON_PURPLE,
+                      hover_color=self._darken(NEON_PURPLE), text_color=TEXT_H1,
+                      command=lambda v=va_name, c=category: self._edit_set_schedule(v, c)
+                      ).pack(side="left", padx=(2, 2))
+        ctk.CTkButton(r, text="Default", width=56, height=22, fg_color=BG_INPUT,
+                      hover_color=BORDER, text_color=TEXT_MUTED,
+                      command=lambda v=va_name, c=category: self._reset_set_schedule(v, c)
+                      ).pack(side="left", padx=(0, 4))
+
+    def _edit_set_schedule(self, va_name: str, category: str):
+        """Abre un popup para editar los 7 días del set."""
+        import json
+        from organizadortg import DEFAULT_SCHEDULE
+
+        win = ctk.CTkToplevel(self)
+        win.title(f"Horarios — {va_name} / {category}")
+        win.geometry("520x420")
+        win.grab_set()
+
+        ctk.CTkLabel(win, text=f"⏰ {va_name} / {category}",
+                     font=ctk.CTkFont(size=14, weight="bold"), text_color=TEXT_H1
+                     ).pack(pady=(12, 4))
+        ctk.CTkLabel(win, text="Horas separadas por coma. Formato: 8:00 AM, 1:00 PM, 7:00 PM",
+                     text_color=TEXT_MUTED, font=ctk.CTkFont(size=11)).pack(pady=(0, 8))
+
+        entries = {}
+        for dow in range(7):
+            row_frame = ctk.CTkFrame(win, fg_color="transparent")
+            row_frame.pack(fill="x", padx=20, pady=2)
+            ctk.CTkLabel(row_frame, text=DAY_NAMES[dow], width=50, anchor="w",
+                         text_color=TEXT_BODY).pack(side="left")
+            cfg = self.db.get_schedule_config(va_name, category, dow)
+            if cfg:
+                current = ", ".join(json.loads(cfg["time_slots"]))
+            else:
+                current = ", ".join(DEFAULT_SCHEDULE[dow])
+            e = ctk.CTkEntry(row_frame, fg_color=BG_INPUT, border_color=BORDER, width=400)
+            e.insert(0, current)
+            e.pack(side="left", padx=8)
+            entries[dow] = e
+
+        def save_all():
+            for dow, entry in entries.items():
+                raw = entry.get().strip()
+                if not raw:
+                    self.db.delete_schedule_config(va_name, category, dow)
+                    continue
+                slots = [s.strip() for s in raw.split(",") if s.strip()]
+                self.db.set_schedule_config(va_name, category, dow, slots)
+            win.destroy()
+            self._refresh_schedule_panel()
+
+        btn_row_w = ctk.CTkFrame(win, fg_color="transparent")
+        btn_row_w.pack(pady=14)
+        ctk.CTkButton(btn_row_w, text="💾 Guardar", fg_color=SUCCESS, text_color=BG_APP,
+                      hover_color=self._darken(SUCCESS), command=save_all).pack(side="left", padx=6)
+        ctk.CTkButton(btn_row_w, text="Cancelar", fg_color=BG_CARD2, text_color=TEXT_BODY,
+                      hover_color=BORDER, command=win.destroy).pack(side="left", padx=6)
+
+    def _reset_set_schedule(self, va_name: str, category: str):
+        """Borra la config de los 7 días del set — vuelve al DEFAULT_SCHEDULE."""
+        if not messagebox.askyesno(
+            "Restaurar default",
+            f"¿Restaurar horarios estratégicos ET para {va_name} / {category}?",
+            parent=self,
+        ):
+            return
+        for dow in range(7):
+            self.db.delete_schedule_config(va_name, category, dow)
+        self._refresh_schedule_panel()
 
     # ── Lógica Bot Telegram ──────────────────────────────────────────────────
     def load_organized_accounts(self):
