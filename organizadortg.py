@@ -128,14 +128,19 @@ def get_accounts_with_va_info():
     for acc in accounts:
         va_name = acc.get('assigned_va', 'Sin Asignar')
         tg_group_id = DEFAULT_CHAT_ID
+        va_timezone = "America/Argentina/Buenos_Aires"
         if va_name != 'Sin Asignar':
             cur = db.conn.cursor()
-            cur.execute("SELECT tg_group_id FROM virtual_assistants WHERE name = ?", (va_name,))
+            cur.execute("SELECT tg_group_id, timezone FROM virtual_assistants WHERE name = ?", (va_name,))
             row = cur.fetchone()
-            if row and row['tg_group_id']: tg_group_id = row['tg_group_id']
+            if row:
+                if row['tg_group_id']: tg_group_id = row['tg_group_id']
+                if 'timezone' in row.keys() and row['timezone']:
+                    va_timezone = row['timezone']
         result.append({
             'username': acc['username'], 'account_type': acc['account_type'],
-            'assigned_va': va_name, 'tg_group_id': tg_group_id
+            'assigned_va': va_name, 'tg_group_id': tg_group_id,
+            'va_timezone': va_timezone,
         })
     return result
 
@@ -324,9 +329,8 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None):
 
     for dia in sorted_days:
         dia_str = fecha_envio.strftime('%Y-%m-%d')
-        tiempos = DEFAULT_SCHEDULE[fecha_envio.weekday()]
+        day_of_week = fecha_envio.weekday()
 
-        slot_offset = 0
         for username, videos in day_account_videos[dia].items():
             if selected_accounts and username not in selected_accounts: continue
 
@@ -335,8 +339,14 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None):
                 print(f"⚠️ Saltando @{username}: No está en la DB.")
                 continue
 
-            chat_id = acc_info['tg_group_id']
-            tag = _account_tag(acc_info)  # siempre desde la DB, nunca del nombre del archivo
+            chat_id    = acc_info['tg_group_id']
+            tag        = _account_tag(acc_info)
+            va_name    = acc_info.get('assigned_va', 'Sin Asignar')
+            category   = (acc_info.get('account_type') or 'general').strip().lower()
+            va_tz      = acc_info.get('va_timezone', 'America/Argentina/Buenos_Aires')
+
+            # Resolver slots por set (VA + categoría) para este día de la semana
+            tiempos = get_slots_for_set(va_name, category, day_of_week, db)
 
             t_id = get_or_create_topic(chat_id, username, tag, topics_state)
             if not t_id:
@@ -347,10 +357,17 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None):
                 if controller and controller.stopped: return f"🛑 Abortado. Enviados: {global_sent}"
                 if controller: controller.paused.wait()
 
-                hora = tiempos[(slot_offset + i) % len(tiempos)]
-                meta = f"{tag}\nDía: {dia_str}\n⏰ Hora: {hora}\nFormato: Reel"
+                hora_et = tiempos[i % len(tiempos)]
+                et_label, local_label = convert_et_to_va_tz(hora_et, va_tz)
+                meta = (
+                    f"{tag}\n"
+                    f"Día: {dia_str}\n"
+                    f"⏰ {et_label}\n"
+                    f"   → {local_label}\n"
+                    f"Formato: Reel"
+                )
 
-                print(f"📤 Enviando a @{username} [{tag}] (Día {dia_str} - {hora})...")
+                print(f"📤 Enviando a @{username} [{tag}] (Día {dia_str} - {hora_et} ET)...")
                 msg_res = call_tg("sendMessage", {'chat_id': chat_id, 'text': meta, 'message_thread_id': t_id}, silent=True)
                 if not msg_res.get("ok"):
                     desc = str(msg_res.get("description", ""))
@@ -363,7 +380,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None):
                             break
                         retry_res = call_tg("sendMessage", {'chat_id': chat_id, 'text': meta, 'message_thread_id': t_id})
                         if not retry_res.get("ok"):
-                            print(f"❌ Falló el reintento de metadata para @{username} [{hora}] — saltando video.")
+                            print(f"❌ Falló el reintento de metadata para @{username} [{hora_et}] — saltando video.")
                             continue
                     else:
                         print(f"⚠️ Error en Telegram API (sendMessage) para @{username}: {msg_res}")
@@ -377,8 +394,6 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None):
                         save_json(os.path.join(base_dir, STATE_FILE), topics_state)
                     time.sleep(2)
                 except Exception as e: print(f"❌ Error físico: {e}")
-
-            slot_offset += len(videos)
 
         fecha_envio += timedelta(days=1)
 
