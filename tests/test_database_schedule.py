@@ -48,5 +48,41 @@ class TimezoneColumnTest(unittest.TestCase):
             db.close()
 
 
+class ScheduleConfigTableTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp_db_fd, self.tmp_db_path = tempfile.mkstemp(suffix=".db")
+        os.close(self.tmp_db_fd)
+        import database
+        self._original_db_path = database.DB_PATH
+        database.DB_PATH = self.tmp_db_path
+
+    def tearDown(self):
+        import database
+        database.DB_PATH = self._original_db_path
+        if os.path.exists(self.tmp_db_path):
+            try:
+                os.unlink(self.tmp_db_path)
+            except PermissionError:
+                pass  # Windows file lock — will be cleaned by temp dir cleanup
+
+    def test_schedule_config_table_exists(self):
+        from database import DatabaseManager
+        db = DatabaseManager()
+        cur = db.conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='schedule_config'")
+        row = cur.fetchone()
+        self.assertIsNotNone(row)
+        db.close()
+
+    def test_schedule_config_primary_key_composite(self):
+        from database import DatabaseManager
+        db = DatabaseManager()
+        cur = db.conn.cursor()
+        cur.execute("PRAGMA table_info(schedule_config)")
+        pk_cols = [row["name"] for row in cur.fetchall() if row["pk"] > 0]
+        self.assertEqual(set(pk_cols), {"va_name", "category", "day_of_week"})
+        db.close()
+
+
 if __name__ == "__main__":
     unittest.main()

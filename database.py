@@ -65,6 +65,14 @@ CREATE TABLE IF NOT EXISTS metadata_fingerprints (
     used_at      TEXT,
     UNIQUE(iphone_model, city, carrier, ios_version)
 );
+
+CREATE TABLE IF NOT EXISTS schedule_config (
+    va_name     TEXT NOT NULL,
+    category    TEXT NOT NULL,
+    day_of_week INTEGER NOT NULL,
+    time_slots  TEXT NOT NULL,
+    PRIMARY KEY (va_name, category, day_of_week)
+);
 """
 
 class DatabaseManager:
