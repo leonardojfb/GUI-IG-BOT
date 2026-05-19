@@ -126,5 +126,38 @@ class ScheduleConfigCRUDTest(unittest.TestCase):
         self.assertIsNone(self.db.get_schedule_config("VA1", "promo", 0))
 
 
+class VATimezoneTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp_db_fd, self.tmp_db_path = tempfile.mkstemp(suffix=".db")
+        os.close(self.tmp_db_fd)
+        import database
+        self._original_db_path = database.DB_PATH
+        database.DB_PATH = self.tmp_db_path
+        from database import DatabaseManager
+        self.db = DatabaseManager()
+
+    def tearDown(self):
+        self.db.close()
+        import database
+        database.DB_PATH = self._original_db_path
+        if os.path.exists(self.tmp_db_path):
+            os.unlink(self.tmp_db_path)
+
+    def test_get_va_timezone_returns_default_for_new_va(self):
+        self.db.add_va("VA1")
+        tz = self.db.get_va_timezone("VA1")
+        self.assertEqual(tz, "America/Argentina/Buenos_Aires")
+
+    def test_set_and_get_va_timezone(self):
+        self.db.add_va("VA1")
+        self.db.set_va_timezone("VA1", "America/New_York")
+        tz = self.db.get_va_timezone("VA1")
+        self.assertEqual(tz, "America/New_York")
+
+    def test_get_va_timezone_returns_default_when_va_missing(self):
+        tz = self.db.get_va_timezone("NoExiste")
+        self.assertEqual(tz, "America/Argentina/Buenos_Aires")
+
+
 if __name__ == "__main__":
     unittest.main()

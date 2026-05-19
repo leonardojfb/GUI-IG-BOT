@@ -148,6 +148,21 @@ class DatabaseManager:
         cur.execute("UPDATE virtual_assistants SET tg_group_id = ? WHERE name = ?", (tg_group_id, va_name))
         self.conn.commit()
 
+    def get_va_timezone(self, va_name: str) -> str:
+        """Devuelve el timezone IANA de una VA. Si la VA no existe o no tiene tz, devuelve ART."""
+        cur = self.conn.cursor()
+        cur.execute("SELECT timezone FROM virtual_assistants WHERE name = ?", (va_name,))
+        row = cur.fetchone()
+        if row and row["timezone"]:
+            return row["timezone"]
+        return "America/Argentina/Buenos_Aires"
+
+    def set_va_timezone(self, va_name: str, timezone: str):
+        """Actualiza el timezone IANA de una VA."""
+        cur = self.conn.cursor()
+        cur.execute("UPDATE virtual_assistants SET timezone = ? WHERE name = ?", (timezone, va_name))
+        self.conn.commit()
+
     # ==================== SCHEDULE CONFIG ====================
     def get_schedule_config(self, va_name: str, category: str, day_of_week: int):
         """Devuelve la fila de schedule_config para el set, o None si no existe."""
