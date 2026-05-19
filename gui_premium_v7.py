@@ -2136,11 +2136,11 @@ class InstagramAutoPro(ctk.CTk):
         header = ctk.CTkFrame(self.sched_panel, fg_color="transparent")
         header.pack(fill="x", pady=(0, 4))
         ctk.CTkLabel(header, text="Set (VA / Categoría)", text_color=TEXT_MUTED,
-                     font=ctk.CTkFont(size=11, weight="bold"), width=180,
+                     font=ctk.CTkFont(size=11, weight="bold"), width=140,
                      anchor="w").pack(side="left", padx=(4, 4))
         for d in DAY_NAMES:
             ctk.CTkLabel(header, text=d, text_color=TEXT_MUTED,
-                         font=ctk.CTkFont(size=11, weight="bold"), width=70).pack(side="left")
+                         font=ctk.CTkFont(size=11, weight="bold"), width=52).pack(side="left")
         ctk.CTkLabel(header, text="", width=120).pack(side="left")  # espacio botones
 
         # Filas por VA × categoría
@@ -2153,7 +2153,7 @@ class InstagramAutoPro(ctk.CTk):
         r = ctk.CTkFrame(self.sched_panel, fg_color=BG_CARD2, corner_radius=4)
         r.pack(fill="x", pady=2, padx=2)
         ctk.CTkLabel(r, text=f"{va_name} / {category}", text_color=TEXT_BODY,
-                     font=ctk.CTkFont(size=11), width=180, anchor="w").pack(side="left", padx=(4, 4))
+                     font=ctk.CTkFont(size=11), width=140, anchor="w").pack(side="left", padx=(4, 4))
 
         for dow in range(7):
             row_data = self.db.get_schedule_config(va_name, category, dow)
@@ -2162,10 +2162,10 @@ class InstagramAutoPro(ctk.CTk):
                 txt = ",".join(s.replace(":00 ", "").replace(" AM", "a").replace(" PM", "p") for s in slots)
                 color = TEXT_BODY
             else:
-                txt = "default"
+                txt = "def"
                 color = TEXT_MUTED
             ctk.CTkLabel(r, text=txt, text_color=color,
-                         font=ctk.CTkFont(size=10), width=70).pack(side="left")
+                         font=ctk.CTkFont(size=10), width=52).pack(side="left")
 
         ctk.CTkButton(r, text="Editar", width=56, height=22, fg_color=NEON_PURPLE,
                       hover_color=self._darken(NEON_PURPLE), text_color=TEXT_H1,
