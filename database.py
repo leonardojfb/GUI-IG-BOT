@@ -148,6 +148,38 @@ class DatabaseManager:
         cur.execute("UPDATE virtual_assistants SET tg_group_id = ? WHERE name = ?", (tg_group_id, va_name))
         self.conn.commit()
 
+    # ==================== SCHEDULE CONFIG ====================
+    def get_schedule_config(self, va_name: str, category: str, day_of_week: int):
+        """Devuelve la fila de schedule_config para el set, o None si no existe."""
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT * FROM schedule_config WHERE va_name = ? AND category = ? AND day_of_week = ?",
+            (va_name, category, day_of_week),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    def set_schedule_config(self, va_name: str, category: str, day_of_week: int, time_slots: list):
+        """Inserta o reemplaza el schedule de un set para un día."""
+        import json
+        cur = self.conn.cursor()
+        cur.execute(
+            """INSERT OR REPLACE INTO schedule_config
+               (va_name, category, day_of_week, time_slots)
+               VALUES (?, ?, ?, ?)""",
+            (va_name, category, day_of_week, json.dumps(time_slots)),
+        )
+        self.conn.commit()
+
+    def delete_schedule_config(self, va_name: str, category: str, day_of_week: int):
+        """Elimina la config de un set para un día — el set volverá al fallback DEFAULT_SCHEDULE."""
+        cur = self.conn.cursor()
+        cur.execute(
+            "DELETE FROM schedule_config WHERE va_name = ? AND category = ? AND day_of_week = ?",
+            (va_name, category, day_of_week),
+        )
+        self.conn.commit()
+
     # ==================== CUENTAS ====================
     def get_all_accounts(self):
         cur = self.conn.cursor()

@@ -84,5 +84,47 @@ class ScheduleConfigTableTest(unittest.TestCase):
         db.close()
 
 
+class ScheduleConfigCRUDTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp_db_fd, self.tmp_db_path = tempfile.mkstemp(suffix=".db")
+        os.close(self.tmp_db_fd)
+        import database
+        self._original_db_path = database.DB_PATH
+        database.DB_PATH = self.tmp_db_path
+        from database import DatabaseManager
+        self.db = DatabaseManager()
+
+    def tearDown(self):
+        self.db.close()
+        import database
+        database.DB_PATH = self._original_db_path
+        if os.path.exists(self.tmp_db_path):
+            os.unlink(self.tmp_db_path)
+
+    def test_set_and_get_schedule_config(self):
+        self.db.set_schedule_config("VA1", "promo", 0, ["8:00 AM", "1:00 PM"])
+        row = self.db.get_schedule_config("VA1", "promo", 0)
+        self.assertIsNotNone(row)
+        import json
+        slots = json.loads(row["time_slots"])
+        self.assertEqual(slots, ["8:00 AM", "1:00 PM"])
+
+    def test_get_returns_none_when_missing(self):
+        row = self.db.get_schedule_config("NoExiste", "promo", 0)
+        self.assertIsNone(row)
+
+    def test_set_overwrites_existing(self):
+        self.db.set_schedule_config("VA1", "promo", 0, ["8:00 AM"])
+        self.db.set_schedule_config("VA1", "promo", 0, ["9:00 PM", "11:00 PM"])
+        row = self.db.get_schedule_config("VA1", "promo", 0)
+        import json
+        self.assertEqual(json.loads(row["time_slots"]), ["9:00 PM", "11:00 PM"])
+
+    def test_delete_schedule_config(self):
+        self.db.set_schedule_config("VA1", "promo", 0, ["8:00 AM"])
+        self.db.delete_schedule_config("VA1", "promo", 0)
+        self.assertIsNone(self.db.get_schedule_config("VA1", "promo", 0))
+
+
 if __name__ == "__main__":
     unittest.main()
