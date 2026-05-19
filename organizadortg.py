@@ -46,6 +46,53 @@ def get_slots_for_set(va_name: str, category: str, day_of_week: int, db_manager)
     return DEFAULT_SCHEDULE[day_of_week]
 
 
+# --- 1.6. TIMEZONE CONVERSION ---
+TIMEZONE_LABELS = {
+    "America/New_York":               ("ET",  "Nueva York"),
+    "America/Argentina/Buenos_Aires": ("ART", "Buenos Aires"),
+    "America/Chicago":                ("CT",  "Chicago"),
+    "America/Los_Angeles":            ("PT",  "Los Ángeles"),
+    "Europe/Madrid":                  ("CET", "Madrid"),
+    "Europe/London":                  ("GMT", "Londres"),
+}
+
+
+def convert_et_to_va_tz(time_str: str, va_tz_str: str) -> tuple:
+    """
+    Convierte una hora ET (formato '8:00 AM' o '7:00 PM') al timezone de la VA.
+    Devuelve dos strings listos para el mensaje:
+        ("8:00 AM ET (Nueva York)", "9:00 AM ART (Buenos Aires)")
+
+    Si va_tz_str es inválido, cae a Buenos Aires.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo  # type: ignore
+
+    et_tz = ZoneInfo("America/New_York")
+    try:
+        va_tz = ZoneInfo(va_tz_str)
+    except Exception:
+        va_tz_str = "America/Argentina/Buenos_Aires"
+        va_tz = ZoneInfo(va_tz_str)
+
+    # Parsea "8:00 AM" combinándolo con la fecha de hoy en ET
+    today_et = datetime.now(et_tz).date()
+    naive = datetime.strptime(time_str.strip(), "%I:%M %p")
+    et_dt = datetime.combine(today_et, naive.time(), tzinfo=et_tz)
+    local_dt = et_dt.astimezone(va_tz)
+
+    et_abbr, et_city = TIMEZONE_LABELS["America/New_York"]
+    local_abbr, local_city = TIMEZONE_LABELS.get(
+        va_tz_str, (va_tz_str.split("/")[-1], va_tz_str.split("/")[-1])
+    )
+
+    et_label = f"{et_dt.strftime('%I:%M %p').lstrip('0')} {et_abbr} ({et_city})"
+    local_label = f"{local_dt.strftime('%I:%M %p').lstrip('0')} {local_abbr} ({local_city})"
+    return et_label, local_label
+
+
 # --- 2. GESTIÓN DE PERSISTENCIA ---
 def load_json(path):
     if os.path.exists(path):
