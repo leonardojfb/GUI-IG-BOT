@@ -51,6 +51,28 @@ CREATE TABLE IF NOT EXISTS fingerprint_history (
     status TEXT DEFAULT 'pending',
     FOREIGN KEY (account_id) REFERENCES virtual_accounts(id)
 );
+
+CREATE TABLE IF NOT EXISTS metadata_fingerprints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_hash   TEXT NOT NULL,
+    account_id   INTEGER,
+    iphone_model TEXT NOT NULL,
+    city         TEXT NOT NULL,
+    lat          TEXT NOT NULL,
+    lon          TEXT NOT NULL,
+    carrier      TEXT NOT NULL,
+    ios_version  TEXT NOT NULL,
+    used_at      TEXT,
+    UNIQUE(iphone_model, city, carrier, ios_version)
+);
+
+CREATE TABLE IF NOT EXISTS schedule_config (
+    va_name     TEXT NOT NULL,
+    category    TEXT NOT NULL,
+    day_of_week INTEGER NOT NULL,
+    time_slots  TEXT NOT NULL,
+    PRIMARY KEY (va_name, category, day_of_week)
+);
 """
 
 class DatabaseManager:
@@ -64,11 +86,26 @@ class DatabaseManager:
         """Crea todas las tablas necesarias usando el SCHEMA global."""
         try:
             cursor = self.conn.cursor()
-            cursor.executescript(SCHEMA) # <--- Esto crea TODAS las tablas del SCHEMA de un solo golpe
+            cursor.executescript(SCHEMA)
             self.conn.commit()
-            print("✅ Base de datos V6 sincronizada con el SCHEMA correcto.")
         except Exception as e:
-            print(f"❌ Error inicializando base de datos: {e}")
+            print(f"Error inicializando base de datos: {e}")
+        self._migrate_columns()
+
+    def _migrate_columns(self):
+        """Agrega columnas nuevas si aún no existen (migraciones no destructivas)."""
+        migrations = [
+            "ALTER TABLE virtual_accounts ADD COLUMN ig_status TEXT DEFAULT 'unknown'",
+            "ALTER TABLE virtual_accounts ADD COLUMN ig_label  TEXT DEFAULT 'nuevo'",
+            "ALTER TABLE virtual_assistants ADD COLUMN timezone TEXT DEFAULT 'America/Argentina/Buenos_Aires'",
+        ]
+        cur = self.conn.cursor()
+        for sql in migrations:
+            try:
+                cur.execute(sql)
+                self.conn.commit()
+            except Exception:
+                pass  # Columna ya existe
 
     def close(self):
         if self.conn: self.conn.close()
@@ -111,6 +148,53 @@ class DatabaseManager:
         cur.execute("UPDATE virtual_assistants SET tg_group_id = ? WHERE name = ?", (tg_group_id, va_name))
         self.conn.commit()
 
+    def get_va_timezone(self, va_name: str) -> str:
+        """Devuelve el timezone IANA de una VA. Si la VA no existe o no tiene tz, devuelve ART."""
+        cur = self.conn.cursor()
+        cur.execute("SELECT timezone FROM virtual_assistants WHERE name = ?", (va_name,))
+        row = cur.fetchone()
+        if row and row["timezone"]:
+            return row["timezone"]
+        return "America/Argentina/Buenos_Aires"
+
+    def set_va_timezone(self, va_name: str, timezone: str):
+        """Actualiza el timezone IANA de una VA."""
+        cur = self.conn.cursor()
+        cur.execute("UPDATE virtual_assistants SET timezone = ? WHERE name = ?", (timezone, va_name))
+        self.conn.commit()
+
+    # ==================== SCHEDULE CONFIG ====================
+    def get_schedule_config(self, va_name: str, category: str, day_of_week: int):
+        """Devuelve la fila de schedule_config para el set, o None si no existe."""
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT * FROM schedule_config WHERE va_name = ? AND category = ? AND day_of_week = ?",
+            (va_name, category, day_of_week),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    def set_schedule_config(self, va_name: str, category: str, day_of_week: int, time_slots: list):
+        """Inserta o reemplaza el schedule de un set para un día."""
+        import json
+        cur = self.conn.cursor()
+        cur.execute(
+            """INSERT OR REPLACE INTO schedule_config
+               (va_name, category, day_of_week, time_slots)
+               VALUES (?, ?, ?, ?)""",
+            (va_name, category, day_of_week, json.dumps(time_slots)),
+        )
+        self.conn.commit()
+
+    def delete_schedule_config(self, va_name: str, category: str, day_of_week: int):
+        """Elimina la config de un set para un día — el set volverá al fallback DEFAULT_SCHEDULE."""
+        cur = self.conn.cursor()
+        cur.execute(
+            "DELETE FROM schedule_config WHERE va_name = ? AND category = ? AND day_of_week = ?",
+            (va_name, category, day_of_week),
+        )
+        self.conn.commit()
+
     # ==================== CUENTAS ====================
     def get_all_accounts(self):
         cur = self.conn.cursor()
@@ -142,6 +226,14 @@ class DatabaseManager:
         cur.execute("DELETE FROM virtual_accounts WHERE username = ?", (username,))
         self.conn.commit()
 
+    def get_accounts_by_type(self, account_type: str) -> list[str]:
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT username FROM virtual_accounts WHERE account_type = ? ORDER BY username",
+            (account_type,),
+        )
+        return [row["username"] for row in cur.fetchall()]
+
     # ==================== TANDAS ====================
     def get_all_tandas(self):
         cur = self.conn.cursor()
@@ -156,11 +248,24 @@ class DatabaseManager:
         ''', (name, p1, p2, captions))
         self.conn.commit()
 
+    def get_tandas(self, active_only=False):
+        """Alias de get_all_tandas para compatibilidad."""
+        return self.get_all_tandas()
+
     def get_tanda_by_name(self, name):
         cur = self.conn.cursor()
         cur.execute("SELECT * FROM batch_tandas WHERE tanda_name = ?", (name,))
         row = cur.fetchone()
         return dict(row) if row else None
+
+    def get_video_types(self):
+        """Devuelve los tipos de video derivados de las categorías existentes."""
+        cats = self.get_categories()
+        return [{"type_name": c, "is_active": 1} for c in cats]
+
+    def get_mix_rules(self, active_only=False):
+        """Devuelve lista vacía — las reglas legacy no se usan en V6."""
+        return []
 
     # ==================== HISTORIAL ====================
     def add_video_to_history(self, account_id, video_path, p1, p2, caption, day):
@@ -178,3 +283,31 @@ class DatabaseManager:
             self.conn.commit()
         except sqlite3.OperationalError as e:
             print(f"❌ Error de columna: {e}. Es necesario resetear la base de datos.")
+
+    # ==================== METADATA FINGERPRINTS ====================
+    def get_all_used_metadata_combos(self):
+        """Devuelve un set de tuplas (model, city, carrier, ios) ya usadas históricamente."""
+        cur = self.conn.cursor()
+        try:
+            cur.execute("SELECT iphone_model, city, carrier, ios_version FROM metadata_fingerprints")
+            return {(r[0], r[1], r[2], r[3]) for r in cur.fetchall()}
+        except Exception:
+            return set()
+
+    def save_metadata_fingerprints(self, fingerprints: list):
+        """Inserta batch de fingerprints (ignora duplicados por el UNIQUE constraint)."""
+        cur = self.conn.cursor()
+        for fp in fingerprints:
+            try:
+                cur.execute('''
+                    INSERT OR IGNORE INTO metadata_fingerprints
+                    (video_hash, account_id, iphone_model, city, lat, lon, carrier, ios_version, used_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                ''', (
+                    fp.get('video_hash', ''), fp.get('account_id'),
+                    fp['iphone_model'], fp['city'], fp['lat'], fp['lon'],
+                    fp['carrier'], fp['ios_version']
+                ))
+            except Exception as e:
+                print(f"⚠️ Error guardando fingerprint: {e}")
+        self.conn.commit()
