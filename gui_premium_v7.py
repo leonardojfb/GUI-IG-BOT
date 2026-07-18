@@ -27,13 +27,14 @@ _ACCT_HIST_FILE = os.path.join(_BASE_DIR, "dist_accounts_history.json")
 from styles.colors import (
     BG_APP, BG_SIDEBAR, BG_CARD, BG_CARD2, BG_INPUT, BORDER,
     NEON_CYAN, NEON_PURPLE, IG_PINK, SUCCESS, WARNING, DANGER, INFO,
+    ACCENT_WEAK, resolve, darken,
     TEXT_H1, TEXT_BODY, TEXT_MUTED,
     FONT_TITLE, FONT_H2, FONT_H3, FONT_BODY, FONT_SMALL, FONT_MONO,
     SIDEBAR_W, STATUS_H, CARD_RADIUS, BTN_RADIUS, BTN_H, BTN_H_LG,
 )
 
 # ── Configuración global de CustomTkinter ──────────────────────────────────
-ctk.set_appearance_mode("dark")
+ctk.set_appearance_mode("system")
 ctk.set_default_color_theme("dark-blue")
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -688,6 +689,7 @@ class InstagramAutoPro(ctk.CTk):
         self.show_frame("Dashboard")
         self._update_clock()
         self.after(250, self._show_startup_greeting)
+        self.after(1600, self._show_update_notice)
 
     def _show_startup_greeting(self):
         """Small startup toast used to verify an installed update visually."""
@@ -725,20 +727,124 @@ class InstagramAutoPro(ctk.CTk):
 
         toast.after(600, fade)
 
+    def _show_update_notice(self):
+        """Show one gentle notice when the silent update check could not run."""
+        status_file = os.path.join(_BASE_DIR, ".update_status.json")
+        try:
+            with open(status_file, "r", encoding="utf-8") as f:
+                status = json.load(f)
+            error = status.get("error", "") if isinstance(status, dict) else ""
+            try:
+                os.remove(status_file)
+            except OSError:
+                pass
+        except (OSError, ValueError, TypeError):
+            return
+
+        if not isinstance(error, str) or not error.strip():
+            return
+
+        toast = ctk.CTkToplevel(self)
+        toast.overrideredirect(True)
+        toast.attributes("-topmost", True)
+        toast.configure(fg_color=BG_CARD)
+
+        width, height = 410, 118
+        self.update_idletasks()
+        x = self.winfo_rootx() + max((self.winfo_width() - width) // 2, 0)
+        y = self.winfo_rooty() + max((self.winfo_height() - height) // 2, 0)
+        toast.geometry(f"{width}x{height}+{x}+{y}")
+
+        card = ctk.CTkFrame(
+            toast, fg_color=BG_CARD2, corner_radius=8,
+            border_width=1, border_color=INFO
+        )
+        card.pack(fill="both", expand=True, padx=1, pady=1)
+        ctk.CTkLabel(
+            card, text="Actualizaciones", text_color=INFO,
+            font=ctk.CTkFont(size=15, weight="bold")
+        ).pack(pady=(16, 4), padx=20)
+        ctk.CTkLabel(
+            card,
+            text=("No se pudieron comprobar actualizaciones. Configura tu token\n"
+                  "en Actualizaciones para no perderte las novedades."),
+            text_color=TEXT_BODY, justify="center",
+            font=ctk.CTkFont(size=12)
+        ).pack(padx=20)
+
+        def fade(alpha=1.0):
+            if alpha <= 0:
+                toast.destroy()
+                return
+            try:
+                toast.attributes("-alpha", alpha)
+            except tk.TclError:
+                toast.after(1200, toast.destroy)
+                return
+            toast.after(70, lambda: fade(alpha - 0.1))
+
+        toast.after(2800, fade)
+
+    def themed(self, value):
+        """Resolve a (light, dark) color token to a single color for the
+        current appearance mode. Use for raw Tk/ttk widgets that cannot
+        consume CustomTkinter tuples."""
+        return resolve(value, ctk.get_appearance_mode())
+
+    def _apply_theme(self, mode: str):
+        """Switch appearance mode and re-color the raw Tk/ttk widgets that
+        do not auto-update. `mode` is 'Light', 'Dark', or 'System'."""
+        # Hide the window during the recolor so the user never sees CTk's
+        # torn intermediate repaint, then show it fully re-themed. Preserve the
+        # maximized state, which deiconify() would otherwise drop on Windows.
+        prev_state = self.state()
+        try:
+            self.withdraw()
+            ctk.set_appearance_mode(mode)
+            self._restyle_raw_tk()
+            self.update_idletasks()
+        finally:
+            self.deiconify()
+            if prev_state == "zoomed":
+                self.state("zoomed")
+
+    def _on_theme_change(self, choice: str):
+        self._apply_theme({"Claro": "Light", "Oscuro": "Dark", "Sistema": "System"}[choice])
+
+    def _restyle_raw_tk(self):
+        """Re-apply mode-correct colors to the ttk Treeview style and the
+        raw Tk Listboxes (CustomTkinter widgets recolor themselves)."""
+        self._setup_treeview_style()
+        for lb in (getattr(self, "list_tg", None), getattr(self, "forge_lst", None)):
+            if lb is not None:
+                lb.configure(
+                    bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
+                    selectbackground=self.themed(NEON_PURPLE),
+                    highlightbackground=self.themed(BORDER),
+                )
+        if getattr(self, "tree", None) is not None:
+            self.tree.tag_configure("odd",  background=self.themed(BG_CARD2))
+            self.tree.tag_configure("even", background=self.themed(BG_CARD))
+        if getattr(self, "tg_log", None) is not None:
+            self.tg_log.tag_config("INFO", foreground=self.themed(INFO))
+            self.tg_log.tag_config("SUCCESS", foreground=self.themed(SUCCESS))
+            self.tg_log.tag_config("WARNING", foreground=self.themed(WARNING))
+            self.tg_log.tag_config("ERROR", foreground=self.themed(DANGER))
+
     def _setup_treeview_style(self):
         """Aplica tema oscuro premium al ttk.Treeview estándar."""
         style = ttk.Style()
         style.theme_use("default")
         style.configure("Premium.Treeview",
-                        background=BG_CARD2, foreground=TEXT_BODY,
-                        fieldbackground=BG_CARD2, rowheight=28,
+                        background=self.themed(BG_CARD2), foreground=self.themed(TEXT_BODY),
+                        fieldbackground=self.themed(BG_CARD2), rowheight=28,
                         font=FONT_BODY, borderwidth=0)
         style.configure("Premium.Treeview.Heading",
-                        background=BG_CARD, foreground=NEON_CYAN,
+                        background=self.themed(BG_CARD), foreground=self.themed(NEON_CYAN),
                         font=FONT_H3, borderwidth=0, relief="flat")
         style.map("Premium.Treeview",
-                  background=[("selected", NEON_PURPLE)],
-                  foreground=[("selected", TEXT_H1)])
+                  background=[("selected", self.themed(NEON_PURPLE))],
+                  foreground=[("selected", self.themed(TEXT_H1))])
 
     # ── Sidebar ───────────────────────────────────────────────────────────
     def _build_sidebar(self):
@@ -747,7 +853,7 @@ class InstagramAutoPro(ctk.CTk):
             fg_color=BG_SIDEBAR, border_width=1, border_color=BORDER
         )
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(11, weight=1)
+        self.sidebar.grid_rowconfigure(90, weight=1)
         self.sidebar.grid_propagate(False)
 
         # — Logo —
@@ -764,38 +870,51 @@ class InstagramAutoPro(ctk.CTk):
         ctk.CTkFrame(self.sidebar, height=1, fg_color=BORDER).grid(
             row=1, column=0, sticky="ew", padx=16, pady=(4, 8))
 
-        # — Botones de navegación —
-        nav_items = [
-            ("📊   Dashboard",  "Dashboard"),
-            ("⚙️   Admin",      "Equipo"),
-            ("🎬   Tandas",     "Tandas"),
-            ("🚀   Logística",  "Logistica"),
-            ("📲   Telegram",   "Telegram"),
-            ("📡   Cuentas",    "Cuentas"),
-            ("🤖   AI Advisor",  "AIAdvisor"),
-            ("🔮   Forge",       "Forge"),
-            ("Actualizaciones", "Actualizaciones"),
+        # — Navegación agrupada por flujo de trabajo —
+        nav_groups = [
+            ("Contenido",    [("🔮   Forge", "Forge"), ("🎬   Tandas", "Tandas")]),
+            ("Distribución", [("🚀   Logística", "Logistica"), ("📡   Cuentas", "Cuentas"),
+                              ("📲   Telegram", "Telegram")]),
+            ("Control",      [("📊   Dashboard", "Dashboard")]),
+            ("Sistema",      [("⚙️   Admin", "Equipo"), ("⬇   Actualizaciones", "Actualizaciones")]),
         ]
         self._nav_btns = {}
-        for i, (label, key) in enumerate(nav_items):
-            btn = ctk.CTkButton(
-                self.sidebar, text=label, anchor="w",
-                height=42, corner_radius=BTN_RADIUS,
-                font=ctk.CTkFont(family="Arial", size=13),
-                fg_color="transparent", text_color=TEXT_BODY,
-                hover_color=BG_CARD2, border_width=0,
-                command=lambda k=key: self.show_frame(k)
-            )
-            btn.grid(row=i + 2, column=0, padx=10, pady=2, sticky="ew")
-            self._nav_btns[key] = btn
+        row = 2
+        for group_name, items in nav_groups:
+            ctk.CTkLabel(self.sidebar, text=group_name.upper(), anchor="w",
+                         font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+                         text_color=TEXT_MUTED).grid(row=row, column=0, padx=18,
+                                                     pady=(10, 2), sticky="w")
+            row += 1
+            for label, key in items:
+                btn = ctk.CTkButton(
+                    self.sidebar, text=label, anchor="w",
+                    height=40, corner_radius=BTN_RADIUS,
+                    font=ctk.CTkFont(family="Segoe UI", size=13),
+                    fg_color="transparent", text_color=TEXT_BODY,
+                    hover_color=BG_CARD2, border_width=0,
+                    command=lambda k=key: self.show_frame(k)
+                )
+                btn.grid(row=row, column=0, padx=10, pady=2, sticky="ew")
+                self._nav_btns[key] = btn
+                row += 1
+
+        # — Selector de tema —
+        self.theme_seg = ctk.CTkSegmentedButton(
+            self.sidebar, values=["Claro", "Oscuro", "Sistema"],
+            command=self._on_theme_change,
+            font=ctk.CTkFont(family="Segoe UI", size=11), height=28,
+        )
+        self.theme_seg.set("Sistema")
+        self.theme_seg.grid(row=91, column=0, padx=14, pady=(8, 4), sticky="ew")
 
         # — Status del bot (parte inferior sidebar) —
         ctk.CTkFrame(self.sidebar, height=1, fg_color=BORDER).grid(
-            row=12, column=0, sticky="ew", padx=16, pady=(8, 4))
+            row=92, column=0, sticky="ew", padx=16, pady=(8, 4))
         self.lbl_bot_status = ctk.CTkLabel(
             self.sidebar, text="⬤  Bot inactivo",
             font=ctk.CTkFont(size=11), text_color=TEXT_MUTED)
-        self.lbl_bot_status.grid(row=13, column=0, padx=18, pady=(0, 18), sticky="sw")
+        self.lbl_bot_status.grid(row=93, column=0, padx=18, pady=(0, 18), sticky="sw")
 
     def set_bot_status(self, active: bool):
         """Actualiza indicador de bot en la sidebar."""
@@ -852,8 +971,16 @@ class InstagramAutoPro(ctk.CTk):
                 fg_color="transparent", text_color=TEXT_BODY)
         if name in self._nav_btns:
             self._nav_btns[name].configure(
-                fg_color=BG_CARD2, text_color=NEON_CYAN)
+                fg_color=ACCENT_WEAK, text_color=NEON_CYAN)
         self._active_nav = name
+        # Keep only the visible frame under geometry management; the other eight
+        # (each with scrollable content) stay built but unmanaged, so a resize
+        # or maximize repaints one frame instead of all nine — kills the lag.
+        for fname, fr in self._frames.items():
+            if fname == name:
+                fr.grid()
+            elif fr.winfo_manager():
+                fr.grid_remove()
         self._frames[name].tkraise()
         if name == "Cuentas" and hasattr(self, "_cuentas_panel"):
             self._cuentas_panel.refresh()
@@ -1101,8 +1228,8 @@ class InstagramAutoPro(ctk.CTk):
         sb.grid(row=1, column=1, sticky="ns", pady=(0, 8), padx=(0, 4))
 
         # Tags de color alternado
-        self.tree.tag_configure("odd",  background=BG_CARD2)
-        self.tree.tag_configure("even", background=BG_CARD)
+        self.tree.tag_configure("odd",  background=self.themed(BG_CARD2))
+        self.tree.tag_configure("even", background=self.themed(BG_CARD))
 
         # ── Botones de acción ────────────────────────────────────────────
         btn_bar = ctk.CTkFrame(f, fg_color="transparent")
@@ -1146,13 +1273,9 @@ class InstagramAutoPro(ctk.CTk):
                      corner_radius=2).pack(fill="x", pady=(8, 0))
         return lbl_val
 
-    def _darken(self, hex_color: str) -> str:
-        """Devuelve una versión ligeramente más oscura del color."""
-        r = int(hex_color[1:3], 16)
-        g = int(hex_color[3:5], 16)
-        b = int(hex_color[5:7], 16)
-        factor = 0.75
-        return f"#{int(r*factor):02x}{int(g*factor):02x}{int(b*factor):02x}"
+    def _darken(self, color, factor=0.75):
+        """Versión más oscura del color. Acepta hex o tupla (light, dark)."""
+        return darken(color, factor)
 
     # ── Lógica Dashboard ─────────────────────────────────────────────────────
     def refresh_dashboard(self):
@@ -2702,9 +2825,11 @@ class InstagramAutoPro(ctk.CTk):
         # NO se ejecuta .grid() aquí — se invoca en _toggle_schedule_panel al expandir
 
         # Fila 4: listbox con selección múltiple
-        self.list_tg = tk.Listbox(ctrl_card, bg=BG_INPUT, fg=TEXT_BODY, selectbackground=NEON_PURPLE,
+        self.list_tg = tk.Listbox(ctrl_card, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
+                                  selectbackground=self.themed(NEON_PURPLE),
                                   selectmode=tk.EXTENDED,
-                                  borderwidth=0, highlightthickness=1, highlightbackground=BORDER, font=FONT_BODY)
+                                  borderwidth=0, highlightthickness=1,
+                                  highlightbackground=self.themed(BORDER), font=FONT_BODY)
         self.list_tg.grid(row=4, column=0, sticky="nsew", padx=20, pady=(0, 10))
 
         # Controles inferiores
@@ -2747,10 +2872,10 @@ class InstagramAutoPro(ctk.CTk):
                                      border_width=1, border_color=BORDER)
         self.tg_log.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 20))
         
-        self.tg_log.tag_config("INFO", foreground=INFO)
-        self.tg_log.tag_config("SUCCESS", foreground=SUCCESS)
-        self.tg_log.tag_config("WARNING", foreground=WARNING)
-        self.tg_log.tag_config("ERROR", foreground=DANGER)
+        self.tg_log.tag_config("INFO", foreground=self.themed(INFO))
+        self.tg_log.tag_config("SUCCESS", foreground=self.themed(SUCCESS))
+        self.tg_log.tag_config("WARNING", foreground=self.themed(WARNING))
+        self.tg_log.tag_config("ERROR", foreground=self.themed(DANGER))
         
         self.pb_tg = ctk.CTkProgressBar(log_card, fg_color=BG_INPUT, progress_color=NEON_CYAN)
         self.pb_tg.grid(row=2, column=0, sticky="ew", padx=20, pady=(0, 20))
@@ -3166,9 +3291,9 @@ class InstagramAutoPro(ctk.CTk):
         self.forge_lbl_count.pack(side="right")
 
         self.forge_lst = tk.Listbox(
-            card_vids, bg=BG_INPUT, fg=TEXT_BODY,
-            selectbackground=NEON_PURPLE, selectmode=tk.EXTENDED,
-            borderwidth=0, highlightthickness=1, highlightbackground=BORDER,
+            card_vids, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
+            selectbackground=self.themed(NEON_PURPLE), selectmode=tk.EXTENDED,
+            borderwidth=0, highlightthickness=1, highlightbackground=self.themed(BORDER),
             font=FONT_BODY, height=9
         )
         self.forge_lst.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 6))

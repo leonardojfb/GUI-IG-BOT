@@ -1,41 +1,74 @@
 """
 Design System — Instagram Automation Pro V7
-Inspirado en patrones de SaaS dashboards modernos (dark mode first).
+Inspirado en patrones de SaaS dashboards modernos (natural light + dark).
 Todos los valores son tokens centralizados; nunca hardcodear colores fuera de este módulo.
 """
 
-# ── Fondos ──────────────────────────────────────────────────────────────────
-BG_APP     = "#0a0a12"   # Fondo raíz de la ventana
-BG_SIDEBAR = "#0f0f1a"   # Panel de navegación lateral
-BG_CARD    = "#13131f"   # Cards primarias
-BG_CARD2   = "#1a1a2e"   # Cards secundarias / hover states
-BG_INPUT   = "#1e1e30"   # Campos de entrada
-BORDER     = "#2a2a40"   # Bordes y separadores
+# ── Fondos ── (light, dark) ────────────────────────────────────────────────
+BG_APP     = ("#e5e1d3", "#16181d")   # Fondo raíz de la ventana (beige cálido)
+BG_SIDEBAR = ("#dcd7c6", "#1b1e25")   # Panel de navegación lateral
+BG_CARD    = ("#efece2", "#22262e")   # Cards primarias (crema, no blanco puro)
+BG_CARD2   = ("#e3dece", "#2a2f38")   # Cards secundarias / hover
+BG_INPUT   = ("#eae6d9", "#262b33")   # Campos de entrada
+BORDER     = ("#ccc6b4", "#333944")   # Bordes y separadores
 
-# ── Acentos de marca ─────────────────────────────────────────────────────────
-NEON_CYAN   = "#00f5d4"  # CTA primario, highlights activos
-NEON_PURPLE = "#7c3aed"  # Indicadores secundarios
-IG_PINK     = "#e1306c"  # Identidad Instagram / acciones destructivas
-IG_ORANGE   = "#f77737"  # Gradiente Instagram alternativo
+# ── Acentos ── (light, dark) ────────────────────────────────────────────────
+NEON_CYAN   = ("#2f8f7d", "#4db6a2")  # Acento primario (teal-sage), CTA, nav activo
+ACCENT_WEAK = ("#dcefe9", "#223a37")  # Fondo del nav activo
+NEON_PURPLE = ("#5b7fb0", "#7f9fcf")  # Acento secundario (slate-blue apagado)
+IG_PINK     = ("#c9564e", "#e07a6f")  # Acciones destructivas (rosa apagado)
+IG_ORANGE   = ("#c2872f", "#e0a94e")  # Ámbar apagado
 
-# ── Semánticos ───────────────────────────────────────────────────────────────
-SUCCESS = "#10b981"   # Operación exitosa
-WARNING = "#f59e0b"   # Advertencia
-DANGER  = "#ef4444"   # Error / eliminar
-INFO    = "#3b82f6"   # Información / neutral
+# ── Semánticos ── (light, dark) ─────────────────────────────────────────────
+SUCCESS = ("#3f9d6d", "#54b184")
+WARNING = ("#c2872f", "#e0a94e")
+DANGER  = ("#c9564e", "#e07a6f")
+INFO    = ("#4a7fb0", "#6398c9")
 
-# ── Tipografía ───────────────────────────────────────────────────────────────
-TEXT_H1    = "#f1f5f9"   # Títulos principales
-TEXT_BODY  = "#cbd5e1"   # Cuerpo de texto
-TEXT_MUTED = "#64748b"   # Textos secundarios / placeholders
+# ── Tipografía ── (light, dark) ─────────────────────────────────────────────
+TEXT_H1    = ("#2a2925", "#e9eaec")   # Títulos
+TEXT_BODY  = ("#55534c", "#bdc2ca")   # Cuerpo
+TEXT_MUTED = ("#8b887f", "#7d838d")   # Secundario / placeholder
+
+# ── Aliases semánticos (nombres claros para código nuevo) ────────────────────
+GROUND      = BG_APP
+RAIL        = BG_SIDEBAR
+SURFACE     = BG_CARD
+SURFACE2    = BG_CARD2
+LINE        = BORDER
+ACCENT      = NEON_CYAN
 
 # ── Fuentes ──────────────────────────────────────────────────────────────────
-FONT_TITLE  = ("Arial", 22, "bold")
-FONT_H2     = ("Arial", 15, "bold")
-FONT_H3     = ("Arial", 12, "bold")
-FONT_BODY   = ("Arial", 12)
-FONT_SMALL  = ("Arial", 10)
+FONT_TITLE  = ("Segoe UI", 22, "bold")
+FONT_H2     = ("Segoe UI", 15, "bold")
+FONT_H3     = ("Segoe UI", 12, "bold")
+FONT_BODY   = ("Segoe UI", 12)
+FONT_SMALL  = ("Segoe UI", 10)
 FONT_MONO   = ("Consolas", 10)  # Para logs y output técnico
+
+
+def resolve(value, mode):
+    """Return the single color for the given CTk appearance mode.
+
+    `value` may be a (light, dark) tuple/list or a plain color string. `mode`
+    is a CTk appearance-mode string like "Light"/"Dark"/"System" (case-
+    insensitive). Non-"dark" modes resolve to the light color. Plain strings
+    pass through unchanged.
+    """
+    if isinstance(value, (tuple, list)):
+        return value[1] if str(mode).lower() == "dark" else value[0]
+    return value
+
+def darken(value, factor=0.75):
+    """Return a slightly darker version of a color. Accepts a hex string or a
+    (light, dark) tuple/list and returns the same shape (so it is safe to pass
+    a themed token straight into a CustomTkinter `hover_color`)."""
+    if isinstance(value, (tuple, list)):
+        return tuple(darken(c, factor) for c in value)
+    r = int(value[1:3], 16)
+    g = int(value[3:5], 16)
+    b = int(value[5:7], 16)
+    return f"#{int(r*factor):02x}{int(g*factor):02x}{int(b*factor):02x}"
 
 # ── Tamaños de componentes ───────────────────────────────────────────────────
 SIDEBAR_W   = 210    # Ancho del sidebar en píxeles

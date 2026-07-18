@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.1",
+    "version":  "1.0.2",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.1",
-    "asset_name":  "MetodoIG-v1.0.1.zip",
-    "sha256":  "b13f5f25214728c2554a7aa96e28ec197250b7d08fed3f8a023dce97ba8d11ab",
-    "notes":  "Entrega inicial con base de datos",
+    "github_release_tag":  "v1.0.2",
+    "asset_name":  "MetodoIG-v1.0.2.zip",
+    "sha256":  "42af15ac48c4463c53d94d2d8e67b5727fcf8b0158936fd3f21592c884069f76",
+    "notes":  "Arranque sin consola, aviso amigable para fallos de actualizacion y mejoras de interfaz.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",
