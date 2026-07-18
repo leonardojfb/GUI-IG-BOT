@@ -3,3 +3,44 @@
 *.avi
 videos/
 node_modules/
+
+# Cliente local: puede contener el token de GitHub del socio.
+update_config.json
+releases/
+release-*test/
+
+# Python and local development
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.vscode/
+.claude/
+
+# Credentials and user-specific configuration
+panel_config.json
+.env
+*.session
+
+# Local application data: never publish this from a client installation
+organizador.db
+*.db-journal
+*.sqlite
+*.sqlite3
+telegram_state_v11.json
+dist_accounts_history.json
+fingerprint_history.json
+captions.txt
+accounts_*.txt
+reporte_organizacion.txt
+archive_legacy/
+
+# Generated media and working folders
+videos_finales/
+CALENDARIO_POSTEO/
+parte1/
+parte2/
+
+# Other local artifacts
+Thumbs.db
+.DS_Store

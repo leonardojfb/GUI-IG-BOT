@@ -1,0 +1,33 @@
+{
+    "version":  "1.0.1",
+    "url":  "",
+    "github_repository":  "leonardojfb/GUI-IG-BOT",
+    "github_release_tag":  "v1.0.1",
+    "asset_name":  "MetodoIG-v1.0.1.zip",
+    "sha256":  "f4b4d3eec7c2c76bffde9906204ff74bf58f509faf29767f6eca1455c546f628",
+    "notes":  "Prueba de actualizacion 1.0.1: saludo inicial",
+    "files":  [
+                  "Abrir GUI.bat",
+                  "Instalar GUI.bat",
+                  "launch_gui.bat",
+                  "launcher.py",
+                  "updater.py",
+                  "version.json",
+                  "requirements.txt",
+                  "gui_premium_v7.py",
+                  "gui_unificada.py",
+                  "gui_organizador.py",
+                  "organizador_simple.py",
+                  "Organizador.py",
+                  "database.py",
+                  "organizadortg.py",
+                  "videos.py",
+                  "metadata_pool.py",
+                  "telegram_core.py",
+                  "cleaner.py",
+                  "vercuentas.py",
+                  "logo_elittisse.svg",
+                  "styles/colors.py",
+                  "styles/__init__.py"
+              ]
+}
