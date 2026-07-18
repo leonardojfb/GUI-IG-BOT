@@ -5,12 +5,12 @@ Todos los valores son tokens centralizados; nunca hardcodear colores fuera de es
 """
 
 # ── Fondos ── (light, dark) ────────────────────────────────────────────────
-BG_APP     = ("#f5f4f0", "#16181d")   # Fondo raíz de la ventana
-BG_SIDEBAR = ("#edece6", "#1b1e25")   # Panel de navegación lateral
-BG_CARD    = ("#ffffff", "#22262e")   # Cards primarias
-BG_CARD2   = ("#f0efe9", "#2a2f38")   # Cards secundarias / hover
-BG_INPUT   = ("#f3f2ec", "#262b33")   # Campos de entrada
-BORDER     = ("#e3e1d8", "#333944")   # Bordes y separadores
+BG_APP     = ("#e5e1d3", "#16181d")   # Fondo raíz de la ventana (beige cálido)
+BG_SIDEBAR = ("#dcd7c6", "#1b1e25")   # Panel de navegación lateral
+BG_CARD    = ("#efece2", "#22262e")   # Cards primarias (crema, no blanco puro)
+BG_CARD2   = ("#e3dece", "#2a2f38")   # Cards secundarias / hover
+BG_INPUT   = ("#eae6d9", "#262b33")   # Campos de entrada
+BORDER     = ("#ccc6b4", "#333944")   # Bordes y separadores
 
 # ── Acentos ── (light, dark) ────────────────────────────────────────────────
 NEON_CYAN   = ("#2f8f7d", "#4db6a2")  # Acento primario (teal-sage), CTA, nav activo

@@ -735,8 +735,19 @@ class InstagramAutoPro(ctk.CTk):
     def _apply_theme(self, mode: str):
         """Switch appearance mode and re-color the raw Tk/ttk widgets that
         do not auto-update. `mode` is 'Light', 'Dark', or 'System'."""
-        ctk.set_appearance_mode(mode)
-        self._restyle_raw_tk()
+        # Hide the window during the recolor so the user never sees CTk's
+        # torn intermediate repaint, then show it fully re-themed. Preserve the
+        # maximized state, which deiconify() would otherwise drop on Windows.
+        prev_state = self.state()
+        try:
+            self.withdraw()
+            ctk.set_appearance_mode(mode)
+            self._restyle_raw_tk()
+            self.update_idletasks()
+        finally:
+            self.deiconify()
+            if prev_state == "zoomed":
+                self.state("zoomed")
 
     def _on_theme_change(self, choice: str):
         self._apply_theme({"Claro": "Light", "Oscuro": "Dark", "Sistema": "System"}[choice])
@@ -903,6 +914,14 @@ class InstagramAutoPro(ctk.CTk):
             self._nav_btns[name].configure(
                 fg_color=ACCENT_WEAK, text_color=NEON_CYAN)
         self._active_nav = name
+        # Keep only the visible frame under geometry management; the other eight
+        # (each with scrollable content) stay built but unmanaged, so a resize
+        # or maximize repaints one frame instead of all nine — kills the lag.
+        for fname, fr in self._frames.items():
+            if fname == name:
+                fr.grid()
+            elif fr.winfo_manager():
+                fr.grid_remove()
         self._frames[name].tkraise()
         if name == "Cuentas" and hasattr(self, "_cuentas_panel"):
             self._cuentas_panel.refresh()
