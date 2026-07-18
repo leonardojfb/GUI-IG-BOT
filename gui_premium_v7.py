@@ -752,6 +752,9 @@ class InstagramAutoPro(ctk.CTk):
                     selectbackground=self.themed(NEON_PURPLE),
                     highlightbackground=self.themed(BORDER),
                 )
+        if getattr(self, "tree", None) is not None:
+            self.tree.tag_configure("odd",  background=self.themed(BG_CARD2))
+            self.tree.tag_configure("even", background=self.themed(BG_CARD))
 
     def _setup_treeview_style(self):
         """Aplica tema oscuro premium al ttk.Treeview estándar."""
@@ -1142,8 +1145,8 @@ class InstagramAutoPro(ctk.CTk):
         sb.grid(row=1, column=1, sticky="ns", pady=(0, 8), padx=(0, 4))
 
         # Tags de color alternado
-        self.tree.tag_configure("odd",  background=BG_CARD2)
-        self.tree.tag_configure("even", background=BG_CARD)
+        self.tree.tag_configure("odd",  background=self.themed(BG_CARD2))
+        self.tree.tag_configure("even", background=self.themed(BG_CARD))
 
         # ── Botones de acción ────────────────────────────────────────────
         btn_bar = ctk.CTkFrame(f, fg_color="transparent")
