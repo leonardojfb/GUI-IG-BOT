@@ -755,6 +755,11 @@ class InstagramAutoPro(ctk.CTk):
         if getattr(self, "tree", None) is not None:
             self.tree.tag_configure("odd",  background=self.themed(BG_CARD2))
             self.tree.tag_configure("even", background=self.themed(BG_CARD))
+        if getattr(self, "tg_log", None) is not None:
+            self.tg_log.tag_config("INFO", foreground=self.themed(INFO))
+            self.tg_log.tag_config("SUCCESS", foreground=self.themed(SUCCESS))
+            self.tg_log.tag_config("WARNING", foreground=self.themed(WARNING))
+            self.tg_log.tag_config("ERROR", foreground=self.themed(DANGER))
 
     def _setup_treeview_style(self):
         """Aplica tema oscuro premium al ttk.Treeview estándar."""
@@ -2789,10 +2794,10 @@ class InstagramAutoPro(ctk.CTk):
                                      border_width=1, border_color=BORDER)
         self.tg_log.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 20))
         
-        self.tg_log.tag_config("INFO", foreground=INFO)
-        self.tg_log.tag_config("SUCCESS", foreground=SUCCESS)
-        self.tg_log.tag_config("WARNING", foreground=WARNING)
-        self.tg_log.tag_config("ERROR", foreground=DANGER)
+        self.tg_log.tag_config("INFO", foreground=self.themed(INFO))
+        self.tg_log.tag_config("SUCCESS", foreground=self.themed(SUCCESS))
+        self.tg_log.tag_config("WARNING", foreground=self.themed(WARNING))
+        self.tg_log.tag_config("ERROR", foreground=self.themed(DANGER))
         
         self.pb_tg = ctk.CTkProgressBar(log_card, fg_color=BG_INPUT, progress_color=NEON_CYAN)
         self.pb_tg.grid(row=2, column=0, sticky="ew", padx=20, pady=(0, 20))
