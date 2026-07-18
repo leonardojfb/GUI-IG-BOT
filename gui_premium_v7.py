@@ -792,30 +792,34 @@ class InstagramAutoPro(ctk.CTk):
         ctk.CTkFrame(self.sidebar, height=1, fg_color=BORDER).grid(
             row=1, column=0, sticky="ew", padx=16, pady=(4, 8))
 
-        # — Botones de navegación —
-        nav_items = [
-            ("📊   Dashboard",  "Dashboard"),
-            ("⚙️   Admin",      "Equipo"),
-            ("🎬   Tandas",     "Tandas"),
-            ("🚀   Logística",  "Logistica"),
-            ("📲   Telegram",   "Telegram"),
-            ("📡   Cuentas",    "Cuentas"),
-            ("🤖   AI Advisor",  "AIAdvisor"),
-            ("🔮   Forge",       "Forge"),
-            ("Actualizaciones", "Actualizaciones"),
+        # — Navegación agrupada por flujo de trabajo —
+        nav_groups = [
+            ("Contenido",    [("🔮   Forge", "Forge"), ("🎬   Tandas", "Tandas")]),
+            ("Distribución", [("🚀   Logística", "Logistica"), ("📡   Cuentas", "Cuentas"),
+                              ("📲   Telegram", "Telegram")]),
+            ("Control",      [("📊   Dashboard", "Dashboard")]),
+            ("Sistema",      [("⚙️   Admin", "Equipo"), ("⬇   Actualizaciones", "Actualizaciones")]),
         ]
         self._nav_btns = {}
-        for i, (label, key) in enumerate(nav_items):
-            btn = ctk.CTkButton(
-                self.sidebar, text=label, anchor="w",
-                height=42, corner_radius=BTN_RADIUS,
-                font=ctk.CTkFont(family="Arial", size=13),
-                fg_color="transparent", text_color=TEXT_BODY,
-                hover_color=BG_CARD2, border_width=0,
-                command=lambda k=key: self.show_frame(k)
-            )
-            btn.grid(row=i + 2, column=0, padx=10, pady=2, sticky="ew")
-            self._nav_btns[key] = btn
+        row = 2
+        for group_name, items in nav_groups:
+            ctk.CTkLabel(self.sidebar, text=group_name.upper(), anchor="w",
+                         font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+                         text_color=TEXT_MUTED).grid(row=row, column=0, padx=18,
+                                                     pady=(10, 2), sticky="w")
+            row += 1
+            for label, key in items:
+                btn = ctk.CTkButton(
+                    self.sidebar, text=label, anchor="w",
+                    height=40, corner_radius=BTN_RADIUS,
+                    font=ctk.CTkFont(family="Segoe UI", size=13),
+                    fg_color="transparent", text_color=TEXT_BODY,
+                    hover_color=BG_CARD2, border_width=0,
+                    command=lambda k=key: self.show_frame(k)
+                )
+                btn.grid(row=row, column=0, padx=10, pady=2, sticky="ew")
+                self._nav_btns[key] = btn
+                row += 1
 
         # — Selector de tema —
         self.theme_seg = ctk.CTkSegmentedButton(
@@ -889,7 +893,7 @@ class InstagramAutoPro(ctk.CTk):
                 fg_color="transparent", text_color=TEXT_BODY)
         if name in self._nav_btns:
             self._nav_btns[name].configure(
-                fg_color=BG_CARD2, text_color=NEON_CYAN)
+                fg_color=ACCENT_WEAK, text_color=NEON_CYAN)
         self._active_nav = name
         self._frames[name].tkraise()
         if name == "Cuentas" and hasattr(self, "_cuentas_panel"):
