@@ -59,6 +59,17 @@ def resolve(value, mode):
         return value[1] if str(mode).lower() == "dark" else value[0]
     return value
 
+def darken(value, factor=0.75):
+    """Return a slightly darker version of a color. Accepts a hex string or a
+    (light, dark) tuple/list and returns the same shape (so it is safe to pass
+    a themed token straight into a CustomTkinter `hover_color`)."""
+    if isinstance(value, (tuple, list)):
+        return tuple(darken(c, factor) for c in value)
+    r = int(value[1:3], 16)
+    g = int(value[3:5], 16)
+    b = int(value[5:7], 16)
+    return f"#{int(r*factor):02x}{int(g*factor):02x}{int(b*factor):02x}"
+
 # ── Tamaños de componentes ───────────────────────────────────────────────────
 SIDEBAR_W   = 210    # Ancho del sidebar en píxeles
 STATUS_H    = 28     # Alto de la status bar

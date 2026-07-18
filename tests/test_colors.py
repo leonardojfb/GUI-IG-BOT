@@ -36,6 +36,14 @@ def test_ui_fonts_use_segoe_and_mono_stays_consolas():
     assert colors.FONT_TITLE[0] == "Segoe UI"
     assert colors.FONT_MONO[0] == "Consolas"
 
+def test_darken_string():
+    assert colors.darken("#ffffff") == "#bfbfbf"   # 255*0.75 = 191 = 0xbf
+    assert colors.darken("#000000") == "#000000"
+
+def test_darken_tuple_returns_tuple():
+    out = colors.darken(("#ffffff", "#000000"))
+    assert out == ("#bfbfbf", "#000000")
+
 if __name__ == "__main__":
     for _name, _fn in sorted(globals().items()):
         if _name.startswith("test_") and callable(_fn):

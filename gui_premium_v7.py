@@ -27,7 +27,7 @@ _ACCT_HIST_FILE = os.path.join(_BASE_DIR, "dist_accounts_history.json")
 from styles.colors import (
     BG_APP, BG_SIDEBAR, BG_CARD, BG_CARD2, BG_INPUT, BORDER,
     NEON_CYAN, NEON_PURPLE, IG_PINK, SUCCESS, WARNING, DANGER, INFO,
-    ACCENT_WEAK, resolve,
+    ACCENT_WEAK, resolve, darken,
     TEXT_H1, TEXT_BODY, TEXT_MUTED,
     FONT_TITLE, FONT_H2, FONT_H3, FONT_BODY, FONT_SMALL, FONT_MONO,
     SIDEBAR_W, STATUS_H, CARD_RADIUS, BTN_RADIUS, BTN_H, BTN_H_LG,
@@ -1187,13 +1187,9 @@ class InstagramAutoPro(ctk.CTk):
                      corner_radius=2).pack(fill="x", pady=(8, 0))
         return lbl_val
 
-    def _darken(self, hex_color: str) -> str:
-        """Devuelve una versión ligeramente más oscura del color."""
-        r = int(hex_color[1:3], 16)
-        g = int(hex_color[3:5], 16)
-        b = int(hex_color[5:7], 16)
-        factor = 0.75
-        return f"#{int(r*factor):02x}{int(g*factor):02x}{int(b*factor):02x}"
+    def _darken(self, color, factor=0.75):
+        """Versión más oscura del color. Acepta hex o tupla (light, dark)."""
+        return darken(color, factor)
 
     # ── Lógica Dashboard ─────────────────────────────────────────────────────
     def refresh_dashboard(self):
