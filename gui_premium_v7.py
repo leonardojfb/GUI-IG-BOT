@@ -689,6 +689,7 @@ class InstagramAutoPro(ctk.CTk):
         self.show_frame("Dashboard")
         self._update_clock()
         self.after(250, self._show_startup_greeting)
+        self.after(1600, self._show_update_notice)
 
     def _show_startup_greeting(self):
         """Small startup toast used to verify an installed update visually."""
@@ -725,6 +726,64 @@ class InstagramAutoPro(ctk.CTk):
             toast.after(70, lambda: fade(alpha - 0.1))
 
         toast.after(600, fade)
+
+    def _show_update_notice(self):
+        """Show one gentle notice when the silent update check could not run."""
+        status_file = os.path.join(_BASE_DIR, ".update_status.json")
+        try:
+            with open(status_file, "r", encoding="utf-8") as f:
+                status = json.load(f)
+            error = status.get("error", "") if isinstance(status, dict) else ""
+            try:
+                os.remove(status_file)
+            except OSError:
+                pass
+        except (OSError, ValueError, TypeError):
+            return
+
+        if not isinstance(error, str) or not error.strip():
+            return
+
+        toast = ctk.CTkToplevel(self)
+        toast.overrideredirect(True)
+        toast.attributes("-topmost", True)
+        toast.configure(fg_color=BG_CARD)
+
+        width, height = 410, 118
+        self.update_idletasks()
+        x = self.winfo_rootx() + max((self.winfo_width() - width) // 2, 0)
+        y = self.winfo_rooty() + max((self.winfo_height() - height) // 2, 0)
+        toast.geometry(f"{width}x{height}+{x}+{y}")
+
+        card = ctk.CTkFrame(
+            toast, fg_color=BG_CARD2, corner_radius=8,
+            border_width=1, border_color=INFO
+        )
+        card.pack(fill="both", expand=True, padx=1, pady=1)
+        ctk.CTkLabel(
+            card, text="Actualizaciones", text_color=INFO,
+            font=ctk.CTkFont(size=15, weight="bold")
+        ).pack(pady=(16, 4), padx=20)
+        ctk.CTkLabel(
+            card,
+            text=("No se pudieron comprobar actualizaciones. Configura tu token\n"
+                  "en Actualizaciones para no perderte las novedades."),
+            text_color=TEXT_BODY, justify="center",
+            font=ctk.CTkFont(size=12)
+        ).pack(padx=20)
+
+        def fade(alpha=1.0):
+            if alpha <= 0:
+                toast.destroy()
+                return
+            try:
+                toast.attributes("-alpha", alpha)
+            except tk.TclError:
+                toast.after(1200, toast.destroy)
+                return
+            toast.after(70, lambda: fade(alpha - 0.1))
+
+        toast.after(2800, fade)
 
     def themed(self, value):
         """Resolve a (light, dark) color token to a single color for the

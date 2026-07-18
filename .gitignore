@@ -6,6 +6,7 @@ node_modules/
 
 # Cliente local: puede contener el token de GitHub del socio.
 update_config.json
+.update_status.json
 releases/
 release-*test/
 
