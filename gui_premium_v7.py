@@ -27,13 +27,14 @@ _ACCT_HIST_FILE = os.path.join(_BASE_DIR, "dist_accounts_history.json")
 from styles.colors import (
     BG_APP, BG_SIDEBAR, BG_CARD, BG_CARD2, BG_INPUT, BORDER,
     NEON_CYAN, NEON_PURPLE, IG_PINK, SUCCESS, WARNING, DANGER, INFO,
+    ACCENT_WEAK, resolve,
     TEXT_H1, TEXT_BODY, TEXT_MUTED,
     FONT_TITLE, FONT_H2, FONT_H3, FONT_BODY, FONT_SMALL, FONT_MONO,
     SIDEBAR_W, STATUS_H, CARD_RADIUS, BTN_RADIUS, BTN_H, BTN_H_LG,
 )
 
 # ── Configuración global de CustomTkinter ──────────────────────────────────
-ctk.set_appearance_mode("dark")
+ctk.set_appearance_mode("system")
 ctk.set_default_color_theme("dark-blue")
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -725,20 +726,47 @@ class InstagramAutoPro(ctk.CTk):
 
         toast.after(600, fade)
 
+    def themed(self, value):
+        """Resolve a (light, dark) color token to a single color for the
+        current appearance mode. Use for raw Tk/ttk widgets that cannot
+        consume CustomTkinter tuples."""
+        return resolve(value, ctk.get_appearance_mode())
+
+    def _apply_theme(self, mode: str):
+        """Switch appearance mode and re-color the raw Tk/ttk widgets that
+        do not auto-update. `mode` is 'Light', 'Dark', or 'System'."""
+        ctk.set_appearance_mode(mode)
+        self._restyle_raw_tk()
+
+    def _on_theme_change(self, choice: str):
+        self._apply_theme({"Claro": "Light", "Oscuro": "Dark", "Sistema": "System"}[choice])
+
+    def _restyle_raw_tk(self):
+        """Re-apply mode-correct colors to the ttk Treeview style and the
+        raw Tk Listboxes (CustomTkinter widgets recolor themselves)."""
+        self._setup_treeview_style()
+        for lb in (getattr(self, "list_tg", None), getattr(self, "forge_lst", None)):
+            if lb is not None:
+                lb.configure(
+                    bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
+                    selectbackground=self.themed(NEON_PURPLE),
+                    highlightbackground=self.themed(BORDER),
+                )
+
     def _setup_treeview_style(self):
         """Aplica tema oscuro premium al ttk.Treeview estándar."""
         style = ttk.Style()
         style.theme_use("default")
         style.configure("Premium.Treeview",
-                        background=BG_CARD2, foreground=TEXT_BODY,
-                        fieldbackground=BG_CARD2, rowheight=28,
+                        background=self.themed(BG_CARD2), foreground=self.themed(TEXT_BODY),
+                        fieldbackground=self.themed(BG_CARD2), rowheight=28,
                         font=FONT_BODY, borderwidth=0)
         style.configure("Premium.Treeview.Heading",
-                        background=BG_CARD, foreground=NEON_CYAN,
+                        background=self.themed(BG_CARD), foreground=self.themed(NEON_CYAN),
                         font=FONT_H3, borderwidth=0, relief="flat")
         style.map("Premium.Treeview",
-                  background=[("selected", NEON_PURPLE)],
-                  foreground=[("selected", TEXT_H1)])
+                  background=[("selected", self.themed(NEON_PURPLE))],
+                  foreground=[("selected", self.themed(TEXT_H1))])
 
     # ── Sidebar ───────────────────────────────────────────────────────────
     def _build_sidebar(self):
@@ -747,7 +775,7 @@ class InstagramAutoPro(ctk.CTk):
             fg_color=BG_SIDEBAR, border_width=1, border_color=BORDER
         )
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(11, weight=1)
+        self.sidebar.grid_rowconfigure(90, weight=1)
         self.sidebar.grid_propagate(False)
 
         # — Logo —
@@ -789,13 +817,22 @@ class InstagramAutoPro(ctk.CTk):
             btn.grid(row=i + 2, column=0, padx=10, pady=2, sticky="ew")
             self._nav_btns[key] = btn
 
+        # — Selector de tema —
+        self.theme_seg = ctk.CTkSegmentedButton(
+            self.sidebar, values=["Claro", "Oscuro", "Sistema"],
+            command=self._on_theme_change,
+            font=ctk.CTkFont(family="Segoe UI", size=11), height=28,
+        )
+        self.theme_seg.set("Sistema")
+        self.theme_seg.grid(row=91, column=0, padx=14, pady=(8, 4), sticky="ew")
+
         # — Status del bot (parte inferior sidebar) —
         ctk.CTkFrame(self.sidebar, height=1, fg_color=BORDER).grid(
-            row=12, column=0, sticky="ew", padx=16, pady=(8, 4))
+            row=92, column=0, sticky="ew", padx=16, pady=(8, 4))
         self.lbl_bot_status = ctk.CTkLabel(
             self.sidebar, text="⬤  Bot inactivo",
             font=ctk.CTkFont(size=11), text_color=TEXT_MUTED)
-        self.lbl_bot_status.grid(row=13, column=0, padx=18, pady=(0, 18), sticky="sw")
+        self.lbl_bot_status.grid(row=93, column=0, padx=18, pady=(0, 18), sticky="sw")
 
     def set_bot_status(self, active: bool):
         """Actualiza indicador de bot en la sidebar."""
@@ -2702,9 +2739,11 @@ class InstagramAutoPro(ctk.CTk):
         # NO se ejecuta .grid() aquí — se invoca en _toggle_schedule_panel al expandir
 
         # Fila 4: listbox con selección múltiple
-        self.list_tg = tk.Listbox(ctrl_card, bg=BG_INPUT, fg=TEXT_BODY, selectbackground=NEON_PURPLE,
+        self.list_tg = tk.Listbox(ctrl_card, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
+                                  selectbackground=self.themed(NEON_PURPLE),
                                   selectmode=tk.EXTENDED,
-                                  borderwidth=0, highlightthickness=1, highlightbackground=BORDER, font=FONT_BODY)
+                                  borderwidth=0, highlightthickness=1,
+                                  highlightbackground=self.themed(BORDER), font=FONT_BODY)
         self.list_tg.grid(row=4, column=0, sticky="nsew", padx=20, pady=(0, 10))
 
         # Controles inferiores
@@ -3166,9 +3205,9 @@ class InstagramAutoPro(ctk.CTk):
         self.forge_lbl_count.pack(side="right")
 
         self.forge_lst = tk.Listbox(
-            card_vids, bg=BG_INPUT, fg=TEXT_BODY,
-            selectbackground=NEON_PURPLE, selectmode=tk.EXTENDED,
-            borderwidth=0, highlightthickness=1, highlightbackground=BORDER,
+            card_vids, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
+            selectbackground=self.themed(NEON_PURPLE), selectmode=tk.EXTENDED,
+            borderwidth=0, highlightthickness=1, highlightbackground=self.themed(BORDER),
             font=FONT_BODY, height=9
         )
         self.forge_lst.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 6))
