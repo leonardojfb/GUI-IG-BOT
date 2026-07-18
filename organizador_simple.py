@@ -111,15 +111,15 @@ class InstagramOrganizerSimple:
         self.tab_va = tk.Frame(self.notebook, bg="#1e1e2e")
         self.tab_mix = tk.Frame(self.notebook, bg="#1e1e2e")
         self.tab_video = tk.Frame(self.notebook, bg="#1e1e2e")
-        
+
         self.notebook.add(self.tab_va, text="👤 Cuentas por VA")
         self.notebook.add(self.tab_mix, text="🔀 Mezclas Cruzadas")
         self.notebook.add(self.tab_video, text="🎞️ Tipos de Video")
-        
+
         self.create_va_tab()
         self.create_mix_tab()
         self.create_video_tab()
-        
+
         self.refresh_va_list()
     
     # ==================== VA TAB ====================

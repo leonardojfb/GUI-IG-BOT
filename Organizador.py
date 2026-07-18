@@ -2,6 +2,8 @@ import os
 import shutil
 import sys
 import random
+import string
+import math
 from collections import defaultdict
 from database import DatabaseManager
 
@@ -13,13 +15,6 @@ output_root = os.path.join(base_dir, "CALENDARIO_POSTEO")
 # Parámetros de distribución diaria
 DAILY_GOAL = 46
 FILL_UP_ENABLED = True
-from database import DatabaseManager
-import datetime
-import math
-
-import math
-
-import math
 
 def preview_distribution_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to_organize="MAX"):
     """
@@ -268,8 +263,6 @@ def check_collision(account_id: int, p1_id: str, p2_id: str) -> bool:
 # ==========================================
 global_used_p1 = {}
 global_used_p2 = {}
-import random
-import string
 
 def change_video_metadata(file_path):
     """
@@ -286,9 +279,6 @@ def change_video_metadata(file_path):
     except Exception as e:
         print(f"⚠️ Error limpiando metadatos en {file_path}: {e}")
         return False
-
-# MODIFICADO: Solo rastreamos P1 globalmente
-global_used_p1 = {} 
 
 def is_p1_collision_global(day, p1):
     """Verifica si el clip de inicio P1 ya se usó hoy en OTRA cuenta."""
@@ -741,168 +731,285 @@ def distribute(daily_goal: int = None, fill_up: bool = None):
 # CONEXIÓN CON LA GUI V6 (VISTA PREVIA Y DISTRIBUCIÓN)
 # ==========================================
 
-import math
-import datetime
+def pick_random_video_for_account_day_slot(videos_pool, used_p1_today_account, used_p1_this_slot):
+    """
+    Elige video con aleatoriedad real.
 
-def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to_organize="MAX"):
-    global global_used_p1
-    global_used_p1 = {} # Reset de colisiones diarias
-    
+    Regla dura:
+    - No repetir PT1 en la misma cuenta el mismo día.
+
+    Regla blanda:
+    - Evitar repetir PT1 en el mismo slot/hora entre cuentas.
+    """
+
+    candidates = videos_pool[:]
+    random.shuffle(candidates)
+
+    # Nivel 1: ideal, no repite PT1 en cuenta/día ni en slot global
+    for v in candidates:
+        p1, p2 = parse_combination_from_filename(v)
+
+        if not p1:
+            continue
+
+        if p1 in used_p1_today_account:
+            continue
+
+        if p1 in used_p1_this_slot:
+            continue
+
+        return v
+
+    # Nivel 2: si no hay alternativa, permite choque en slot,
+    # pero NUNCA repite PT1 en la misma cuenta/día
+    for v in candidates:
+        p1, p2 = parse_combination_from_filename(v)
+
+        if not p1:
+            continue
+
+        if p1 in used_p1_today_account:
+            continue
+
+        return v
+
+    return None
+def pick_random_video_item_for_account_day_slot(
+    video_items_pool,
+    used_p1_today_account,
+    used_p1_this_slot,
+    p1_usage_day=None,
+    p1_usage_global=None,
+    used_combos_account=None,
+):
+    """
+    Selecciona video usando scoring anti-colisión.
+
+    Reglas duras:
+    - No repetir PT1 en la misma cuenta el mismo día.
+    - No repetir la misma combinación PT1+PT2 en la misma cuenta (nunca, entre todos los días).
+
+    Reglas blandas:
+    - Evitar PT1 ya usado en el mismo slot.
+    - Preferir PT1 menos usado en el día.
+    - Preferir PT1 menos usado globalmente.
+    """
+
+    if p1_usage_day is None:
+        p1_usage_day = {}
+    if p1_usage_global is None:
+        p1_usage_global = {}
+    if used_combos_account is None:
+        used_combos_account = set()
+
+    candidates = []
+
+    for item in video_items_pool:
+        p1, p2 = parse_combination_from_filename(item["filename"])
+
+        if not p1:
+            continue
+
+        # REGLA DURA 1: no repetir PT1 en la misma cuenta hoy
+        if p1 in used_p1_today_account:
+            continue
+
+        # REGLA DURA 2: no repetir combinación PT1+PT2 en la misma cuenta (nunca)
+        if p2 and (p1, p2) in used_combos_account:
+            continue
+
+        score = 0
+
+        # Penalización fuerte si choca en mismo slot de horario
+        if p1 in used_p1_this_slot:
+            score += 1000
+
+        # Penalización por uso en el mismo día
+        score += p1_usage_day.get(p1, 0) * 50
+
+        # Penalización por uso global en toda la distribución
+        score += p1_usage_global.get(p1, 0) * 10
+
+        # Ruido aleatorio pequeño para que no sea robótico
+        score += random.random()
+
+        candidates.append((score, item))
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda x: x[0])
+    return candidates[0][1]
+def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to_organize="MAX", tanda_name_2=None):
     db = DatabaseManager()
+
     all_accs = db.get_all_accounts()
-    accounts = [a for a in all_accs if a['account_type'].upper() == category_dest.upper()]
-    
+    accounts = [
+        a for a in all_accs
+        if a["account_type"].upper() == category_dest.upper()
+    ]
+
     if not accounts:
         db.close()
         return "❌ Error: No hay cuentas para esta categoría."
 
-    tanda_path = os.path.join(source_root, tanda_name)
-    videos_originales = [f for f in os.listdir(tanda_path) if f.lower().endswith(('.mp4', '.mov'))]
-    random.shuffle(videos_originales)
-    
-    # Cálculo de días (Mismo que antes)
+    tanda_names = [tanda_name]
+
+    if tanda_name_2 and str(tanda_name_2).strip():
+        tanda_names.append(tanda_name_2)
+
+    video_items = []
+
+    for tn in tanda_names:
+        tanda_path = os.path.join(source_root, tn)
+
+        if not os.path.exists(tanda_path):
+            db.close()
+            return f"❌ Error: No existe la tanda: {tanda_path}"
+
+        for f in os.listdir(tanda_path):
+            if f.lower().endswith((".mp4", ".mov")):
+                video_items.append({
+                    "filename": f,
+                    "tanda": tn,
+                    "path": os.path.join(tanda_path, f)
+                })
+
+    if not video_items:
+        db.close()
+        return "❌ Error: No hay videos en las tandas seleccionadas."
+
+    random.shuffle(video_items)
+
     num_cuentas = len(accounts)
     vids_dia_total = num_cuentas * daily_quota
+
     if str(days_to_organize).upper() == "MAX":
-        target_days = math.ceil(len(videos_originales) / vids_dia_total) if vids_dia_total > 0 else 1
+        target_days = math.ceil(len(video_items) / vids_dia_total) if vids_dia_total > 0 else 1
     else:
-        try: target_days = int(days_to_organize)
-        except: target_days = 1
+        try:
+            target_days = int(days_to_organize)
+        except:
+            target_days = 1
 
     total_movidos = 0
     os.makedirs(output_root, exist_ok=True)
-    
-    for day in range(1, target_days + 1):
-        day_label = f"Dia_{day}"
-        for acc in accounts:
-            acc_id = acc['id']
-            acc_name = acc['username']
-            acc_history = get_account_used_combinations(acc_id) # Historial de esta cuenta específica
-            
-            target_dir = os.path.join(output_root, day_label, acc_name)
-            os.makedirs(target_dir, exist_ok=True)
-            
-            videos_hoy = 0
-            while videos_hoy < daily_quota:
-                vid_name = None
-                
-                # ESTRATEGIA 1: Buscar video en la tanda que no choque GLOBALMENTE hoy (solo P1)
-                for i, v in enumerate(videos_originales):
-                    p1, p2 = parse_combination_from_filename(v)
-                    if not is_p1_collision_global(day, p1):
-                        vid_name = videos_originales.pop(i)
-                        mark_p1_used_global(day, p1)
-                        break
-                
-                # ESTRATEGIA 2: Si no hay en stock o hay choques, forzar FILL-UP con metadatos nuevos
-                if not vid_name and use_fillup:
-                    # Buscamos en la tanda CUALQUIER video cuyo P1 no haya sido usado por ESTA cuenta nunca
-                    # y que no haya sido usado GLOBALMENTE hoy.
-                    videos_tanda = [f for f in os.listdir(tanda_path) if f.lower().endswith(('.mp4', '.mov'))]
-                    random.shuffle(videos_tanda)
-                    
-                    for v_alt in videos_tanda:
-                        p1_alt, p2_alt = parse_combination_from_filename(v_alt)
-                        # Condición: P1 no usado por la cuenta nunca Y P1 no usado por nadie hoy
-                        if (p1_alt, p2_alt) not in acc_history and not is_p1_collision_global(day, p1_alt):
-                            vid_name = v_alt
-                            mark_p1_used_global(day, p1_alt)
-                            break
 
-                if vid_name:
-                    src = os.path.join(tanda_path, vid_name)
-                    dst = os.path.join(target_dir, vid_name)
-                    shutil.copy2(src, dst)
-                    
-                    # CAMBIO DE METADATA: Hacemos el video "único" físicamente
-                    change_video_metadata(dst)
-                    
-                    # Registro en DB
-                    p1, p2 = parse_combination_from_filename(vid_name)
-                    db.add_video_to_history(acc_id, dst, p1, p2, "Auto-Generated", day)
-                    
-                    videos_hoy += 1
-                    total_movidos += 1
-                else:
-                    # Si llega aquí, es que realmente se acabaron los P1 únicos para hoy
-                    break 
+    full_tanda_pool = video_items[:]
+    random.shuffle(full_tanda_pool)
+    p1_usage_global = {}
 
-    db.close()
-    return f"🚀 Logística terminada. {total_movidos} videos procesados (Metadata actualizada en duplicados)."
-    """Ejecución real de la distribución, moviendo archivos y guardando en DB."""
+    # Lifetime: combos (p1, p2) ya asignados a cada cuenta en todos los días anteriores.
+    # Garantiza que fill-up no reutilice el mismo video en la misma cuenta nunca.
+    from collections import defaultdict
+    account_lifetime_combos = defaultdict(set)  # acc_id -> set of (p1, p2)
+
     try:
-        db = DatabaseManager()
-        accounts = db.get_accounts_by_category(dest_category)
-        if not accounts: return "No hay cuentas."
+        for day in range(1, target_days + 1):
+            day_label = f"Dia_{day}"
 
-        tanda_dir = os.path.join(base_dir, "videos_finales", tanda_name)
-        if not os.path.exists(tanda_dir): return "Carpeta de tanda no encontrada."
-            
-        videos_disponibles = [f for f in os.listdir(tanda_dir) if f.lower().endswith(('.mp4', '.mov'))]
-        if not videos_disponibles: return "No hay videos en la tanda."
+            used_p1_by_account_today = {}
 
-        global_used_p1_real = {}
-        global_used_p2_real = {}
-        total_asignados = 0
-        os.makedirs(output_root, exist_ok=True)
+            used_p1_by_slot = {
+                slot: set()
+                for slot in range(1, daily_quota + 1)
+            }
+            p1_usage_day = {}
 
-        for account in accounts:
-            acc_id = account['id']
-            acc_name = account['username']
-            used_local = get_account_used_combinations(acc_id)
-            video_idx = 0
-            
-            for dia in range(1, 31): 
-                if dia not in global_used_p1_real:
-                    global_used_p1_real[dia] = set()
-                    global_used_p2_real[dia] = set()
+            for slot in range(1, daily_quota + 1):
+                shuffled_accounts = accounts[:]
+                random.shuffle(shuffled_accounts)
 
-                dia_dir = os.path.join(output_root, f"Dia_{dia}", acc_name)
-                os.makedirs(dia_dir, exist_ok=True)
-                videos_hoy = 0
-                intentos = 0
-                
-                while videos_hoy < daily_quota and intentos < len(videos_disponibles) * 2:
-                    filename = videos_disponibles[video_idx % len(videos_disponibles)]
-                    p1_id, p2_id = parse_combination_from_filename(filename)
-                    if not p1_id: p1_id, p2_id = (filename, "UNK")
-                    
-                    choque_local = (p1_id, p2_id) in used_local
-                    choque_global = (p1_id in global_used_p1_real[dia]) or (p2_id in global_used_p2_real[dia])
+                for acc in shuffled_accounts:
+                    acc_id = acc["id"]
+                    acc_name = acc["username"]
 
-                    if not choque_global and (fillup or not choque_local):
-                        # ¡APROBADO! Mover archivo
-                        src_path = os.path.join(tanda_dir, filename)
-                        dest_path = os.path.join(dia_dir, filename)
-                        shutil.copy2(src_path, dest_path)
-                        
-                        # Bloquear variables globalmente y localmente
-                        global_used_p1_real[dia].add(p1_id)
-                        global_used_p2_real[dia].add(p2_id)
-                        used_local.add((p1_id, p2_id))
-                        
-                        # Guardar historial real en DB
-                        db.add_video_to_history(acc_id, dest_path, p1_id, p2_id, "Caption TBD", dia)
-                        
-                        videos_hoy += 1
-                        total_asignados += 1
-                    
-                    video_idx += 1
-                    intentos += 1
+                    day_key = (acc_id, day)
 
+                    if day_key not in used_p1_by_account_today:
+                        used_p1_by_account_today[day_key] = set()
+
+                    target_dir = os.path.join(output_root, day_label, acc_name)
+                    os.makedirs(target_dir, exist_ok=True)
+
+                    # Intento 1: pool principal (videos únicos, se consumen al usarse)
+                    vid_item = pick_random_video_item_for_account_day_slot(
+                        video_items,
+                        used_p1_by_account_today[day_key],
+                        used_p1_by_slot[slot],
+                        p1_usage_day,
+                        p1_usage_global,
+                        account_lifetime_combos[acc_id],
+                    )
+
+                    if vid_item:
+                        video_items.remove(vid_item)
+
+                    # Intento 2: fill-up — excluye combos ya vistos por esta cuenta (obligatorio)
+                    if not vid_item and use_fillup:
+                        vid_item = pick_random_video_item_for_account_day_slot(
+                            full_tanda_pool,
+                            used_p1_by_account_today[day_key],
+                            used_p1_by_slot[slot],
+                            p1_usage_day,
+                            p1_usage_global,
+                            account_lifetime_combos[acc_id],
+                        )
+
+                    if not vid_item:
+                        print(f"⚠️ Sin video válido para {acc_name} / Día {day} / Slot {slot}")
+                        continue
+
+                    src = vid_item["path"]
+                    vid_name = vid_item["filename"]
+
+                    base, ext = os.path.splitext(vid_name)
+                    tanda_tag = vid_item["tanda"].replace(" ", "_")
+
+                    unique_name = f"{base}__TANDA_{tanda_tag}__ACC{acc_id}__D{day}__S{slot}{ext}"
+                    dst = os.path.join(target_dir, unique_name)
+
+                    if os.path.exists(dst):
+                        unique_name = f"{base}__TANDA_{tanda_tag}__ACC{acc_id}__D{day}__S{slot}__{random.randint(1000,9999)}{ext}"
+                        dst = os.path.join(target_dir, unique_name)
+
+                    shutil.copy2(src, dst)
+                    change_video_metadata(dst)
+
+                    p1, p2 = parse_combination_from_filename(vid_name)
+
+                    if p1:
+                        used_p1_by_account_today[day_key].add(p1)
+                        used_p1_by_slot[slot].add(p1)
+                        p1_usage_day[p1] = p1_usage_day.get(p1, 0) + 1
+                        p1_usage_global[p1] = p1_usage_global.get(p1, 0) + 1
+                    if p1 and p2:
+                        account_lifetime_combos[acc_id].add((p1, p2))
+
+                    db.add_video_to_history(
+                        acc_id,
+                        dst,
+                        p1,
+                        p2,
+                        f"Auto-Generated / {vid_item['tanda']}",
+                        day
+                    )
+
+                    total_movidos += 1
+    finally:
         db.close()
-        return f"✅ Distribución completada. {total_asignados} videos asignados a la categoría {dest_category} siguiendo el algoritmo anti-choque global."
-    except Exception as e:
-        return f"Error crítico durante la distribución: {str(e)}"
-if __name__ == "__main__":
-    print("🔍 --- INICIANDO ORGANIZACIÓN CON ANTI-CHOQUE GLOBAL ---")
-    
-    # Parámetros por defecto
-    distribute(
-        tanda_name=None,        # Usará la tanda activa
-        target_category=None,   # Usará todas las categorías
-        daily_goal=46,          # Meta diaria
-        fillup=True             # Fill-up habilitado
+
+    return (
+        f"✅ Logística terminada.\n"
+        f"{total_movidos} videos procesados.\n"
+        f"Tandas usadas: {', '.join(tanda_names)}\n"
+        f"Categoría destino: {category_dest}\n"
+        f"Regla aplicada: no repetir PT1 en la misma cuenta el mismo día.\n"
+        f"Shuffle aplicado entre tandas + día + slot + cuenta."
     )
-    
-    print("\n--- ✅ ORGANIZACIÓN CON ANTI-CHOQUE GLOBAL COMPLETADA ---")
+if __name__ == "__main__":
+    print("--- INICIANDO ORGANIZACION CON ANTI-CHOQUE GLOBAL ---")
+
+    distribute(daily_goal=46, fill_up=True)
+
+    print("\n--- ORGANIZACION CON ANTI-CHOQUE GLOBAL COMPLETADA ---")

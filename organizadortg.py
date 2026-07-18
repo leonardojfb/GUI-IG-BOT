@@ -5,10 +5,67 @@ import time
 import json
 import random
 import re
+import subprocess
+import tempfile
 from datetime import datetime, timedelta
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from database import DatabaseManager
+
+TG_MAX_BYTES = 49 * 1024 * 1024  # 49MB para dejar margen
+
+# Windows: suppress the console window each ffmpeg/ffprobe child would otherwise
+# pop when the GUI runs windowless. 0 on non-Windows (flag doesn't exist there).
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+def _compress_video_for_tg(video_path: str) -> str | None:
+    """Comprime el video con ffmpeg para que quede bajo TG_MAX_BYTES.
+    Devuelve la ruta del archivo temporal comprimido, o None si falla."""
+    try:
+        import shutil
+        if not shutil.which("ffmpeg"):
+            print("⚠️  ffmpeg no encontrado en PATH. No se puede comprimir el video.")
+            return None
+
+        size_bytes = os.path.getsize(video_path)
+        # Obtener duración con ffprobe
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", video_path],
+            capture_output=True, text=True, creationflags=_NO_WINDOW
+        )
+        if probe.returncode != 0 or not probe.stdout.strip():
+            print("⚠️  No se pudo obtener duración del video con ffprobe.")
+            return None
+
+        duration = float(probe.stdout.strip())
+        # Calcular bitrate objetivo en kbps para quedar bajo el límite
+        target_kbps = int((TG_MAX_BYTES * 8) / duration / 1000 * 0.92)  # 8% de margen extra
+        target_kbps = max(target_kbps, 300)  # mínimo 300kbps para calidad mínima aceptable
+
+        suffix = os.path.splitext(video_path)[1] or ".mp4"
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        tmp.close()
+
+        print(f"🗜️  Comprimiendo video ({size_bytes/1024/1024:.1f}MB → objetivo <{TG_MAX_BYTES/1024/1024:.0f}MB, bitrate {target_kbps}kbps)...")
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-i", video_path,
+             "-b:v", f"{target_kbps}k", "-b:a", "128k",
+             "-vcodec", "libx264", "-acodec", "aac",
+             "-preset", "fast", tmp.name],
+            capture_output=True, text=True, creationflags=_NO_WINDOW
+        )
+        if result.returncode != 0:
+            print(f"❌ ffmpeg falló:\n{result.stderr[-500:]}")
+            os.unlink(tmp.name)
+            return None
+
+        compressed_size = os.path.getsize(tmp.name)
+        print(f"✅ Comprimido: {compressed_size/1024/1024:.1f}MB")
+        return tmp.name
+    except Exception as e:
+        print(f"❌ Error al comprimir video: {e}")
+        return None
 
 # --- 1. CONFIGURACIÓN Y CREDENCIALES ---
 TOKEN = "8787705820:AAGIeKGzhxHZgUmbbH9G9EgK5Y7M11J-MWM"
@@ -102,13 +159,17 @@ def load_json(path):
 def save_json(path, data):
     with open(path, 'w', encoding='utf-8') as f: json.dump(data, f, indent=4)
 
-def load_clean_captions():
-    path = os.path.join(base_dir, "captions.txt")
-    if not os.path.exists(path): return ["¡Nuevo post de Tatiana! 🔥"]
+def load_clean_captions(path=None):
+    if not path or not os.path.exists(path):
+        return []
     content = open(path, 'r', encoding='utf-8', errors='ignore').read()
     pattern = r'\[\d{1,2}.*?\].*?:\s*(.*?)(?=\s*\[\d{1,2}|$)'
     blocks = re.findall(pattern, content, flags=re.DOTALL)
-    return [b.strip() for b in blocks if b.strip()]
+    captions = [b.strip() for b in blocks if b.strip()]
+    if not captions:
+        # Fallback: cada línea no vacía es un caption
+        captions = [line.strip() for line in content.splitlines() if line.strip()]
+    return captions
 
 def shuffle_hashtags(text):
     hashtags = re.findall(r'#\w+', text)
@@ -117,8 +178,8 @@ def shuffle_hashtags(text):
     random.shuffle(hashtags)
     return f"{text_no_hashes}\n\n{' '.join(hashtags)}"
 
-captions_pool = load_clean_captions()
 history_db = load_json(os.path.join(base_dir, HISTORY_FILE))
+captions_pool = []  # se carga en execute_telegram_plan con el archivo elegido por el usuario
 
 # --- 3. BASE DE DATOS Y ENRUTAMIENTO ---
 def get_accounts_with_va_info():
@@ -146,14 +207,22 @@ def get_accounts_with_va_info():
 
 def call_tg(method, data, silent=False):
     url = f"https://api.telegram.org/bot{TOKEN}/{method}"
-    try:
-        res = requests.post(url, json=data).json()
-        if not res.get("ok") and not silent:
-            print(f"⚠️ Error en Telegram API ({method}): {res}")
-        return res
-    except Exception as e:
-        print(f"⚠️ Error de red al llamar a {method}: {e}")
-        return {"ok": False}
+    for attempt in range(4):
+        try:
+            res = requests.post(url, json=data).json()
+            if not res.get("ok"):
+                retry_after = res.get("parameters", {}).get("retry_after")
+                if retry_after:
+                    print(f"⏳ Telegram rate limit ({method}), esperando {retry_after}s...")
+                    time.sleep(retry_after + 1)
+                    continue
+                if not silent:
+                    print(f"⚠️ Error en Telegram API ({method}): {res}")
+            return res
+        except Exception as e:
+            print(f"⚠️ Error de red al llamar a {method}: {e}")
+            return {"ok": False}
+    return {"ok": False}
 def is_video_already_sent(video_path):
     """
     Revisa en fingerprint_history si este video ya fue marcado como enviado.
@@ -194,28 +263,70 @@ def get_or_create_topic(chat_id, acc_name, tag_emoji, state, is_admin=False, for
     if res.get("ok"):
         state[state_key] = res["result"]["message_thread_id"]
         return state[state_key]
+    print(f"❌ createForumTopic falló | chat_id usado: '{chat_id}' | cuenta: {acc_name} | error: {res.get('description')}")
     return None
 
 def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, username, tag):
-    for attempt in range(2):
-        with open(video_path, 'rb') as fv:
-            r = requests.post(
-                f"https://api.telegram.org/bot{TOKEN}/sendVideo",
-                data={'chat_id': chat_id, 'caption': caption, 'message_thread_id': t_id},
-                files={'video': fv}
-            )
-        if r.status_code == 200:
-            return True, t_id
-        if attempt == 0 and "thread not found" in r.text:
-            print(f"⚠️ Topic expirado al enviar video @{username}, recreando...")
-            t_id = get_or_create_topic(chat_id, username, tag, topics_state, force_recreate=True)
-            if not t_id:
-                print(f"❌ No se pudo recrear topic para @{username}.")
-                return False, None
+    active_path = video_path
+    compressed_tmp = None
+
+    # Si el archivo ya supera el límite, comprimir antes del primer intento
+    if os.path.getsize(video_path) > TG_MAX_BYTES:
+        print(f"⚠️  Video @{username} pesa {os.path.getsize(video_path)/1024/1024:.1f}MB (> 49MB). Comprimiendo...")
+        compressed_tmp = _compress_video_for_tg(video_path)
+        if compressed_tmp:
+            active_path = compressed_tmp
         else:
+            print(f"❌ No se pudo comprimir el video de @{username}. Saltando.")
+            return False, t_id
+
+    try:
+        for attempt in range(5):
+            payload = {'chat_id': chat_id, 'message_thread_id': t_id}
+            if caption:
+                payload['caption'] = caption
+            with open(active_path, 'rb') as fv:
+                r = requests.post(
+                    f"https://api.telegram.org/bot{TOKEN}/sendVideo",
+                    data=payload,
+                    files={'video': fv}
+                )
+            if r.status_code == 200:
+                return True, t_id
+            if r.status_code == 413:
+                # El comprimido sigue siendo muy grande — intentar comprimir más agresivamente
+                print(f"⚠️  Aún muy grande después de comprimir @{username}. Intentando compresión extra...")
+                if compressed_tmp:
+                    os.unlink(compressed_tmp)
+                    compressed_tmp = None
+                extra_tmp = _compress_video_for_tg(active_path if active_path != video_path else video_path)
+                if extra_tmp:
+                    active_path = extra_tmp
+                    compressed_tmp = extra_tmp
+                    continue
+                print(f"❌ Video de @{username} sigue excediendo el límite de Telegram (50MB). Saltando.")
+                return False, t_id
+            if r.status_code == 429:
+                try:
+                    retry_after = r.json().get("parameters", {}).get("retry_after", 15)
+                except Exception:
+                    retry_after = 15
+                print(f"⏳ Telegram rate limit (sendVideo @{username}), esperando {retry_after}s...")
+                time.sleep(retry_after + 1)
+                continue
+            if "thread not found" in r.text:
+                print(f"⚠️ Topic expirado al enviar video @{username}, recreando...")
+                t_id = get_or_create_topic(chat_id, username, tag, topics_state, force_recreate=True)
+                if not t_id:
+                    print(f"❌ No se pudo recrear topic para @{username}.")
+                    return False, None
+                continue
             print(f"❌ Error API Telegram: {r.text}")
             return False, t_id
-    return False, t_id
+        return False, t_id
+    finally:
+        if compressed_tmp and os.path.exists(compressed_tmp):
+            os.unlink(compressed_tmp)
 
 def scan_calendar_structure():
     print(f"📂 Escaneando calendario en: {input_root}")
@@ -291,7 +402,11 @@ def _account_tag(acc_info):
         return "SUICIDE"
     return category.upper() if category else "GENERAL"
 
-def execute_telegram_plan(start_date, selected_accounts=None, controller=None):
+def execute_telegram_plan(start_date, selected_accounts=None, controller=None, captions_file=None):
+    pool = load_clean_captions(captions_file)
+    if captions_file and not pool:
+        print(f"⚠️ El archivo de captions '{captions_file}' no contenía texto válido — se enviará sin caption.")
+
     accounts = get_accounts_with_va_info()
     all_videos = scan_calendar_structure()
 
@@ -385,7 +500,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None):
                     else:
                         print(f"⚠️ Error en Telegram API (sendMessage) para @{username}: {msg_res}")
 
-                cap = shuffle_hashtags(random.choice(captions_pool))
+                cap = shuffle_hashtags(random.choice(pool)) if pool else None
                 try:
                     ok, t_id = _send_video_to_topic(chat_id, t_id, cap, vid['path'], topics_state, username, tag)
                     if ok:
@@ -402,9 +517,10 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None):
 
 # --- 4. CONTROLADOR DE HILOS Y MOTOR DE EJECUCIÓN ---
 class TelegramBotController:
-    def __init__(self, start_date_str, selected_accounts=None):
+    def __init__(self, start_date_str, selected_accounts=None, captions_file=None):
         self.start_date_str = start_date_str
         self.selected_accounts = selected_accounts
+        self.captions_file = captions_file
         self._paused = threading.Event()
         self._paused.set()
         self._stopped = False
@@ -424,7 +540,7 @@ class TelegramBotController:
         self._stopped = False
         try:
             start_date = datetime.strptime(self.start_date_str, "%Y-%m-%d")
-            result = execute_telegram_plan(start_date, self.selected_accounts, self)
+            result = execute_telegram_plan(start_date, self.selected_accounts, self, captions_file=self.captions_file)
             print(result)
         finally:
             self._running = False

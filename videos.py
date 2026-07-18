@@ -3,6 +3,7 @@ import subprocess
 import json
 import random
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from database import DatabaseManager
 
 # --- CONFIGURACIÓN ---
@@ -13,6 +14,10 @@ FOLDER_OUTPUT_ROOT = os.path.join(BASE_DIR, "videos_finales")
 RES_W, RES_H = 1080, 1920
 FPS = "30"
 LAT, LON = "+34.0522", "-118.2437"
+
+# Windows: suppress the console window each ffmpeg/ffprobe child would otherwise
+# pop (the GUI runs windowless). 0 on non-Windows, where the flag doesn't exist.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 # ==================== SISTEMA DE CAPTIONS ====================
@@ -71,7 +76,7 @@ def get_audio(file_path):
         '-show_entries', 'stream=codec_type', '-of', 'json', file_path
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, creationflags=_NO_WINDOW)
         return len(json.loads(result.stdout).get('streams', [])) > 0
     except Exception:
         return False
@@ -80,21 +85,15 @@ def get_audio(file_path):
 def run_render():
     """Punto de entrada principal para el renderizado de videos."""
     db = DatabaseManager()
-    
-    tandas = db.get_tandas(active_only=True)
-    
+
+    tandas = db.get_all_tandas()
+
     if tandas:
-        print(f"🎬 Modo Tandas: {len(tandas)} tanda(s) encontrada(s)")
+        print(f"Modo Tandas: {len(tandas)} tanda(s) encontrada(s)")
         process_tandas(db, tandas)
     else:
-        print("⚠️ No hay Tandas activas. Usando reglas de mezcla legacy...")
-        rules = db.get_mix_rules(active_only=True)
-        if not rules:
-            print("⚠️ No hay reglas de mezcla activas en la base de datos.")
-            db.close()
-            return
-        process_mix_rules(db, rules)
-    
+        print("No hay Tandas activas.")
+
     db.close()
 
 
@@ -132,30 +131,31 @@ def process_tandas(db: DatabaseManager, tandas: list):
         
         total_videos = len(v1_list) * len(v2_list)
         print(f"🔄 Modo Cruce Total: Generando {total_videos} combinaciones ({len(v1_list)} P1 x {len(v2_list)} P2)")
-        
-        # Bucle anidado: Por cada video en P1, recorre todos los videos en P2
+
+        # Pre-armar lista de pares pendientes (saltar ya renderizados)
+        pending = []
         for v1 in v1_list:
             for v2 in v2_list:
                 p1_id = os.path.splitext(v1)[0].replace(" ", "_")
                 p2_id = os.path.splitext(v2)[0].replace(" ", "_")
-                
                 name_out = f"{tanda_name}__{p1_id}__{p2_id}.mp4"
                 out_path = os.path.join(out_dir, name_out)
-                
-                # Si la combinación ya se renderizó antes, la salta
-                if os.path.exists(out_path):
-                    continue
-                
-                caption = get_caption_for_video(tanda)
-                
-                render_video_pair(
-                    os.path.join(p1_dir, v1),
-                    os.path.join(p2_dir, v2),
-                    out_path,
-                    tanda_name,
-                    p1_id,
-                    p2_id
-                )
+                if not os.path.exists(out_path):
+                    pending.append((
+                        os.path.join(p1_dir, v1),
+                        os.path.join(p2_dir, v2),
+                        out_path, tanda_name, p1_id, p2_id
+                    ))
+
+        if not pending:
+            print("✅ Todos los videos ya están renderizados.")
+            continue
+
+        print(f"⏳ Pendientes: {len(pending)} — renderizando 2 en paralelo...")
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = {pool.submit(render_video_pair, *args): args for args in pending}
+            for fut in as_completed(futures):
+                fut.result()  # re-lanza excepciones si las hay
 
 def process_mix_rules(db: DatabaseManager, rules: list):
     """Procesar videos usando reglas de mezcla legacy."""
@@ -216,48 +216,69 @@ def process_mix_rules(db: DatabaseManager, rules: list):
 def render_video_pair(path_v1, path_v2, out_path, cat, p1_id, p2_id):
     """
     Renderiza un par de videos concatenados usando ffmpeg.
-    Aplica escalado, unificación de audio y spoofing de metadata.
+    Intenta GPU NVIDIA primero; si falla, usa CPU (libx264) automáticamente.
     """
     p1_audio = get_audio(path_v1)
     p2_audio = get_audio(path_v2)
-    
+
     a1 = "[0:a]" if p1_audio else "[2:a]"
     a2 = "[1:a]" if p2_audio else "[2:a]"
-    
+
+    # Si ambos videos carecen de audio, usamos asplit para no reutilizar el mismo stream.
+    if not p1_audio and not p2_audio:
+        audio_filter = "[2:a]asplit[a0][a1];"
+    else:
+        audio_filter = f"{a1}aresample=44100[a0];{a2}aresample=44100[a1];"
+
     filter_complex = (
         f"[0:v]scale={RES_W}:{RES_H}:force_original_aspect_ratio=increase,"
         f"crop={RES_W}:{RES_H},setsar=1,fps={FPS},format=yuv420p[v0];"
         f"[1:v]scale={RES_W}:{RES_H}:force_original_aspect_ratio=increase,"
         f"crop={RES_W}:{RES_H},setsar=1,fps={FPS},format=yuv420p[v1];"
-        f"{a1}aresample=44100[a0];{a2}aresample=44100[a1];"
+        f"{audio_filter}"
         f"[v0][a0][v1][a1]concat=n=2:v=1:a=1[outv][outa]"
     )
-    
-# Usamos tu configuración NVIDIA original de alto rendimiento
-    cmd = [
-        'ffmpeg', '-y', '-hwaccel', 'cuda',
-        '-i', path_v1, '-i', path_v2,
-        '-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100', # <-- AQUÍ ESTÁ LA CORRECCIÓN
-        '-filter_complex', filter_complex,
-        '-map', '[outv]', '-map', '[outa]',
-        '-c:v', 'h264_nvenc', '-preset', 'p4', '-cq:v', '20',
-        '-metadata', 'make=Apple',
-        '-metadata', 'model=iPhone 15 Pro',
-        '-metadata', f'location={LAT}{LON}/',
-        out_path
-    ]
-    
+
     name_out = os.path.basename(out_path)
-    print(f"🎬 Acelerando por hardware (NVIDIA): {name_out}...")
-    
-    # Capturamos el resultado para ver si falla
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    
-    if result.returncode != 0:
-        print(f"❌ ERROR CRÍTICO de FFmpeg al generar {name_out}:")
-        print(result.stderr) # Esto imprimirá por qué tu NVIDIA rechazó el comando
-    else:
-        print(f"✅ ¡Video renderizado con éxito!")
+
+    encoders = [
+        ('GPU NVIDIA (h264_nvenc)', ['-hwaccel', 'cuda'], ['-c:v', 'h264_nvenc', '-preset', 'p4', '-cq:v', '20']),
+        ('Intel QSV (h264_qsv)',    [],                   ['-c:v', 'h264_qsv', '-global_quality', '23']),
+        ('CPU (libx264 fast)',      [],                   ['-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-threads', '4']),
+    ]
+
+    last_stderr = ""
+    for label, hw_args, codec_args in encoders:
+        print(f"🎬 Renderizando con {label}: {name_out}...")
+
+        cmd = (
+            ['ffmpeg', '-y']
+            + hw_args
+            + ['-i', path_v1, '-i', path_v2,
+               '-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
+               '-filter_complex', filter_complex,
+               '-map', '[outv]', '-map', '[outa]']
+            + codec_args
+            + ['-metadata', 'make=Apple',
+               '-metadata', 'model=iPhone 15 Pro',
+               '-metadata', f'location={LAT}{LON}/',
+               out_path]
+        )
+
+        result = subprocess.run(cmd, capture_output=True, text=True, creationflags=_NO_WINDOW)
+
+        if result.returncode == 0:
+            print(f"✅ Video renderizado con exito ({label})")
+            return
+
+        if os.path.exists(out_path):
+            os.remove(out_path)
+
+        last_stderr = result.stderr
+        print(f"⚠️ {label} fallo, probando siguiente encoder...")
+
+    print(f"❌ ERROR: No se pudo renderizar {name_out} con ningun encoder.")
+    print(last_stderr)
 def render_tanda(tanda_name: str) -> str:
     """Función puente llamada desde la Interfaz Gráfica (GUI) para procesar una tanda específica."""
     db = DatabaseManager()

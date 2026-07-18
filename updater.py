@@ -128,6 +128,12 @@ def _request_bytes(
     try:
         with open_url(request, timeout=timeout) as response:
             return response.read()
+    except urllib.error.HTTPError as exc:
+        if exc.code in {401, 403, 404}:
+            raise UpdateError(
+                f"GitHub rechazo el acceso ({exc.code}); revisa el token y el permiso Contents: Read-only"
+            ) from exc
+        raise UpdateError(f"GitHub respondio HTTP {exc.code} al consultar {url}") from exc
     except (OSError, urllib.error.URLError, urllib.error.HTTPError) as exc:
         raise UpdateError(f"No se pudo consultar {url}") from exc
 
@@ -157,6 +163,8 @@ def _github_asset_url(
         return None
     if not all((repository, release_tag, asset_name)):
         raise UpdateError("El manifiesto de GitHub esta incompleto")
+    if not token:
+        raise UpdateError("Falta el token de GitHub para consultar el repositorio privado")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
         raise UpdateError("github_repository no tiene un formato valido")
 
@@ -304,14 +312,21 @@ def apply_package(
 def check_and_apply(
     app_dir: Path = APP_DIR,
     opener: Callable[..., Any] | None = None,
+    status_callback: Callable[[str], None] | None = None,
 ) -> bool:
     """Check the configured manifest and apply it; failures are non-fatal."""
     app_dir = Path(app_dir).resolve()
+
+    def report(message: str) -> None:
+        print(f"Actualizador: {message}")
+        if status_callback:
+            status_callback(message)
+
     try:
         config = load_config(app_dir)
         manifest_url = str(config.get("manifest_url", "")).strip()
         if not manifest_url:
-            print("Actualizador: manifest_url no configurada; se abre la app local.")
+            report("manifest_url no configurada; se abre la app local.")
             return False
         timeout = int(config.get("timeout_seconds", 15))
         token = str(config.get("access_token", "")) or os.getenv("IG_GUI_UPDATE_TOKEN", "")
@@ -321,7 +336,7 @@ def check_and_apply(
         remote_version = str(manifest.get("version", ""))
         local_version = read_local_version(app_dir)
         if not is_newer(remote_version, local_version):
-            print(f"Actualizador: ya esta instalada la version {local_version}.")
+            report(f"ya esta instalada la version {local_version}.")
             return False
 
         github_asset_url = _github_asset_url(manifest, token, timeout, opener)
@@ -343,10 +358,13 @@ def check_and_apply(
             if actual_hash != expected_hash:
                 raise UpdateError("El SHA-256 del ZIP no coincide con el manifiesto")
             new_version = apply_package(app_dir, package_path, manifest)
-        print(f"Actualizador: aplicacion actualizada a {new_version}.")
+        report(f"aplicacion actualizada a {new_version}.")
         return True
     except Exception as exc:
-        print(f"Actualizador: {exc}. Se abrira la version local.", file=sys.stderr)
+        message = f"{exc}. Se abrira la version local."
+        print(f"Actualizador: {message}", file=sys.stderr)
+        if status_callback:
+            status_callback(message)
         return False
 
 

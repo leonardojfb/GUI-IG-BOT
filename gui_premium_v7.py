@@ -3,6 +3,7 @@
 Dashboard ultra-premium con CustomTkinter.
 Mantiene toda la lógica de negocio de gui_unificada.py.
 
+
 TAREA 1: Esqueleto base — sidebar, content area, status bar, reloj.
 """
 import customtkinter as ctk
@@ -19,6 +20,7 @@ import shutil
 import requests
 
 from database import DatabaseManager
+from updater import APP_DIR as UPDATE_APP_DIR, check_and_apply, load_config, read_local_version
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _ACCT_HIST_FILE = os.path.join(_BASE_DIR, "dist_accounts_history.json")
@@ -54,14 +56,16 @@ MAX_PER_SESSION = 10
 DELAY_MIN = 300    # 5 min
 DELAY_MAX = 600    # 10 min
 
-TIMEZONE_OPTIONS = [
-    "America/Argentina/Buenos_Aires",
-    "America/New_York",
-    "America/Chicago",
-    "America/Los_Angeles",
-    "Europe/Madrid",
-    "Europe/London",
-]
+TIMEZONE_MAP = {
+    "Buenos Aires": "America/Argentina/Buenos_Aires",
+    "Caracas":      "America/Caracas",
+    "New York":     "America/New_York",
+    "Chicago":      "America/Chicago",
+    "Los Angeles":  "America/Los_Angeles",
+    "Madrid":       "Europe/Madrid",
+    "London":       "Europe/London",
+}
+TZ_TO_LABEL = {v: k for k, v in TIMEZONE_MAP.items()}
 
 DAY_NAMES = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
 DEFAULT_CATEGORIES = ["promo", "suicide", "general"]
@@ -192,7 +196,7 @@ class AccountStatusPanel(ctk.CTkFrame):
     def _build_controls(self):
         ctrl = ctk.CTkFrame(self, fg_color="transparent")
         ctrl.grid(row=2, column=0, sticky="ew", padx=24, pady=10)
-        ctrl.grid_columnconfigure(5, weight=1)
+        ctrl.grid_columnconfigure(7, weight=1)
 
         self.btn_check = ctk.CTkButton(
             ctrl, text=f"▶  Verificar  (máx {MAX_PER_SESSION})",
@@ -226,21 +230,42 @@ class AccountStatusPanel(ctk.CTkFrame):
             border_width=1, border_color=BORDER,
             corner_radius=BTN_RADIUS, height=BTN_H,
             font=ctk.CTkFont(size=12), command=self.load_accounts
-        ).grid(row=0, column=3, padx=(0, 20))
+        ).grid(row=0, column=3, padx=(0, 8))
+
+        self.btn_delete_sel = ctk.CTkButton(
+            ctrl, text="🗑  Eliminar sel.",
+            fg_color=DANGER, text_color=TEXT_H1,
+            corner_radius=BTN_RADIUS, height=BTN_H,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=self._delete_selected
+        )
+        self.btn_delete_sel.grid(row=0, column=4, padx=(0, 6))
+
+        self.lbl_sel_count = ctk.CTkLabel(ctrl, text="", text_color=WARNING,
+                                           font=ctk.CTkFont(size=11, weight="bold"), width=52)
+        self.lbl_sel_count.grid(row=0, column=5, padx=(0, 12))
 
         self.lbl_progress = ctk.CTkLabel(ctrl, text="", text_color=TEXT_MUTED,
                                           font=ctk.CTkFont(size=11))
-        self.lbl_progress.grid(row=0, column=4, padx=(0, 12))
+        self.lbl_progress.grid(row=0, column=6, padx=(0, 12))
 
         self.pb = ctk.CTkProgressBar(ctrl, fg_color=BG_INPUT, progress_color=NEON_CYAN, height=8)
-        self.pb.grid(row=0, column=5, sticky="ew")
+        self.pb.grid(row=0, column=7, sticky="ew")
         self.pb.set(0)
 
     def _build_table_header(self):
         hdr = ctk.CTkFrame(self, fg_color=BG_CARD2, corner_radius=0, height=32)
         hdr.grid(row=3, column=0, sticky="ew", padx=24, pady=(4, 0))
         hdr.grid_propagate(False)
-        hdr.grid_columnconfigure(1, weight=1)
+        hdr.grid_columnconfigure(2, weight=1)
+
+        self._select_all_var = tk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            hdr, text="", variable=self._select_all_var,
+            checkbox_width=16, checkbox_height=16,
+            fg_color=NEON_PURPLE, hover_color=NEON_CYAN,
+            command=self._toggle_all, width=36
+        ).grid(row=0, column=0, padx=(14, 4), pady=4)
 
         cols = [
             ("Estado HTTP", 90,  "center"),
@@ -250,15 +275,16 @@ class AccountStatusPanel(ctk.CTkFrame):
             ("Tipo",        110, "center"),
         ]
         for i, (text, w, anchor) in enumerate(cols):
+            col = i + 1
             if w == 0:
-                hdr.grid_columnconfigure(i, weight=1)
+                hdr.grid_columnconfigure(col, weight=1)
             lbl = ctk.CTkLabel(
                 hdr, text=text, text_color=NEON_CYAN,
                 font=ctk.CTkFont(size=11, weight="bold"),
                 anchor=anchor, width=w if w else 0
             )
-            padx = (20, 8) if i == 0 else (8, 8)
-            lbl.grid(row=0, column=i, padx=padx, pady=4, sticky="ew" if w == 0 else "")
+            padx = (4, 8) if i == 0 else (8, 8)
+            lbl.grid(row=0, column=col, padx=padx, pady=4, sticky="ew" if w == 0 else "")
 
     def _build_scroll_area(self):
         self.scroll_frame = ctk.CTkScrollableFrame(
@@ -296,7 +322,16 @@ class AccountStatusPanel(ctk.CTkFrame):
         row_bg = BG_CARD if index % 2 == 0 else BG_CARD2
         row = ctk.CTkFrame(self.scroll_frame, fg_color=row_bg, corner_radius=4)
         row.grid(row=index, column=0, sticky="ew", pady=1, padx=2)
-        row.grid_columnconfigure(1, weight=1)
+        row.grid_columnconfigure(2, weight=1)
+
+        select_var = tk.BooleanVar(value=False)
+        chk = ctk.CTkCheckBox(
+            row, text="", variable=select_var,
+            checkbox_width=16, checkbox_height=16,
+            fg_color=NEON_PURPLE, hover_color=NEON_CYAN,
+            command=self._update_selected_count, width=36
+        )
+        chk.grid(row=0, column=0, padx=(14, 4), pady=8)
 
         circle_color = (
             SUCCESS   if status == "alive"
@@ -307,12 +342,12 @@ class AccountStatusPanel(ctk.CTkFrame):
             row, text="⬤", text_color=circle_color,
             font=ctk.CTkFont(size=18), width=90, anchor="center"
         )
-        circle.grid(row=0, column=0, padx=(20, 8), pady=8)
+        circle.grid(row=0, column=1, padx=(4, 8), pady=8)
 
         ctk.CTkLabel(
             row, text=f"@{username}", text_color=TEXT_BODY,
             font=ctk.CTkFont(size=12), anchor="w"
-        ).grid(row=0, column=1, padx=8, pady=8, sticky="ew")
+        ).grid(row=0, column=2, padx=8, pady=8, sticky="ew")
 
         combo = ctk.CTkComboBox(
             row, values=LABEL_OPTIONS,
@@ -322,7 +357,7 @@ class AccountStatusPanel(ctk.CTkFrame):
             command=lambda val, u=username: self._on_label_change(u, val)
         )
         combo.set(label_val)
-        combo.grid(row=0, column=2, padx=8, pady=6)
+        combo.grid(row=0, column=3, padx=8, pady=6)
 
         # Indicador de color según etiqueta
         label_dot = ctk.CTkLabel(
@@ -330,19 +365,19 @@ class AccountStatusPanel(ctk.CTkFrame):
             text_color=LABEL_COLORS.get(label_val, "#64748b"),
             font=ctk.CTkFont(size=10), width=16
         )
-        label_dot.grid(row=0, column=2, padx=(8, 0), pady=8, sticky="e")
+        label_dot.grid(row=0, column=3, padx=(8, 0), pady=8, sticky="e")
 
         ctk.CTkLabel(
             row, text=va, text_color=TEXT_MUTED,
             font=ctk.CTkFont(size=11), width=180, anchor="w"
-        ).grid(row=0, column=3, padx=(8, 8), pady=8, sticky="w")
+        ).grid(row=0, column=4, padx=(8, 8), pady=8, sticky="w")
 
         ctk.CTkLabel(
             row, text=acc_type, text_color=TEXT_MUTED,
             font=ctk.CTkFont(size=11), width=110, anchor="center"
-        ).grid(row=0, column=4, padx=(8, 20), pady=8)
+        ).grid(row=0, column=5, padx=(8, 20), pady=8)
 
-        self._rows[username] = {"circle": circle, "combo": combo, "dot": label_dot}
+        self._rows[username] = {"circle": circle, "combo": combo, "dot": label_dot, "select_var": select_var}
 
     # ── Acciones de usuario ───────────────────────────────────────────────────
 
@@ -372,6 +407,37 @@ class AccountStatusPanel(ctk.CTkFrame):
             self._rows[username]["circle"].configure(text_color="#64748b")
         self.pb.set(0)
         self.lbl_progress.configure(text="Estado reiniciado — listo para nueva sesión")
+
+    def _toggle_all(self):
+        val = self._select_all_var.get()
+        for d in self._rows.values():
+            d["select_var"].set(val)
+        self._update_selected_count()
+
+    def _update_selected_count(self):
+        n = sum(1 for d in self._rows.values() if d["select_var"].get())
+        self.lbl_sel_count.configure(text=f"{n} sel." if n else "")
+        # Si alguno fue desmarcado manualmente, quitar el "seleccionar todo"
+        if not n:
+            self._select_all_var.set(False)
+
+    def _delete_selected(self):
+        selected = [u for u, d in self._rows.items() if d["select_var"].get()]
+        if not selected:
+            messagebox.showinfo("Sin selección", "Seleccioná al menos una cuenta para eliminar.")
+            return
+        preview = "\n".join(f"  • @{u}" for u in selected[:10])
+        if len(selected) > 10:
+            preview += f"\n  … y {len(selected) - 10} más"
+        if not messagebox.askyesno(
+            "Eliminar cuentas",
+            f"¿Eliminar {len(selected)} cuenta(s) permanentemente?\n\n{preview}"
+        ):
+            return
+        for u in selected:
+            self.db.delete_account(u)
+        self._select_all_var.set(False)
+        self.load_accounts()
 
     def start_check(self):
         if self._checking:
@@ -600,6 +666,8 @@ class InstagramAutoPro(ctk.CTk):
         self.p1_dir = ""
         self.p2_dir = ""
         self.cap_file = ""
+        self.acct_cap_file = ""
+        self.tandas_cap_file = ""
         self.tg_controller = None
         self._tg_accounts = []
         self._tg_only_with_videos = None  # se inicializa en _build_tg_frame
@@ -619,6 +687,43 @@ class InstagramAutoPro(ctk.CTk):
 
         self.show_frame("Dashboard")
         self._update_clock()
+        self.after(250, self._show_startup_greeting)
+
+    def _show_startup_greeting(self):
+        """Small startup toast used to verify an installed update visually."""
+        toast = ctk.CTkToplevel(self)
+        toast.overrideredirect(True)
+        toast.attributes("-topmost", True)
+        toast.configure(fg_color=BG_CARD)
+
+        width, height = 250, 96
+        self.update_idletasks()
+        x = self.winfo_rootx() + max((self.winfo_width() - width) // 2, 0)
+        y = self.winfo_rooty() + max((self.winfo_height() - height) // 2, 0)
+        toast.geometry(f"{width}x{height}+{x}+{y}")
+
+        card = ctk.CTkFrame(
+            toast, fg_color=BG_CARD2, corner_radius=8,
+            border_width=1, border_color=NEON_CYAN
+        )
+        card.pack(fill="both", expand=True, padx=1, pady=1)
+        ctk.CTkLabel(
+            card, text="Hola!!", text_color=NEON_CYAN,
+            font=ctk.CTkFont(size=24, weight="bold")
+        ).pack(expand=True)
+
+        def fade(alpha=1.0):
+            if alpha <= 0:
+                toast.destroy()
+                return
+            try:
+                toast.attributes("-alpha", alpha)
+            except tk.TclError:
+                toast.after(1200, toast.destroy)
+                return
+            toast.after(70, lambda: fade(alpha - 0.1))
+
+        toast.after(600, fade)
 
     def _setup_treeview_style(self):
         """Aplica tema oscuro premium al ttk.Treeview estándar."""
@@ -642,7 +747,7 @@ class InstagramAutoPro(ctk.CTk):
             fg_color=BG_SIDEBAR, border_width=1, border_color=BORDER
         )
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(10, weight=1)
+        self.sidebar.grid_rowconfigure(11, weight=1)
         self.sidebar.grid_propagate(False)
 
         # — Logo —
@@ -669,6 +774,7 @@ class InstagramAutoPro(ctk.CTk):
             ("📡   Cuentas",    "Cuentas"),
             ("🤖   AI Advisor",  "AIAdvisor"),
             ("🔮   Forge",       "Forge"),
+            ("Actualizaciones", "Actualizaciones"),
         ]
         self._nav_btns = {}
         for i, (label, key) in enumerate(nav_items):
@@ -685,11 +791,11 @@ class InstagramAutoPro(ctk.CTk):
 
         # — Status del bot (parte inferior sidebar) —
         ctk.CTkFrame(self.sidebar, height=1, fg_color=BORDER).grid(
-            row=10, column=0, sticky="ew", padx=16, pady=(8, 4))
+            row=12, column=0, sticky="ew", padx=16, pady=(8, 4))
         self.lbl_bot_status = ctk.CTkLabel(
             self.sidebar, text="⬤  Bot inactivo",
             font=ctk.CTkFont(size=11), text_color=TEXT_MUTED)
-        self.lbl_bot_status.grid(row=11, column=0, padx=18, pady=(0, 18), sticky="sw")
+        self.lbl_bot_status.grid(row=13, column=0, padx=18, pady=(0, 18), sticky="sw")
 
     def set_bot_status(self, active: bool):
         """Actualiza indicador de bot en la sidebar."""
@@ -707,7 +813,7 @@ class InstagramAutoPro(ctk.CTk):
         container.grid_columnconfigure(0, weight=1)
         self._container = container
 
-        for name in ["Dashboard", "Equipo", "Tandas", "Logistica", "Telegram", "Cuentas", "AIAdvisor", "Forge"]:
+        for name in ["Dashboard", "Equipo", "Tandas", "Logistica", "Telegram", "Cuentas", "AIAdvisor", "Forge", "Actualizaciones"]:
             f = ctk.CTkFrame(container, fg_color=BG_APP, corner_radius=0)
             f.grid(row=0, column=0, sticky="nsew")
             self._frames[name] = f
@@ -721,6 +827,7 @@ class InstagramAutoPro(ctk.CTk):
         self._build_cuentas_frame()
         self._build_ai_frame()
         self._build_forge_frame()
+        self._build_updates_frame()
 
     # ── Status Bar ────────────────────────────────────────────────────────
     def _build_status_bar(self):
@@ -754,6 +861,167 @@ class InstagramAutoPro(ctk.CTk):
             self._refresh_tandas_list()
 
     # ── Reloj ─────────────────────────────────────────────────────────────
+    def _build_updates_frame(self):
+        """Configuracion local del canal de actualizaciones privadas."""
+        f = self._frames["Actualizaciones"]
+        f.grid_columnconfigure(0, weight=1)
+        f.grid_rowconfigure(1, weight=1)
+
+        header = ctk.CTkFrame(f, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 10))
+        ctk.CTkLabel(
+            header, text="Actualizaciones",
+            font=ctk.CTkFont(size=22, weight="bold"), text_color=TEXT_H1
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            header, text="Configura el acceso al repositorio privado y comprueba nuevas versiones.",
+            font=ctk.CTkFont(size=12), text_color=TEXT_MUTED
+        ).pack(anchor="w", pady=(4, 0))
+
+        card = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        card.grid(row=1, column=0, sticky="new", padx=24, pady=(0, 24))
+        card.grid_columnconfigure(1, weight=1)
+
+        try:
+            config = load_config(UPDATE_APP_DIR)
+        except Exception:
+            config = {}
+
+        ctk.CTkLabel(
+            card, text="Manifiesto remoto:", text_color=TEXT_MUTED,
+            font=ctk.CTkFont(size=11)
+        ).grid(row=0, column=0, padx=(20, 10), pady=(20, 8), sticky="e")
+        self.e_update_manifest = ctk.CTkEntry(
+            card, fg_color=BG_INPUT, border_color=BORDER,
+            placeholder_text="https://raw.githubusercontent.com/.../release-manifest.json"
+        )
+        self.e_update_manifest.grid(row=0, column=1, columnspan=2, padx=(0, 20), pady=(20, 8), sticky="ew")
+        if config.get("manifest_url"):
+            self.e_update_manifest.insert(0, str(config["manifest_url"]))
+
+        ctk.CTkLabel(
+            card, text="Token GitHub:", text_color=TEXT_MUTED,
+            font=ctk.CTkFont(size=11)
+        ).grid(row=1, column=0, padx=(20, 10), pady=8, sticky="e")
+        self.e_update_token = ctk.CTkEntry(
+            card, fg_color=BG_INPUT, border_color=BORDER, show="*",
+            placeholder_text="github_pat_... (Contents: Read-only)"
+        )
+        self.e_update_token.grid(row=1, column=1, columnspan=2, padx=(0, 20), pady=8, sticky="ew")
+        if config.get("access_token"):
+            self.e_update_token.insert(0, str(config["access_token"]))
+
+        self.lbl_update_state = ctk.CTkLabel(
+            card, text="", text_color=TEXT_MUTED,
+            font=ctk.CTkFont(size=11), anchor="w"
+        )
+        self.lbl_update_state.grid(row=2, column=0, columnspan=3, padx=20, pady=(8, 12), sticky="ew")
+
+        buttons = ctk.CTkFrame(card, fg_color="transparent")
+        buttons.grid(row=3, column=0, columnspan=3, padx=20, pady=(0, 20), sticky="ew")
+        buttons.grid_columnconfigure(3, weight=1)
+        ctk.CTkButton(
+            buttons, text="Guardar configuracion", fg_color=SUCCESS, text_color=BG_APP,
+            height=BTN_H, corner_radius=BTN_RADIUS, command=self._save_update_config
+        ).grid(row=0, column=0, padx=(0, 8))
+        ctk.CTkButton(
+            buttons, text="Borrar token", fg_color=BG_CARD2, text_color=TEXT_BODY,
+            border_width=1, border_color=BORDER, height=BTN_H, corner_radius=BTN_RADIUS,
+            command=self._clear_update_token
+        ).grid(row=0, column=1, padx=(0, 8))
+        self.btn_check_update = ctk.CTkButton(
+            buttons, text="Comprobar y actualizar", fg_color=NEON_CYAN, text_color=BG_APP,
+            height=BTN_H, corner_radius=BTN_RADIUS, command=self._check_updates_from_gui
+        )
+        self.btn_check_update.grid(row=0, column=2, padx=(0, 8))
+
+        self._refresh_update_state()
+
+    def _refresh_update_state(self, message=None, color=TEXT_MUTED):
+        try:
+            version = read_local_version(UPDATE_APP_DIR)
+        except Exception:
+            version = "desconocida"
+        token_set = bool(self.e_update_token.get().strip())
+        state = f"Version instalada: {version}  |  Token: {'configurado' if token_set else 'no configurado'}"
+        if message:
+            state += f"  |  {message}"
+        self.lbl_update_state.configure(text=state, text_color=color)
+
+    def _write_update_config(self):
+        config_path = os.path.join(UPDATE_APP_DIR, "update_config.json")
+        config = {}
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, "r", encoding="utf-8") as handle:
+                    loaded = json.load(handle)
+                if isinstance(loaded, dict):
+                    config = loaded
+            except (OSError, json.JSONDecodeError):
+                config = {}
+        config["manifest_url"] = self.e_update_manifest.get().strip()
+        config["timeout_seconds"] = int(config.get("timeout_seconds", 15))
+        config["check_on_start"] = True
+        config["access_token"] = self.e_update_token.get().strip()
+        with open(config_path, "w", encoding="utf-8") as handle:
+            json.dump(config, handle, indent=2, ensure_ascii=True)
+
+    def _save_update_config(self):
+        try:
+            if not self.e_update_manifest.get().strip():
+                return messagebox.showwarning("Configuracion incompleta", "Indica la URL del manifiesto.", parent=self)
+            self._write_update_config()
+            self._refresh_update_state("configuracion guardada", SUCCESS)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Error", f"No se pudo guardar la configuracion: {exc}", parent=self)
+
+    def _clear_update_token(self):
+        if not messagebox.askyesno("Borrar token", "Eliminar el token local de GitHub?", parent=self):
+            return
+        self.e_update_token.delete(0, "end")
+        try:
+            self._write_update_config()
+            self._refresh_update_state("token eliminado", WARNING)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Error", f"No se pudo guardar la configuracion: {exc}", parent=self)
+
+    def _check_updates_from_gui(self):
+        try:
+            self._write_update_config()
+            before = read_local_version(UPDATE_APP_DIR)
+        except (OSError, ValueError) as exc:
+            return messagebox.showerror("Error", f"No se pudo preparar la actualizacion: {exc}", parent=self)
+
+        self.btn_check_update.configure(state="disabled", text="Comprobando...")
+        self._refresh_update_state("consultando GitHub", WARNING)
+
+        def worker():
+            messages = []
+            updated = check_and_apply(UPDATE_APP_DIR, status_callback=messages.append)
+            try:
+                after = read_local_version(UPDATE_APP_DIR)
+            except Exception:
+                after = before
+            detail = messages[-1] if messages else "No se recibio respuesta del actualizador."
+            self.after(0, lambda: self._finish_gui_update(before, after, updated, detail))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_gui_update(self, before, after, updated, detail):
+        self.btn_check_update.configure(state="normal", text="Comprobar y actualizar")
+        if updated and after != before:
+            self._refresh_update_state(f"actualizada de {before} a {after}; reinicia la GUI", SUCCESS)
+            messagebox.showinfo(
+                "Actualizacion aplicada",
+                f"La version {after} ya esta instalada. Cierra y vuelve a abrir la GUI para usarla.",
+                parent=self,
+            )
+        else:
+            color = WARNING if "ya esta instalada" in detail else DANGER
+            self._refresh_update_state(detail, color)
+            if color == DANGER:
+                messagebox.showerror("No se pudo actualizar", detail, parent=self)
+
     def _update_clock(self):
         self.lbl_clock.configure(
             text=datetime.now().strftime("🕐  %Y-%m-%d   %H:%M:%S"))
@@ -817,7 +1085,8 @@ class InstagramAutoPro(ctk.CTk):
         # Treeview
         cols = ("VA", "Telegram ID", "Cuenta IG", "Categoría", "Videos", "Fecha")
         self.tree = ttk.Treeview(table_frame, columns=cols, show="headings",
-                                  style="Premium.Treeview", height=16)
+                                  style="Premium.Treeview", height=16,
+                                  selectmode="extended")
         col_widths = {"VA": 120, "Telegram ID": 130, "Cuenta IG": 160,
                       "Categoría": 120, "Videos": 80, "Fecha": 110}
         for c in cols:
@@ -944,6 +1213,10 @@ class InstagramAutoPro(ctk.CTk):
             return None
         return self.tree.item(sel[0])["values"][2].lstrip("@")
 
+    def get_selected_accounts(self) -> list[str]:
+        return [self.tree.item(iid)["values"][2].lstrip("@")
+                for iid in self.tree.selection()]
+
     def change_account_category(self):
         username = self.get_selected_account()
         if not username:
@@ -974,10 +1247,20 @@ class InstagramAutoPro(ctk.CTk):
             messagebox.showinfo("✅", "VA actualizado.")
 
     def delete_account(self):
-        username = self.get_selected_account()
-        if username and messagebox.askyesno(
-                "Confirmar", f"¿Eliminar la cuenta @{username}?"):
-            self.db.delete_account(username)
+        usernames = self.get_selected_accounts()
+        if not usernames:
+            messagebox.showwarning("⚠️", "Selecciona al menos una cuenta.")
+            return
+        if len(usernames) == 1:
+            msg = f"¿Eliminar la cuenta @{usernames[0]}?"
+        else:
+            preview = "\n".join(f"  • @{u}" for u in usernames[:10])
+            if len(usernames) > 10:
+                preview += f"\n  … y {len(usernames) - 10} más"
+            msg = f"¿Eliminar {len(usernames)} cuentas?\n\n{preview}"
+        if messagebox.askyesno("Confirmar eliminación", msg):
+            for u in usernames:
+                self.db.delete_account(u)
             self.refresh_dashboard()
 
     def _sort_tree(self, tv, col, reverse):
@@ -990,21 +1273,24 @@ class InstagramAutoPro(ctk.CTk):
         tv.heading(col, command=lambda: self._sort_tree(tv, col, not reverse))
 
     def _build_team_frame(self):
-        """Panel Admin — VAs / Cuentas / Categorías en 3 columnas."""
+        """Panel Admin — fila superior: VAs / Categorías / Tandas  |  fila inferior: Cuentas (ancho completo)."""
         f = self._frames["Equipo"]
-        f.grid_rowconfigure(1, weight=1)
+        f.grid_rowconfigure(1, weight=1)   # fila superior
+        f.grid_rowconfigure(2, weight=2)   # fila inferior (Cuentas) — más espacio vertical
         f.grid_columnconfigure((0, 1, 2), weight=1)
 
         # ── Header ──────────────────────────────────────────────────────
         header = ctk.CTkFrame(f, fg_color="transparent")
         header.grid(row=0, column=0, columnspan=3, sticky="ew", padx=24, pady=(20, 10))
-        ctk.CTkLabel(header, text="⚙️  Admin — VAs · Cuentas · Categorías",
+        ctk.CTkLabel(header, text="⚙️  Admin — VAs · Cuentas · Categorías · Tandas",
                      font=ctk.CTkFont(size=22, weight="bold"),
                      text_color=TEXT_H1).grid(row=0, column=0, sticky="w")
 
+        # ══ FILA SUPERIOR ═══════════════════════════════════════════════
+
         # ── Columna 0: VAs ───────────────────────────────────────────────
         col0 = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
-        col0.grid(row=1, column=0, sticky="nsew", padx=(24, 8), pady=(0, 24))
+        col0.grid(row=1, column=0, sticky="nsew", padx=(24, 8), pady=(0, 8))
         col0.grid_rowconfigure(1, weight=1)
         col0.grid_columnconfigure(0, weight=1)
 
@@ -1033,63 +1319,21 @@ class InstagramAutoPro(ctk.CTk):
                       font=ctk.CTkFont(weight="bold"),
                       command=self.add_va_ui).grid(row=4, column=0, sticky="ew")
 
-        # ── Columna 1: Cuentas ───────────────────────────────────────────
+        # ── Columna 1: Categorías ────────────────────────────────────────
         col1 = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
-        col1.grid(row=1, column=1, sticky="nsew", padx=8, pady=(0, 24))
+        col1.grid(row=1, column=1, sticky="nsew", padx=8, pady=(0, 8))
         col1.grid_rowconfigure(1, weight=1)
         col1.grid_columnconfigure(0, weight=1)
 
-        self._acc_header_lbl = ctk.CTkLabel(
-            col1, text="📱  Cuentas (0)",
-            font=ctk.CTkFont(size=14, weight="bold"), text_color=NEON_PURPLE)
-        self._acc_header_lbl.grid(row=0, column=0, sticky="w", padx=16, pady=(16, 8))
-
-        self._acc_scroll = ctk.CTkScrollableFrame(col1, fg_color="transparent")
-        self._acc_scroll.grid(row=1, column=0, sticky="nsew", padx=8, pady=4)
-        self._acc_scroll.grid_columnconfigure(0, weight=1)
-
-        bulk_form = ctk.CTkFrame(col1, fg_color="transparent")
-        bulk_form.grid(row=2, column=0, sticky="ew", padx=16, pady=(8, 16))
-        bulk_form.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(bulk_form, text="Agregar cuentas (una por línea):",
-                     text_color=TEXT_MUTED, font=ctk.CTkFont(size=11)).grid(row=0, column=0, sticky="w")
-        self.txt_accounts = ctk.CTkTextbox(bulk_form, fg_color=BG_INPUT, border_color=BORDER,
-                                            border_width=1, height=70)
-        self.txt_accounts.grid(row=1, column=0, sticky="ew", pady=(2, 6))
-
-        ba_ctrl = ctk.CTkFrame(bulk_form, fg_color="transparent")
-        ba_ctrl.grid(row=2, column=0, sticky="ew")
-        ba_ctrl.grid_columnconfigure((1, 3), weight=1)
-        ctk.CTkLabel(ba_ctrl, text="Cat:", text_color=TEXT_MUTED,
-                     font=ctk.CTkFont(size=11)).grid(row=0, column=0, padx=(0, 4))
-        self.c_bulk_cat = ctk.CTkComboBox(ba_ctrl, values=[], fg_color=BG_INPUT, border_color=BORDER)
-        self.c_bulk_cat.grid(row=0, column=1, padx=(0, 8), sticky="ew")
-        ctk.CTkLabel(ba_ctrl, text="VA:", text_color=TEXT_MUTED,
-                     font=ctk.CTkFont(size=11)).grid(row=0, column=2, padx=(0, 4))
-        self.c_bulk_va = ctk.CTkComboBox(ba_ctrl, values=[], fg_color=BG_INPUT, border_color=BORDER)
-        self.c_bulk_va.grid(row=0, column=3, sticky="ew")
-
-        ctk.CTkButton(bulk_form, text="🚀 Cargar cuentas", fg_color=IG_PINK,
-                      hover_color=self._darken(IG_PINK), text_color=TEXT_H1,
-                      corner_radius=BTN_RADIUS, height=BTN_H,
-                      font=ctk.CTkFont(weight="bold"),
-                      command=self.add_bulk_accounts).grid(row=3, column=0, sticky="ew", pady=(6, 0))
-
-        # ── Columna 2: Categorías ────────────────────────────────────────
-        col2 = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
-        col2.grid(row=1, column=2, sticky="nsew", padx=(8, 24), pady=(0, 24))
-        col2.grid_rowconfigure(1, weight=1)
-        col2.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(col2, text="🏷️  Categorías",
+        ctk.CTkLabel(col1, text="🏷️  Categorías",
                      font=ctk.CTkFont(size=14, weight="bold"),
                      text_color=WARNING).grid(row=0, column=0, sticky="w", padx=16, pady=(16, 8))
 
-        self._cat_scroll = ctk.CTkScrollableFrame(col2, fg_color="transparent")
+        self._cat_scroll = ctk.CTkScrollableFrame(col1, fg_color="transparent")
         self._cat_scroll.grid(row=1, column=0, sticky="nsew", padx=8, pady=4)
         self._cat_scroll.grid_columnconfigure(0, weight=1)
 
-        cat_form = ctk.CTkFrame(col2, fg_color="transparent")
+        cat_form = ctk.CTkFrame(col1, fg_color="transparent")
         cat_form.grid(row=2, column=0, sticky="ew", padx=16, pady=(8, 16))
         cat_form.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(cat_form, text="Nombre:", text_color=TEXT_MUTED,
@@ -1101,6 +1345,114 @@ class InstagramAutoPro(ctk.CTk):
                       corner_radius=BTN_RADIUS, height=BTN_H,
                       font=ctk.CTkFont(weight="bold"),
                       command=self.add_category_ui).grid(row=2, column=0, sticky="ew")
+
+        # ── Columna 2: Tandas ────────────────────────────────────────────
+        col2 = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        col2.grid(row=1, column=2, sticky="nsew", padx=(8, 24), pady=(0, 8))
+        col2.grid_rowconfigure(1, weight=1)
+        col2.grid_columnconfigure(0, weight=1)
+
+        self._tanda_admin_header = ctk.CTkLabel(
+            col2, text="🎬  Tandas (0)",
+            font=ctk.CTkFont(size=14, weight="bold"), text_color=IG_PINK)
+        self._tanda_admin_header.grid(row=0, column=0, sticky="w", padx=16, pady=(16, 8))
+
+        self._tanda_scroll = ctk.CTkScrollableFrame(col2, fg_color="transparent")
+        self._tanda_scroll.grid(row=1, column=0, sticky="nsew", padx=8, pady=4)
+        self._tanda_scroll.grid_columnconfigure(0, weight=1)
+
+        tanda_form = ctk.CTkFrame(col2, fg_color="transparent")
+        tanda_form.grid(row=2, column=0, sticky="ew", padx=16, pady=(8, 16))
+        tanda_form.grid_columnconfigure((0, 2), weight=1)
+
+        # Nombre de nueva tanda
+        ctk.CTkLabel(tanda_form, text="Nombre:", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11)).grid(row=0, column=0, columnspan=3, sticky="w")
+        self.e_tanda_admin_name = ctk.CTkEntry(tanda_form, fg_color=BG_INPUT, border_color=BORDER,
+                                                placeholder_text="TANDA_001")
+        self.e_tanda_admin_name.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(2, 6))
+
+        self._tanda_admin_p1 = ""
+        self._tanda_admin_p2 = ""
+        self._tanda_admin_cap = ""
+
+        # P1 y P2 en la misma fila
+        self.lbl_tanda_p1 = ctk.CTkLabel(tanda_form, text="P1: —", text_color=TEXT_MUTED,
+                                          font=ctk.CTkFont(size=10), anchor="w")
+        self.lbl_tanda_p1.grid(row=2, column=0, sticky="w")
+        self.lbl_tanda_p2 = ctk.CTkLabel(tanda_form, text="P2: —", text_color=TEXT_MUTED,
+                                          font=ctk.CTkFont(size=10), anchor="w")
+        self.lbl_tanda_p2.grid(row=2, column=2, sticky="w")
+
+        ctk.CTkButton(tanda_form, text="📂 P1 (Inicio)", fg_color=NEON_PURPLE,
+                      hover_color=self._darken(NEON_PURPLE), text_color=TEXT_H1,
+                      corner_radius=BTN_RADIUS, height=BTN_H, font=ctk.CTkFont(size=11),
+                      command=self._tanda_admin_pick_p1).grid(row=3, column=0, sticky="ew", pady=(2, 6))
+        ctk.CTkFrame(tanda_form, width=8, fg_color="transparent").grid(row=3, column=1)
+        ctk.CTkButton(tanda_form, text="📂 P2 (Cierre)", fg_color=NEON_CYAN,
+                      hover_color=self._darken(NEON_CYAN), text_color=BG_APP,
+                      corner_radius=BTN_RADIUS, height=BTN_H, font=ctk.CTkFont(size=11),
+                      command=self._tanda_admin_pick_p2).grid(row=3, column=2, sticky="ew", pady=(2, 6))
+
+        self.lbl_tanda_cap = ctk.CTkLabel(tanda_form, text="Captions: —", text_color=TEXT_MUTED,
+                                           font=ctk.CTkFont(size=10), anchor="w")
+        self.lbl_tanda_cap.grid(row=4, column=0, columnspan=3, sticky="w")
+        ctk.CTkButton(tanda_form, text="📄 Captions (.txt)", fg_color=WARNING,
+                      hover_color=self._darken(WARNING), text_color=BG_APP,
+                      corner_radius=BTN_RADIUS, height=BTN_H, font=ctk.CTkFont(size=11),
+                      command=self._tanda_admin_pick_cap).grid(row=5, column=0, columnspan=3, sticky="ew", pady=(2, 8))
+
+        ctk.CTkButton(tanda_form, text="➕ Guardar Tanda", fg_color=IG_PINK,
+                      hover_color=self._darken(IG_PINK), text_color=TEXT_H1,
+                      corner_radius=BTN_RADIUS, height=BTN_H,
+                      font=ctk.CTkFont(weight="bold"),
+                      command=self._tanda_admin_save).grid(row=6, column=0, columnspan=3, sticky="ew")
+
+        # ══ FILA INFERIOR: Cuentas (ancho completo) ══════════════════════
+
+        col_acc = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        col_acc.grid(row=2, column=0, columnspan=3, sticky="nsew", padx=24, pady=(0, 24))
+        col_acc.grid_rowconfigure(1, weight=1)
+        col_acc.grid_columnconfigure(0, weight=1)
+
+        # Header de cuentas con el formulario de alta en la misma barra
+        acc_top = ctk.CTkFrame(col_acc, fg_color="transparent")
+        acc_top.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 6))
+        acc_top.grid_columnconfigure(3, weight=1)
+
+        self._acc_header_lbl = ctk.CTkLabel(
+            acc_top, text="📱  Cuentas (0)",
+            font=ctk.CTkFont(size=14, weight="bold"), text_color=NEON_PURPLE)
+        self._acc_header_lbl.grid(row=0, column=0, sticky="w", padx=(0, 24))
+
+        # Agregar cuentas inline (no ocupa fila extra)
+        ctk.CTkLabel(acc_top, text="Agregar (una por línea):", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11)).grid(row=0, column=1, sticky="w", padx=(0, 6))
+        self.txt_accounts = ctk.CTkTextbox(acc_top, fg_color=BG_INPUT, border_color=BORDER,
+                                            border_width=1, height=54, width=260)
+        self.txt_accounts.grid(row=0, column=2, padx=(0, 10))
+
+        bulk_right = ctk.CTkFrame(acc_top, fg_color="transparent")
+        bulk_right.grid(row=0, column=3, sticky="ew")
+        bulk_right.grid_columnconfigure((1, 3), weight=1)
+
+        ctk.CTkLabel(bulk_right, text="Cat:", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11)).grid(row=0, column=0, padx=(0, 4))
+        self.c_bulk_cat = ctk.CTkComboBox(bulk_right, values=[], fg_color=BG_INPUT, border_color=BORDER, width=130)
+        self.c_bulk_cat.grid(row=0, column=1, padx=(0, 8), sticky="ew")
+        ctk.CTkLabel(bulk_right, text="VA:", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11)).grid(row=0, column=2, padx=(0, 4))
+        self.c_bulk_va = ctk.CTkComboBox(bulk_right, values=[], fg_color=BG_INPUT, border_color=BORDER, width=130)
+        self.c_bulk_va.grid(row=0, column=3, padx=(0, 10), sticky="ew")
+        ctk.CTkButton(bulk_right, text="🚀 Cargar", fg_color=IG_PINK,
+                      hover_color=self._darken(IG_PINK), text_color=TEXT_H1,
+                      corner_radius=BTN_RADIUS, height=BTN_H,
+                      font=ctk.CTkFont(weight="bold"),
+                      command=self.add_bulk_accounts).grid(row=0, column=4)
+
+        self._acc_scroll = ctk.CTkScrollableFrame(col_acc, fg_color="transparent")
+        self._acc_scroll.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
+        self._acc_scroll.grid_columnconfigure(0, weight=1)
 
         self._admin_refresh()
 
@@ -1194,12 +1546,14 @@ class InstagramAutoPro(ctk.CTk):
             ctk.CTkLabel(r, text="⬤", text_color=dot_color,
                          font=ctk.CTkFont(size=10)).grid(row=0, column=1, padx=(4, 2))
 
-            # Dropdown de timezone
-            tz_var = tk.StringVar(value=tz)
+            # Dropdown de timezone (etiqueta corta para no aplastar el nombre del VA)
+            tz_label = TZ_TO_LABEL.get(tz, tz)
+            tz_var = tk.StringVar(value=tz_label)
             tz_menu = ctk.CTkOptionMenu(
-                r, values=TIMEZONE_OPTIONS, variable=tz_var, width=180,
+                r, values=list(TIMEZONE_MAP.keys()), variable=tz_var, width=110,
                 fg_color=BG_CARD2, button_color=BG_CARD2, text_color=TEXT_BODY,
-                command=lambda new_tz, n=name: self._admin_save_va_tz(n, new_tz),
+                font=ctk.CTkFont(size=11),
+                command=lambda label, n=name: self._admin_save_va_tz(n, label),
             )
             tz_menu.grid(row=0, column=2, padx=(4, 4))
 
@@ -1274,6 +1628,8 @@ class InstagramAutoPro(ctk.CTk):
             self._admin_load_accounts()
         if hasattr(self, "_cat_scroll"):
             self._admin_load_cats()
+        if hasattr(self, "_tanda_scroll"):
+            self._admin_load_tandas()
         cats = self.db.get_categories()
         vas  = ["Sin Asignar"] + self.db.get_vas()
         if hasattr(self, "c_bulk_cat"):
@@ -1296,9 +1652,10 @@ class InstagramAutoPro(ctk.CTk):
             self.db.update_va_telegram_group(va_name, new_tg.strip())
             self._admin_load_vas()
 
-    def _admin_save_va_tz(self, va_name: str, timezone: str):
+    def _admin_save_va_tz(self, va_name: str, label: str):
         """Guarda el timezone seleccionado en el dropdown de una VA."""
-        self.db.set_va_timezone(va_name, timezone)
+        tz_id = TIMEZONE_MAP.get(label, label)
+        self.db.set_va_timezone(va_name, tz_id)
 
     def _admin_delete_va(self, va_name: str):
         if messagebox.askyesno("Eliminar VA", f"¿Eliminar '{va_name}'?", parent=self):
@@ -1315,6 +1672,183 @@ class InstagramAutoPro(ctk.CTk):
         if messagebox.askyesno("Eliminar categoría", f"¿Eliminar '{cat_name}'?", parent=self):
             self.db.delete_category(cat_name)
             self._admin_refresh()
+
+    # ── Admin Tandas ─────────────────────────────────────────────────────────
+
+    def _admin_load_tandas(self):
+        if not hasattr(self, "_tanda_scroll"):
+            return
+        for w in self._tanda_scroll.winfo_children():
+            w.destroy()
+        tandas = self.db.get_all_tandas()
+        self._tanda_admin_header.configure(text=f"🎬  Tandas ({len(tandas)})")
+        for tanda in tandas:
+            name = tanda.get("tanda_name", "")
+            p1   = os.path.basename(tanda.get("p1_folder", "")) or "—"
+            p2   = os.path.basename(tanda.get("p2_folder", "")) or "—"
+            cap  = os.path.basename(tanda.get("captions_file_path", "") or "") or "—"
+
+            r = ctk.CTkFrame(self._tanda_scroll, fg_color=BG_CARD2, corner_radius=4)
+            r.pack(fill="x", pady=3, padx=4)
+            r.grid_columnconfigure(0, weight=1)
+
+            ctk.CTkLabel(r, text=name, text_color=IG_PINK,
+                         font=ctk.CTkFont(size=12, weight="bold"), anchor="w"
+                         ).grid(row=0, column=0, columnspan=3, sticky="w", padx=8, pady=(6, 0))
+            ctk.CTkLabel(r, text=f"P1: {p1[:20]}", text_color=TEXT_MUTED,
+                         font=ctk.CTkFont(size=10), anchor="w"
+                         ).grid(row=1, column=0, sticky="w", padx=8, pady=0)
+            ctk.CTkLabel(r, text=f"P2: {p2[:20]}", text_color=TEXT_MUTED,
+                         font=ctk.CTkFont(size=10), anchor="w"
+                         ).grid(row=2, column=0, sticky="w", padx=8, pady=0)
+            ctk.CTkLabel(r, text=f"Cap: {cap[:20]}", text_color=TEXT_MUTED,
+                         font=ctk.CTkFont(size=10), anchor="w"
+                         ).grid(row=3, column=0, sticky="w", padx=8, pady=(0, 4))
+
+            ctk.CTkButton(r, text="✏️", width=30, height=26, corner_radius=4,
+                          fg_color=NEON_CYAN, text_color=BG_APP,
+                          hover_color=self._darken(NEON_CYAN),
+                          command=lambda t=tanda: self._admin_edit_tanda(t)
+                          ).grid(row=0, column=1, padx=(4, 2), pady=(4, 0), sticky="ne")
+            ctk.CTkButton(r, text="×", width=28, height=26, corner_radius=4,
+                          fg_color=DANGER, text_color=TEXT_H1,
+                          hover_color=self._darken(DANGER),
+                          command=lambda n=name: self._admin_delete_tanda(n)
+                          ).grid(row=0, column=2, padx=(2, 6), pady=(4, 0), sticky="ne")
+
+    def _admin_edit_tanda(self, tanda: dict):
+        dlg = ctk.CTkToplevel(self)
+        dlg.title(f"Editar Tanda — {tanda['tanda_name']}")
+        dlg.geometry("440x340")
+        dlg.configure(fg_color=BG_CARD)
+        dlg.transient(self)
+        dlg.grab_set()
+        dlg.resizable(False, False)
+
+        state = {
+            "p1": tanda.get("p1_folder", ""),
+            "p2": tanda.get("p2_folder", ""),
+            "cap": tanda.get("captions_file_path", "") or "",
+        }
+
+        ctk.CTkLabel(dlg, text="Nombre:", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11)).pack(anchor="w", padx=20, pady=(20, 2))
+        e_name = ctk.CTkEntry(dlg, fg_color=BG_INPUT, border_color=BORDER)
+        e_name.insert(0, tanda.get("tanda_name", ""))
+        e_name.pack(fill="x", padx=20, pady=(0, 8))
+
+        lbl_p1 = ctk.CTkLabel(dlg, text=f"P1: {os.path.basename(state['p1']) or '—'}",
+                               text_color=NEON_PURPLE, font=ctk.CTkFont(size=11), anchor="w")
+        lbl_p1.pack(fill="x", padx=20)
+
+        def pick_p1():
+            path = filedialog.askdirectory(title="Carpeta P1", parent=dlg)
+            if path:
+                state["p1"] = path
+                lbl_p1.configure(text=f"P1: {os.path.basename(path)}")
+        ctk.CTkButton(dlg, text="📂 Cambiar P1", fg_color=NEON_PURPLE,
+                      hover_color=self._darken(NEON_PURPLE), text_color=TEXT_H1,
+                      corner_radius=BTN_RADIUS, height=BTN_H, command=pick_p1
+                      ).pack(fill="x", padx=20, pady=(2, 8))
+
+        lbl_p2 = ctk.CTkLabel(dlg, text=f"P2: {os.path.basename(state['p2']) or '—'}",
+                               text_color=NEON_CYAN, font=ctk.CTkFont(size=11), anchor="w")
+        lbl_p2.pack(fill="x", padx=20)
+
+        def pick_p2():
+            path = filedialog.askdirectory(title="Carpeta P2", parent=dlg)
+            if path:
+                state["p2"] = path
+                lbl_p2.configure(text=f"P2: {os.path.basename(path)}")
+        ctk.CTkButton(dlg, text="📂 Cambiar P2", fg_color=NEON_CYAN,
+                      hover_color=self._darken(NEON_CYAN), text_color=BG_APP,
+                      corner_radius=BTN_RADIUS, height=BTN_H, command=pick_p2
+                      ).pack(fill="x", padx=20, pady=(2, 8))
+
+        lbl_cap = ctk.CTkLabel(dlg, text=f"Cap: {os.path.basename(state['cap']) or '—'}",
+                               text_color=WARNING, font=ctk.CTkFont(size=11), anchor="w")
+        lbl_cap.pack(fill="x", padx=20)
+
+        def pick_cap():
+            path = filedialog.askopenfilename(filetypes=[("Texto", "*.txt")], parent=dlg)
+            if path:
+                state["cap"] = path
+                lbl_cap.configure(text=f"Cap: {os.path.basename(path)}")
+        ctk.CTkButton(dlg, text="📄 Cambiar Captions", fg_color=WARNING,
+                      hover_color=self._darken(WARNING), text_color=BG_APP,
+                      corner_radius=BTN_RADIUS, height=BTN_H, command=pick_cap
+                      ).pack(fill="x", padx=20, pady=(2, 12))
+
+        def save():
+            new_name = e_name.get().strip().upper()
+            if not new_name or not state["p1"] or not state["p2"]:
+                messagebox.showwarning("⚠️", "Nombre, P1 y P2 son obligatorios.", parent=dlg)
+                return
+            old_name = tanda["tanda_name"]
+            cur = self.db.conn.cursor()
+            cur.execute(
+                "UPDATE batch_tandas SET tanda_name=?, p1_folder=?, p2_folder=?, captions_file_path=? WHERE tanda_name=?",
+                (new_name, state["p1"], state["p2"], state["cap"] or None, old_name)
+            )
+            self.db.conn.commit()
+            dlg.destroy()
+            self._admin_load_tandas()
+            self.reload_dist_lists()
+            messagebox.showinfo("✅", f"Tanda '{new_name}' actualizada.")
+
+        ctk.CTkButton(dlg, text="💾 Guardar cambios", fg_color=SUCCESS,
+                      hover_color=self._darken(SUCCESS), text_color=BG_APP,
+                      corner_radius=BTN_RADIUS, height=BTN_H,
+                      font=ctk.CTkFont(weight="bold"), command=save
+                      ).pack(fill="x", padx=20, pady=(0, 20))
+
+    def _admin_delete_tanda(self, tanda_name: str):
+        if messagebox.askyesno("Eliminar tanda", f"¿Eliminar '{tanda_name}'?", parent=self):
+            cur = self.db.conn.cursor()
+            cur.execute("DELETE FROM batch_tandas WHERE tanda_name = ?", (tanda_name,))
+            self.db.conn.commit()
+            self._admin_load_tandas()
+            self.reload_dist_lists()
+
+    def _tanda_admin_pick_p1(self):
+        path = filedialog.askdirectory(title="Carpeta P1 (Inicio)")
+        if path:
+            self._tanda_admin_p1 = path
+            self.lbl_tanda_p1.configure(
+                text=f"P1: {os.path.basename(path)}", text_color=NEON_PURPLE)
+
+    def _tanda_admin_pick_p2(self):
+        path = filedialog.askdirectory(title="Carpeta P2 (Cierre)")
+        if path:
+            self._tanda_admin_p2 = path
+            self.lbl_tanda_p2.configure(
+                text=f"P2: {os.path.basename(path)}", text_color=NEON_CYAN)
+
+    def _tanda_admin_pick_cap(self):
+        path = filedialog.askopenfilename(filetypes=[("Archivos de texto", "*.txt")])
+        if path:
+            self._tanda_admin_cap = path
+            self.lbl_tanda_cap.configure(
+                text=f"Cap: {os.path.basename(path)}", text_color=WARNING)
+
+    def _tanda_admin_save(self):
+        name = self.e_tanda_admin_name.get().strip().upper()
+        if not name:
+            return messagebox.showwarning("⚠️", "Ingresa un nombre para la tanda.")
+        if not self._tanda_admin_p1 or not self._tanda_admin_p2:
+            return messagebox.showwarning("⚠️", "Selecciona las carpetas P1 y P2.")
+        self.db.add_tanda(name, self._tanda_admin_p1, self._tanda_admin_p2,
+                          self._tanda_admin_cap or None)
+        self.e_tanda_admin_name.delete(0, "end")
+        self._tanda_admin_p1 = ""
+        self._tanda_admin_p2 = ""
+        self._tanda_admin_cap = ""
+        self.lbl_tanda_p1.configure(text="P1: —", text_color=TEXT_MUTED)
+        self.lbl_tanda_p2.configure(text="P2: —", text_color=TEXT_MUTED)
+        self.lbl_tanda_cap.configure(text="Captions: —", text_color=TEXT_MUTED)
+        self._admin_load_tandas()
+        self.reload_dist_lists()
+        messagebox.showinfo("✅", f"Tanda '{name}' guardada correctamente.")
 
     def _build_mix_frame(self):
         """TAREA 4 — Creador de Tandas."""
@@ -1417,6 +1951,18 @@ class InstagramAutoPro(ctk.CTk):
         if path:
             self.cap_file = path
             self.lbl_cap.configure(text=os.path.basename(path), text_color=NEON_CYAN)
+
+    def pick_captions_acct(self):
+        path = filedialog.askopenfilename(filetypes=[("Archivos de Texto", "*.txt")])
+        if path:
+            self.acct_cap_file = path
+            self.acct_lbl_cap.configure(text=os.path.basename(path), text_color=NEON_CYAN)
+
+    def pick_captions_tandas(self):
+        path = filedialog.askopenfilename(filetypes=[("Archivos de Texto", "*.txt")])
+        if path:
+            self.tandas_cap_file = path
+            self.tandas_lbl_cap.configure(text=os.path.basename(path), text_color=NEON_CYAN)
 
     def _refresh_tandas_list(self):
         if not hasattr(self, "_tandas_list_scroll"):
@@ -1535,11 +2081,27 @@ class InstagramAutoPro(ctk.CTk):
         # Fila 3: Fill-up
         self.fillup_var = tk.BooleanVar(value=False)
         ctk.CTkCheckBox(parent, text="Habilitar 'Fill-up' (Rellenar con historial si faltan)",
-                        variable=self.fillup_var, text_color=NEON_CYAN).grid(row=3, column=0, columnspan=4, padx=20, pady=(10, 20), sticky="w")
+                        variable=self.fillup_var, text_color=NEON_CYAN).grid(row=3, column=0, columnspan=4, padx=20, pady=(10, 10), sticky="w")
+
+        # Fila 4: Archivo Captions
+        cap_row = ctk.CTkFrame(parent, fg_color=BG_CARD2, corner_radius=CARD_RADIUS)
+        cap_row.grid(row=4, column=0, columnspan=4, sticky="ew", padx=20, pady=(0, 10))
+        ctk.CTkButton(cap_row, text="📄 Archivo Captions (.txt)", fg_color=WARNING, text_color=BG_APP,
+                      hover_color=self._darken(WARNING), font=ctk.CTkFont(weight="bold"),
+                      command=self.pick_captions_tandas).pack(side="left", padx=16, pady=12)
+        self.tandas_lbl_cap = ctk.CTkLabel(cap_row, text="Ningún archivo seleccionado", text_color=TEXT_MUTED)
+        self.tandas_lbl_cap.pack(side="left", padx=10)
 
         # Botonera
         btn_box = ctk.CTkFrame(parent, fg_color="transparent")
-        btn_box.grid(row=4, column=0, columnspan=4, pady=30)
+        btn_box.grid(row=5, column=0, columnspan=4, pady=20)
+
+        ctk.CTkButton(btn_box, text="🔄 Resetear todo",
+                      fg_color=BG_CARD2, text_color=TEXT_MUTED,
+                      hover_color=BG_CARD, height=BTN_H_LG,
+                      border_width=1, border_color=BORDER,
+                      font=ctk.CTkFont(size=13),
+                      command=self._tandas_dist_reset).pack(side="left", padx=(0, 20))
 
         ctk.CTkButton(btn_box, text="👁️ VISTA PREVIA", fg_color=NEON_CYAN, text_color=BG_APP,
                       hover_color=self._darken(NEON_CYAN), height=BTN_H_LG,
@@ -1560,7 +2122,7 @@ class InstagramAutoPro(ctk.CTk):
 
     def _build_dist_cuentas_tab(self, parent):
         """Tab: bloques secuenciales — cada cuenta recibe un bloque distinto del pool."""
-        parent.grid_rowconfigure(4, weight=1)
+        parent.grid_rowconfigure(5, weight=1)
         parent.grid_columnconfigure(0, weight=1)
 
         # ── Diagrama visual ──────────────────────────────────────────────
@@ -1669,9 +2231,24 @@ class InstagramAutoPro(ctk.CTk):
                       height=BTN_H, corner_radius=BTN_RADIUS,
                       command=self._acct_dist_remove_last).pack(side="left")
 
+        # ── Archivo Captions ─────────────────────────────────────────────
+        cap_row = ctk.CTkFrame(parent, fg_color=BG_CARD2, corner_radius=CARD_RADIUS)
+        cap_row.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 6))
+        ctk.CTkButton(cap_row, text="📄 Archivo Captions (.txt)", fg_color=WARNING, text_color=BG_APP,
+                      hover_color=self._darken(WARNING), font=ctk.CTkFont(weight="bold"),
+                      command=self.pick_captions_acct).pack(side="left", padx=16, pady=12)
+        self.acct_lbl_cap = ctk.CTkLabel(cap_row, text="Ningún archivo seleccionado", text_color=TEXT_MUTED)
+        self.acct_lbl_cap.pack(side="left", padx=10)
+
         # ── Botones principales ──────────────────────────────────────────
         btn_row = ctk.CTkFrame(parent, fg_color="transparent")
-        btn_row.grid(row=3, column=0, pady=16)
+        btn_row.grid(row=4, column=0, pady=16)
+        ctk.CTkButton(btn_row, text="🔄 Resetear todo",
+                      fg_color=BG_CARD2, text_color=TEXT_MUTED,
+                      hover_color=BG_CARD, height=BTN_H_LG,
+                      border_width=1, border_color=BORDER,
+                      font=ctk.CTkFont(size=13),
+                      command=self._acct_dist_reset).pack(side="left", padx=(0, 20))
         ctk.CTkButton(btn_row, text="👁️ PREVISUALIZAR",
                       fg_color=NEON_CYAN, text_color=BG_APP,
                       hover_color=self._darken(NEON_CYAN), height=BTN_H_LG,
@@ -1686,7 +2263,7 @@ class InstagramAutoPro(ctk.CTk):
         # ── Resultados ───────────────────────────────────────────────────
         self.acct_dist_result = ctk.CTkTextbox(parent, fg_color=BG_CARD2,
                                                 text_color=NEON_CYAN, font=FONT_MONO)
-        self.acct_dist_result.grid(row=4, column=0, sticky="nsew", padx=16, pady=(0, 16))
+        self.acct_dist_result.grid(row=5, column=0, sticky="nsew", padx=16, pady=(0, 16))
 
     # ── Lógica Logística ─────────────────────────────────────────────────────
     def reload_dist_lists(self, event=None):
@@ -1823,6 +2400,21 @@ class InstagramAutoPro(ctk.CTk):
     def _acct_dist_clear(self):
         self.acct_dist_list.delete("1.0", "end")
 
+    def _refresh_dist_frame(self):
+        """Destruye y reconstruye el frame de Logística completo (equivalente a F5)."""
+        self.acct_cap_file = ""
+        self.tandas_cap_file = ""
+        f = self._frames["Logistica"]
+        for w in f.winfo_children():
+            w.destroy()
+        self._build_dist_frame()
+
+    def _acct_dist_reset(self):
+        self._refresh_dist_frame()
+
+    def _tandas_dist_reset(self):
+        self._refresh_dist_frame()
+
     def _acct_dist_add(self):
         acc = self.acct_dist_entry.get().strip()
         if acc and acc not in self._acct_dist_accounts():
@@ -1897,44 +2489,99 @@ class InstagramAutoPro(ctk.CTk):
                         return
 
         def task():
+            import re
+
+            def forge_vid_id(fname):
+                base = os.path.splitext(fname)[0]
+                m = re.match(r'^(.+?)__c\d+$', base)
+                return m.group(1) if m else base
+
             if not os.path.exists(folder):
                 raise FileNotFoundError(f"Carpeta no encontrada: {folder}")
 
-            # Pool completo de videos — sin filtro por historial
-            vids = sorted(f for f in os.listdir(folder)
-                          if f.lower().endswith((".mp4", ".mov", ".avi")))
-            if not vids:
+            all_vids = sorted(f for f in os.listdir(folder)
+                              if f.lower().endswith((".mp4", ".mov", ".avi")))
+            if not all_vids:
                 raise ValueError("No se encontraron videos en la carpeta")
 
-            n_actual = min(n, len(vids) // max(len(accounts), 1))
-            if n_actual == 0:
-                raise ValueError(f"No hay suficientes videos ({len(vids)}) para {len(accounts)} cuenta(s) con {n} por cuenta")
+            needed = len(accounts) * vpd * days
+            if len(all_vids) < needed:
+                raise ValueError(
+                    f"No hay suficientes videos ({len(all_vids)}) para "
+                    f"{len(accounts)} cuentas × {vpd} vid/día × {days} días = {needed} necesarios"
+                )
 
-            # Bloques secuenciales: primeros n_actual → cuenta 1, siguientes → cuenta 2, etc.
-            plan: dict[str, list[str]] = {}
-            for idx, acc in enumerate(accounts):
-                start = idx * n_actual
-                end = start + n_actual
-                block = vids[start:end]
-                if len(block) < n_actual:
-                    break  # No hay videos suficientes para esta cuenta
-                shuffled = block[:]
-                random.shuffle(shuffled)
-                plan[acc] = shuffled
+            pool = all_vids[:]
+            random.shuffle(pool)
+
+            # plan[acc] = [[day0_vids], [day1_vids], ...]
+            # Antichoque: mismo vid_id no se repite en la misma cuenta el mismo día (duro)
+            # ni en la misma cuenta en ningún día (preferido)
+            # ni en distintas cuentas el mismo día (penalizado)
+            plan = {acc: [[] for _ in range(days)] for acc in accounts}
+            assigned = set()
+            acc_lifetime_vid_ids = {acc: set() for acc in accounts}
+
+            for day_idx in range(days):
+                day_vid_ids_used = set()
+
+                for slot in range(vpd):
+                    slot_vid_ids_used = set()
+                    accs_shuffled = accounts[:]
+                    random.shuffle(accs_shuffled)
+
+                    for acc in accs_shuffled:
+                        acc_today_vid_ids = {forge_vid_id(v) for v in plan[acc][day_idx]}
+                        candidates = []
+                        for v in pool:
+                            if v in assigned:
+                                continue
+                            vid_id = forge_vid_id(v)
+                            if vid_id in acc_today_vid_ids:
+                                continue  # regla dura: no repetir vid_id mismo día/cuenta
+                            score = 0
+                            if vid_id in acc_lifetime_vid_ids[acc]:
+                                score += 200  # penalizar reutilización en misma cuenta
+                            if vid_id in day_vid_ids_used:
+                                score += 100  # penalizar mismo vid_id en distintas cuentas hoy
+                            if vid_id in slot_vid_ids_used:
+                                score += 50   # penalizar mismo slot entre cuentas
+                            score += random.random()
+                            candidates.append((score, v))
+
+                        if not candidates:
+                            raise ValueError(
+                                f"Sin candidatos para '{acc}' día {day_idx+1} slot {slot+1}. "
+                                f"Reducí cuentas, días o videos/día."
+                            )
+
+                        candidates.sort(key=lambda x: x[0])
+                        chosen = candidates[0][1]
+                        vid_id = forge_vid_id(chosen)
+
+                        plan[acc][day_idx].append(chosen)
+                        assigned.add(chosen)
+                        acc_lifetime_vid_ids[acc].add(vid_id)
+                        day_vid_ids_used.add(vid_id)
+                        slot_vid_ids_used.add(vid_id)
 
             lines = []
             label = "👁️  PREVISUALIZACIÓN" if preview_only else "🚀  EJECUTANDO"
+            total_per_acc = vpd * days
             lines += [label, "=" * 60,
                       f"📦  Tanda      : {tanda}",
-                      f"📦  Pool total  : {len(vids)} videos en carpeta",
-                      f"📅  Período     : {period_str}  ({days} días × {vpd} videos/día = {n} solicitados)",
-                      f"📦  Por cuenta  : {n_actual} videos (bloque único, orden aleatorio)",
+                      f"📦  Pool total  : {len(all_vids)} videos en carpeta",
+                      f"📅  Período     : {period_str}  ({days} días × {vpd} videos/día = {total_per_acc}/cuenta)",
+                      f"🛡️  Antichoque  : vid_id único por cuenta/día activo",
                       f"👥  Cuentas    : {len(plan)}", ""]
 
-            for acc, order in plan.items():
-                lines.append(f"📱  {acc}  →  {len(order)} videos")
-                for i, vid in enumerate(order, 1):
-                    lines.append(f"    {i:02d}. {vid}")
+            for acc, day_lists in plan.items():
+                total = sum(len(d) for d in day_lists)
+                lines.append(f"📱  {acc}  →  {total} videos")
+                for day_idx, day_vids in enumerate(day_lists):
+                    lines.append(f"  Día {day_idx + 1}:")
+                    for i, vid in enumerate(day_vids, 1):
+                        lines.append(f"    {i:02d}. {vid}  [{forge_vid_id(vid)}]")
                 lines.append("")
 
             if not preview_only:
@@ -1950,7 +2597,6 @@ class InstagramAutoPro(ctk.CTk):
                             acc_path = os.path.join(day_path, acc)
                             if os.path.isdir(acc_path):
                                 shutil.rmtree(acc_path)
-                        # Eliminar el día si quedó vacío
                         try:
                             if not any(True for _ in os.scandir(day_path)):
                                 shutil.rmtree(day_path)
@@ -1959,12 +2605,11 @@ class InstagramAutoPro(ctk.CTk):
 
                 # Crear estructura Dia_X/<cuenta>/video.mp4
                 total_copiados = 0
-                for acc, order in plan.items():
-                    for day_num in range(1, days + 1):
-                        day_path = os.path.join(cal_root, f"Dia_{day_num}", acc)
+                for acc, day_lists in plan.items():
+                    for day_idx, day_vids in enumerate(day_lists):
+                        day_path = os.path.join(cal_root, f"Dia_{day_idx + 1}", acc)
                         os.makedirs(day_path, exist_ok=True)
-                        start_idx = (day_num - 1) * vpd
-                        for vid_name in order[start_idx : start_idx + vpd]:
+                        for vid_name in day_vids:
                             src = os.path.join(folder, vid_name)
                             dst = os.path.join(day_path, vid_name)
                             shutil.copy2(src, dst)
@@ -2317,7 +2962,8 @@ class InstagramAutoPro(ctk.CTk):
         self.bot_log(f"Cuentas seleccionadas ({len(selected_accounts)}): {', '.join('@' + u for u in selected_accounts)}", "INFO")
 
         import organizadortg as telegram_bot
-        self.tg_controller = telegram_bot.TelegramBotController(date_str, selected_accounts)
+        cap_file = self.acct_cap_file or self.tandas_cap_file or None
+        self.tg_controller = telegram_bot.TelegramBotController(date_str, selected_accounts, captions_file=cap_file)
         
         self.btn_start_tg.configure(state="disabled")
         self.btn_pause_tg.configure(state="normal")
@@ -2493,7 +3139,7 @@ class InstagramAutoPro(ctk.CTk):
         ctk.CTkLabel(header, text="🔮  Forge de Metadata",
                      font=ctk.CTkFont(size=22, weight="bold"),
                      text_color=TEXT_H1).grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(header, text="Inyecta fingerprints iPhone únicos · 63,000 combinaciones disponibles",
+        ctk.CTkLabel(header, text="Inyecta fingerprints iPhone únicos · 276,000 combinaciones disponibles",
                      font=ctk.CTkFont(size=12), text_color=TEXT_MUTED
                      ).grid(row=1, column=0, sticky="w")
 
@@ -2553,7 +3199,7 @@ class InstagramAutoPro(ctk.CTk):
         cfg_rows = [
             ("Nombre de tanda:",   "e_forge_tanda",   None),
             ("Categoría destino:", "c_forge_cat",      "combo"),
-            ("Videos/cuenta/día:", "e_forge_quota",    "4"),
+            ("Copias por vídeo:",   "e_forge_copies",   "4"),
             ("Días a distribuir:", "e_forge_days",     "MAX"),
         ]
         for row_i, (lbl, attr, default) in enumerate(cfg_rows, start=1):
@@ -2583,7 +3229,36 @@ class InstagramAutoPro(ctk.CTk):
                         text_color=NEON_CYAN,
                         checkbox_width=18, checkbox_height=18
                         ).grid(row=5, column=0, columnspan=2,
-                               sticky="w", padx=18, pady=(6, 16))
+                               sticky="w", padx=18, pady=(6, 4))
+
+        # — Micro-ediciones por copia (variant engine) —
+        self.FORGE_FX_DEFS = [
+            ("crop",   "Recorte de bordes"),
+            ("mirror", "Espejo horizontal"),
+            ("zoom",   "Zoom leve"),
+            ("rotate", "Rotación mínima"),
+            ("color",  "Filtro de color"),
+            ("noise",  "Grano sutil"),
+            ("speed",  "Micro-velocidad"),
+            ("trim",   "Recorte de ms"),
+        ]
+        fx_frame = ctk.CTkFrame(card_cfg, fg_color="transparent")
+        fx_frame.grid(row=6, column=0, columnspan=2, sticky="ew",
+                      padx=18, pady=(4, 16))
+        ctk.CTkLabel(fx_frame, text="Micro-ediciones por copia:",
+                     font=ctk.CTkFont(size=11, weight="bold"),
+                     text_color=NEON_PURPLE).grid(row=0, column=0, columnspan=2,
+                                                  sticky="w", pady=(0, 4))
+        self.forge_fx_vars = {}
+        for i, (key, lbl) in enumerate(self.FORGE_FX_DEFS):
+            var = tk.BooleanVar(value=True)
+            self.forge_fx_vars[key] = var
+            ctk.CTkCheckBox(fx_frame, text=lbl, variable=var,
+                            font=ctk.CTkFont(size=11),
+                            text_color=TEXT_BODY,
+                            checkbox_width=16, checkbox_height=16
+                            ).grid(row=1 + i // 2, column=i % 2,
+                                   sticky="w", pady=2, padx=(0, 14))
 
         # ── Tabla Preview ────────────────────────────────────────────────
         preview_card = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
@@ -2690,28 +3365,40 @@ class InstagramAutoPro(ctk.CTk):
         self.forge_lbl_count.configure(text=f"{len(self.forge_video_paths)} videos")
 
     def forge_preview_metadata(self):
-        n = len(self.forge_video_paths)
-        if n == 0:
+        n_videos = len(self.forge_video_paths)
+        if n_videos == 0:
             return messagebox.showwarning("⚠️", "Agrega al menos un video primero.")
         try:
+            copies = int(self.e_forge_copies.get())
+            if copies < 1:
+                raise ValueError
+        except ValueError:
+            return messagebox.showwarning("⚠️", "Copias por vídeo debe ser un número >= 1.")
+
+        n_total = n_videos * copies
+        try:
             import metadata_pool
-            self.forge_meta_assignments = metadata_pool.generate_unique_metadata(self.db, n)
+            self.forge_meta_assignments = metadata_pool.generate_unique_metadata(self.db, n_total)
         except ValueError as e:
             return messagebox.showerror("Sin combinaciones disponibles", str(e))
 
         for item in self.forge_tree.get_children():
             self.forge_tree.delete(item)
-        for i, path in enumerate(self.forge_video_paths):
-            m = self.forge_meta_assignments[i]
-            tag = "even" if i % 2 == 0 else "odd"
-            self.forge_tree.insert("", tk.END, tags=(tag,), values=(
-                os.path.basename(path), m["iphone_model"], m["city"],
-                m["carrier"], m["ios_version"]
-            ))
+        row_idx = 0
+        for path in self.forge_video_paths:
+            name = os.path.basename(path)
+            for c in range(1, copies + 1):
+                m = self.forge_meta_assignments[row_idx]
+                tag = "even" if row_idx % 2 == 0 else "odd"
+                self.forge_tree.insert("", tk.END, tags=(tag,), values=(
+                    f"{name}  (c{c:02d})", m["iphone_model"], m["city"],
+                    m["carrier"], m["ios_version"]
+                ))
+                row_idx += 1
         self.btn_forge_process.configure(state="normal")
         self.btn_forge_reshuffle.configure(state="normal")
         self.forge_pb_lbl.configure(
-            text=f"✅ {n} asignaciones generadas. Revisá y presioná Procesar.",
+            text=f"✅ {n_total} asignaciones generadas ({n_videos} vídeos × {copies} copias). Revisá y presioná Procesar.",
             text_color=SUCCESS
         )
 
@@ -2733,16 +3420,26 @@ class InstagramAutoPro(ctk.CTk):
         if not category:
             return messagebox.showwarning("⚠️", "Seleccioná una categoría destino.")
         try:
-            quota = int(self.e_forge_quota.get())
+            copies = int(self.e_forge_copies.get())
+            if copies < 1:
+                raise ValueError
         except ValueError:
-            return messagebox.showwarning("⚠️", "Cuota diaria inválida.")
+            return messagebox.showwarning("⚠️", "Copias por vídeo debe ser un número >= 1.")
 
         days_input = self.e_forge_days.get().strip() or "MAX"
+        n_total = len(self.forge_video_paths) * copies
+
+        # Leer checkboxes de micro-ediciones en el hilo principal (tk vars no
+        # son seguras desde el worker).
+        fx_enabled = {key: var.get() for key, var in self.forge_fx_vars.items()}
+        active_fx = [lbl for key, lbl in self.FORGE_FX_DEFS if fx_enabled[key]]
+        fx_desc = ", ".join(active_fx) if active_fx else "ninguna (solo metadata, sin re-encode)"
 
         if not messagebox.askyesno("Confirmar Forge", (
-            f"¿Procesar {len(self.forge_video_paths)} videos con metadata iPhone única?\n\n"
+            f"¿Generar {len(self.forge_video_paths)} vídeos × {copies} copias = {n_total} archivos con metadata iPhone única?\n\n"
             f"Tanda: {tanda_name}\n"
             f"Categoría: {category}\n"
+            f"Micro-ediciones: {fx_desc}\n"
             f"Distribuir automáticamente: {'Sí' if auto_dist else 'No'}"
         )):
             return
@@ -2763,29 +3460,32 @@ class InstagramAutoPro(ctk.CTk):
             import metadata_pool
             os.makedirs(output_dir, exist_ok=True)
             fingerprints = []
-            for i, (vid_path, meta) in enumerate(zip(videos, meta_list)):
+            meta_idx = 0
+            for vid_path in videos:
                 filename = os.path.basename(vid_path)
                 base, ext = os.path.splitext(filename)
-                p1 = base.replace("__", "_")  # evita romper el parser de P1/P2
-                out_name = f"{tanda_name}__{p1}__v{i:04d}{ext}"
-                out_path = os.path.join(output_dir, out_name)
-                metadata_pool.apply_metadata_to_video(vid_path, out_path, meta)
-                fingerprints.append({
-                    "video_hash": metadata_pool.get_video_hash(vid_path),
-                    **meta,
-                })
+                vid_id = base.replace(" ", "_").replace("__", "_")
+                vh = metadata_pool.get_video_hash(vid_path)
+                for copy_num in range(1, copies + 1):
+                    meta = meta_list[meta_idx]
+                    out_name = f"{vid_id}__c{copy_num:02d}{ext}"
+                    out_path = os.path.join(output_dir, out_name)
+                    metadata_pool.apply_variant_and_metadata(vid_path, out_path, meta, enabled=fx_enabled)
+                    db_ref.save_forge_video(tanda_name, filename, out_name, vh)
+                    fingerprints.append({"video_hash": f"{vh}_{copy_num}", **meta})
+                    meta_idx += 1
             db_ref.save_metadata_fingerprints(fingerprints)
             db_ref.add_tanda(tanda_name, tanda_name, tanda_name, "")
 
             msg = (
-                f"✅ {len(videos)} videos procesados con metadata iPhone.\n"
+                f"✅ {n_total} archivos generados ({len(videos)} vídeos × {copies} copias).\n"
                 f"📁 Guardados en: videos_finales/{tanda_name}/\n"
                 f"🔮 Tanda '{tanda_name}' registrada en la DB."
             )
             if auto_dist:
                 import Organizador
                 dist_result = Organizador.distribute_tanda(
-                    tanda_name, category, quota, False, days_input
+                    tanda_name, category, copies, False, days_input
                 )
                 msg += f"\n\n{dist_result}"
             return msg

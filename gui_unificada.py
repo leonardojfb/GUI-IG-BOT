@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 import os
 import threading
+import Organizador
 from database import DatabaseManager
 
 # ==========================================
@@ -252,20 +253,23 @@ class InstagramOrganizerGUI:
         self.tab_mix = tk.Frame(self.notebook, bg="#1e1e2e")
         self.tab_dist = tk.Frame(self.notebook, bg="#1e1e2e")
         self.tab_tg = tk.Frame(self.notebook, bg="#1e1e2e") # <--- AQUI NACE LA 5
-        
+        self.tab_forge = tk.Frame(self.notebook, bg="#1e1e2e")
+
         # 4. Añadir las pestañas a la barra superior
         self.notebook.add(self.tab_dash, text="📊 1. Dashboard")
         self.notebook.add(self.tab_team, text="👥 2. Equipo y Listas")
         self.notebook.add(self.tab_mix, text="🎬 3. Creador de Tandas")
         self.notebook.add(self.tab_dist, text="🚀 4. Logística")
         self.notebook.add(self.tab_tg, text="📲 5. Bot Telegram") # <--- AQUI SE MUESTRA
-        
+        self.notebook.add(self.tab_forge, text="🔮 6. Forge de Metadata")
+
         # 5. Inyectar el contenido dentro de cada pestaña
         self.build_dashboard_tab()
         self.build_team_tab()
         self.build_mix_tab()
         self.build_dist_tab()
         self.build_tg_tab() # <--- AQUI SE LLAMA AL CONTENIDO
+        self.build_forge_tab()
     # ==========================================
     # PESTAÑA 1: DASHBOARD
     # ==========================================
@@ -704,33 +708,39 @@ class InstagramOrganizerGUI:
         
         self.c_tandas = ttk.Combobox(f1, state="readonly", width=25, postcommand=self.reload_dist_lists)
         self.c_tandas.grid(row=0, column=1, sticky="w")
+
+        lbl_tandas_2 = tk.Label(f1, text="2da tanda opcional:", bg="#2d2d44", fg="white")
+        lbl_tandas_2.grid(row=0, column=2, padx=10, pady=15, sticky="e")
+
+        self.c_tandas_2 = ttk.Combobox(f1, state="readonly", width=25, postcommand=self.reload_dist_lists)
+        self.c_tandas_2.grid(row=0, column=3, sticky="w")
         
         lbl_dest = tk.Label(f1, text="Categoría Destino:", bg="#2d2d44", fg="white")
-        lbl_dest.grid(row=0, column=2, padx=10, sticky="e")
+        lbl_dest.grid(row=1, column=0, padx=10, sticky="e")
         
         self.c_dest = ttk.Combobox(f1, state="readonly", width=25, postcommand=self.reload_dist_lists)
-        self.c_dest.grid(row=0, column=3, sticky="w")
+        self.c_dest.grid(row=1, column=1, sticky="w")
         
         # --- FILA 1: Cuota y Checkbox ---
         lbl_quota = tk.Label(f1, text="Videos diarios por cuenta:", bg="#2d2d44", fg="white")
-        lbl_quota.grid(row=1, column=0, padx=10, pady=10, sticky="e")
-        
+        lbl_quota.grid(row=2, column=0, padx=10, pady=10, sticky="e")        
+
         self.e_quota = tk.Entry(f1, width=10)
         self.e_quota.insert(0, "4")
-        self.e_quota.grid(row=1, column=1, sticky="w")
+        self.e_quota.grid(row=2, column=1, sticky="w")
 # Debajo de e_quota
         lbl_days = tk.Label(f1, text="Días (o 'MAX'):", bg="#2d2d44", fg="white")
-        lbl_days.grid(row=1, column=2, padx=10, sticky="e")
-        
+        lbl_days.grid(row=2, column=2, padx=10, sticky="e")   
+
         self.e_days = tk.Entry(f1, width=10)
         self.e_days.insert(0, "MAX")
-        self.e_days.grid(row=1, column=3, sticky="w")
+        self.e_days.grid(row=2, column=3, sticky="w")
 
         self.fillup_var = tk.BooleanVar()
         chk_fillup = tk.Checkbutton(f1, text="Habilitar 'Fill-up' (Rellenar con historial)", 
                                     variable=self.fillup_var, bg="#2d2d44", fg="#4ecdc4", selectcolor="#1e1e2e")
-        chk_fillup.grid(row=1, column=2, columnspan=2, sticky="w")
-        
+        chk_fillup.grid(row=3, column=0, columnspan=4, sticky="w", padx=10, pady=8)        
+
         # --- Botonera de Acción ---
         btn_box = tk.Frame(main, bg="#1e1e2e")
         btn_box.pack(pady=30)
@@ -747,24 +757,65 @@ class InstagramOrganizerGUI:
         """Recarga las listas de tandas y categorías desde la DB."""
         try:
             tandas_raw = self.db.get_all_tandas()
-            tandas = [t['tanda_name'] for t in tandas_raw]
-            if hasattr(self, 'c_tandas'):
+
+            tandas = []
+            for t in tandas_raw:
+                if isinstance(t, dict):
+                    tandas.append(t.get("tanda_name"))
+                else:
+                    tandas.append(t["tanda_name"])
+
+            tandas = [t for t in tandas if t]
+
+            if hasattr(self, "c_tandas"):
+                current_1 = self.c_tandas.get()
                 self.c_tandas.config(values=tandas)
-                if tandas and not self.c_tandas.get():
+
+                if current_1 in tandas:
+                    self.c_tandas.set(current_1)
+                elif tandas:
                     self.c_tandas.current(0)
-            
+                else:
+                    self.c_tandas.set("")
+
+            if hasattr(self, "c_tandas_2"):
+                current_2 = self.c_tandas_2.get()
+                values_2 = [""] + tandas
+                self.c_tandas_2.config(values=values_2)
+
+                if current_2 in values_2:
+                    self.c_tandas_2.set(current_2)
+                else:
+                    self.c_tandas_2.set("")
+
             cats = self.db.get_categories()
-            if hasattr(self, 'c_dest'):
+
+            if hasattr(self, "c_dest"):
+                current_dest = self.c_dest.get()
                 self.c_dest.config(values=cats)
-                if cats and not self.c_dest.get():
+
+                if current_dest in cats:
+                    self.c_dest.set(current_dest)
+                elif cats:
                     self.c_dest.current(0)
+                else:
+                    self.c_dest.set("")
+
+            if hasattr(self, 'c_forge_cat'):
+                self._forge_reload_cats()
+
+            print(f"✅ Tandas cargadas en GUI: {tandas}")
+            print(f"✅ Categorías cargadas en GUI: {cats}")
+
         except Exception as e:
             print(f"⚠️ Error al refrescar listas: {e}")
+            messagebox.showerror("Error cargando listas", str(e))
 
     def preview_distribution(self):
         """Genera la simulación detallada sin mover archivos físicos."""
         tanda = self.c_tandas.get()
         dest = self.c_dest.get()
+        tanda_2 = self.c_tandas_2.get().strip() if hasattr(self, "c_tandas_2") else ""
         # Capturamos el nuevo campo de días que añadimos anteriormente
         days_input = self.e_days.get() if hasattr(self, 'e_days') else "MAX"
         
@@ -778,7 +829,21 @@ class InstagramOrganizerGUI:
             
         def task():
             import Organizador
-            # Llamamos a la lógica enviando TODOS los parámetros necesarios
+
+            if tanda_2:
+                return (
+                    Organizador.preview_distribution_tanda(
+                        tanda, dest, quota, self.fillup_var.get(), days_input
+                    )
+                    + "\n\n"
+                    + "╔════════════════════════════════════════════════════════════════════╗\n"
+                    + f"║   🎲 SEGUNDA TANDA OPCIONAL: {tanda_2:<26} ║\n"
+                    + "╚════════════════════════════════════════════════════════════════════╝\n\n"
+                    + Organizador.preview_distribution_tanda(
+                        tanda_2, dest, quota, self.fillup_var.get(), days_input
+                    )
+                )
+
             return Organizador.preview_distribution_tanda(
                 tanda, dest, quota, self.fillup_var.get(), days_input
             )
@@ -806,6 +871,9 @@ class InstagramOrganizerGUI:
         tanda = self.c_tandas.get()
         dest = self.c_dest.get()
         days_input = self.e_days.get() # <--- Capturamos los días ("MAX" o número)
+        tanda_2 = self.c_tandas_2.get().strip() if hasattr(self, "c_tandas_2") else ""
+        if tanda_2 == tanda:
+            tanda_2 = ""
         
         try:
             quota = int(self.e_quota.get())
@@ -815,13 +883,21 @@ class InstagramOrganizerGUI:
         if not tanda or not dest: 
             return messagebox.showwarning("⚠️", "Faltan datos.")
         
-        if not messagebox.askyesno("Confirmación", f"¿Distribuir '{tanda}' a la categoría '{dest}'?"):
+        label_tandas = tanda if not tanda_2 else f"{tanda} + {tanda_2}"
+
+        if not messagebox.askyesno("Confirmación", f"¿Distribuir '{label_tandas}' a la categoría '{dest}'?"):
             return
             
         def task():
             import Organizador
-            # Ahora enviamos los 5 parámetros correctos a la lógica de distribución
-            return Organizador.distribute_tanda(tanda, dest, quota, self.fillup_var.get(), days_input)
+            return Organizador.distribute_tanda(
+                tanda,
+                dest,
+                quota,
+                self.fillup_var.get(),
+                days_input,
+                tanda_name_2=tanda_2 if tanda_2 else None
+         )
             
         def done(success, result):
             if success: messagebox.showinfo("Éxito", result)
@@ -920,7 +996,7 @@ class InstagramOrganizerGUI:
         self.btn_tg_stop.config(state=tk.NORMAL)
         
         import organizadortg
-        self.tg_controller = organizadortg.TelegramBotController()
+        self.tg_controller = organizadortg.TelegramBotController(date_str, selected)
         
         def task():
             return organizadortg.execute_telegram_plan(start_date, selected, self.tg_controller)
@@ -947,6 +1023,257 @@ class InstagramOrganizerGUI:
         if self.tg_controller:
             self.tg_controller.stop()
             self.tg_controller.resume()
+
+    # ==========================================
+    # PESTAÑA 6: FORGE DE METADATA
+    # ==========================================
+    def build_forge_tab(self):
+        self.forge_video_paths = []
+        self.forge_meta_assignments = []
+
+        main = tk.Frame(self.tab_forge, bg="#1e1e2e")
+        main.pack(fill=tk.BOTH, expand=True, padx=20, pady=15)
+
+        # --- TOP: dos columnas (video list | config) ---
+        top = tk.Frame(main, bg="#1e1e2e")
+        top.pack(fill=tk.X, pady=(0, 8))
+        top.columnconfigure(0, weight=1)
+        top.columnconfigure(1, weight=1)
+
+        # PASO 1 — Lista de videos
+        f_videos = tk.LabelFrame(top, text="1. Videos a Procesar", bg="#2d2d44", fg="#00d9ff", font=("Arial", 11, "bold"))
+        f_videos.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+
+        scroll_v = tk.Scrollbar(f_videos)
+        scroll_v.pack(side=tk.RIGHT, fill=tk.Y)
+        self.forge_lst = tk.Listbox(f_videos, selectmode=tk.EXTENDED, bg="#1e1e2e", fg="white",
+                                    yscrollcommand=scroll_v.set, font=("Consolas", 9), height=9)
+        self.forge_lst.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 0))
+        scroll_v.config(command=self.forge_lst.yview)
+
+        btn_row = tk.Frame(f_videos, bg="#2d2d44")
+        btn_row.pack(fill=tk.X, padx=8, pady=6)
+        tk.Button(btn_row, text="+ Agregar Videos", bg="#4ecdc4", fg="#1e1e2e",
+                  font=("Arial", 9, "bold"), command=self.forge_add_videos).pack(side=tk.LEFT, padx=(0, 5))
+        tk.Button(btn_row, text="− Quitar", bg="#ff6b6b", fg="white",
+                  font=("Arial", 9, "bold"), command=self.forge_remove_video).pack(side=tk.LEFT)
+
+        self.forge_lbl_count = tk.Label(f_videos, text="Total: 0 videos", bg="#2d2d44", fg="#aaaaaa", font=("Arial", 9))
+        self.forge_lbl_count.pack(pady=(0, 8))
+
+        # PASO 2 — Configuración
+        f_config = tk.LabelFrame(top, text="2. Configuración", bg="#2d2d44", fg="#00d9ff", font=("Arial", 11, "bold"))
+        f_config.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+
+        def _lbl(text, row):
+            tk.Label(f_config, text=text, bg="#2d2d44", fg="white",
+                     anchor="e", font=("Arial", 10)).grid(row=row, column=0, padx=10, pady=7, sticky="e")
+
+        _lbl("Nombre de tanda:", 0)
+        self.e_forge_tanda = tk.Entry(f_config, width=22, bg="#1e1e2e", fg="white", insertbackground="white")
+        self.e_forge_tanda.grid(row=0, column=1, padx=10, pady=7, sticky="w")
+
+        _lbl("Categoría destino:", 1)
+        self.c_forge_cat = ttk.Combobox(f_config, state="readonly", width=20)
+        self.c_forge_cat.grid(row=1, column=1, padx=10, pady=7, sticky="w")
+        self.c_forge_cat.config(postcommand=self._forge_reload_cats)
+        self._forge_reload_cats()
+
+        _lbl("Videos/cuenta/día:", 2)
+        self.e_forge_quota = tk.Entry(f_config, width=8, bg="#1e1e2e", fg="white", insertbackground="white")
+        self.e_forge_quota.insert(0, "4")
+        self.e_forge_quota.grid(row=2, column=1, padx=10, pady=7, sticky="w")
+
+        _lbl("Días a distribuir:", 3)
+        self.e_forge_days = tk.Entry(f_config, width=8, bg="#1e1e2e", fg="white", insertbackground="white")
+        self.e_forge_days.insert(0, "MAX")
+        self.e_forge_days.grid(row=3, column=1, padx=10, pady=7, sticky="w")
+
+        self.forge_dist_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(f_config, text="Distribuir automáticamente al procesar",
+                       variable=self.forge_dist_var, bg="#2d2d44", fg="#4ecdc4",
+                       selectcolor="#1e1e2e").grid(row=4, column=0, columnspan=2, sticky="w", padx=10, pady=(4, 10))
+
+        # --- TABLA PREVIEW ---
+        f_preview = tk.LabelFrame(main, text="Vista Previa de Metadata", bg="#2d2d44", fg="#00d9ff", font=("Arial", 11, "bold"))
+        f_preview.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+
+        cols = ("Video", "Modelo iPhone", "Ciudad", "Carrier", "iOS")
+        self.forge_tree = ttk.Treeview(f_preview, columns=cols, show="headings", height=7)
+        col_widths = {"Video": 160, "Modelo iPhone": 170, "Ciudad": 130, "Carrier": 150, "iOS": 70}
+        for col in cols:
+            self.forge_tree.heading(col, text=col)
+            self.forge_tree.column(col, width=col_widths[col], anchor="center")
+        scr_tree = ttk.Scrollbar(f_preview, orient="vertical", command=self.forge_tree.yview)
+        self.forge_tree.configure(yscrollcommand=scr_tree.set)
+        self.forge_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(8, 0), pady=8)
+        scr_tree.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 8), pady=8)
+
+        # --- BOTONERA ---
+        btn_bar = tk.Frame(main, bg="#1e1e2e")
+        btn_bar.pack(pady=6)
+
+        tk.Button(btn_bar, text="👁️ Preview Metadata", bg="#4ecdc4", fg="#1e1e2e",
+                  font=("Arial", 11, "bold"), command=self.forge_preview_metadata).pack(side=tk.LEFT, padx=8)
+
+        self.btn_forge_reshuffle = tk.Button(btn_bar, text="🔀 Regenerar Shuffle", bg="#f39c12", fg="white",
+                                             font=("Arial", 11, "bold"), command=self.forge_reshuffle,
+                                             state=tk.DISABLED)
+        self.btn_forge_reshuffle.pack(side=tk.LEFT, padx=8)
+
+        self.btn_forge_process = tk.Button(btn_bar, text="⚡ Procesar Ahora", bg="#ff6b6b", fg="white",
+                                           font=("Arial", 11, "bold"), command=self.forge_process,
+                                           state=tk.DISABLED)
+        self.btn_forge_process.pack(side=tk.LEFT, padx=8)
+
+        # --- PROGRESO ---
+        prog_frame = tk.Frame(main, bg="#1e1e2e")
+        prog_frame.pack(fill=tk.X, pady=(4, 0))
+
+        self.forge_progress = ttk.Progressbar(prog_frame, mode="determinate", length=420)
+        self.forge_progress.pack(side=tk.LEFT, padx=(0, 10))
+
+        self.forge_progress_lbl = tk.Label(prog_frame, text="Listo.", bg="#1e1e2e", fg="#aaaaaa", font=("Arial", 9))
+        self.forge_progress_lbl.pack(side=tk.LEFT)
+
+    def _forge_reload_cats(self):
+        cats = self.db.get_categories()
+        self.c_forge_cat.config(values=cats)
+        if cats and not self.c_forge_cat.get():
+            self.c_forge_cat.current(0)
+
+    def forge_add_videos(self):
+        paths = filedialog.askopenfilenames(
+            title="Seleccionar Videos",
+            filetypes=[("Video", "*.mp4 *.mov"), ("Todos los archivos", "*.*")]
+        )
+        for p in paths:
+            if p not in self.forge_video_paths:
+                self.forge_video_paths.append(p)
+                self.forge_lst.insert(tk.END, os.path.basename(p))
+        self.forge_lbl_count.config(text=f"Total: {len(self.forge_video_paths)} videos")
+
+    def forge_remove_video(self):
+        for idx in reversed(self.forge_lst.curselection()):
+            self.forge_lst.delete(idx)
+            self.forge_video_paths.pop(idx)
+        self.forge_lbl_count.config(text=f"Total: {len(self.forge_video_paths)} videos")
+
+    def forge_preview_metadata(self):
+        n = len(self.forge_video_paths)
+        if n == 0:
+            return messagebox.showwarning("⚠️", "Agrega al menos un video primero.")
+        try:
+            import metadata_pool
+            self.forge_meta_assignments = metadata_pool.generate_unique_metadata(self.db, n)
+        except ValueError as e:
+            return messagebox.showerror("Sin combinaciones disponibles", str(e))
+
+        for item in self.forge_tree.get_children():
+            self.forge_tree.delete(item)
+        for i, path in enumerate(self.forge_video_paths):
+            m = self.forge_meta_assignments[i]
+            self.forge_tree.insert("", tk.END, values=(
+                os.path.basename(path), m["iphone_model"], m["city"], m["carrier"], m["ios_version"]
+            ))
+        self.btn_forge_process.config(state=tk.NORMAL)
+        self.btn_forge_reshuffle.config(state=tk.NORMAL)
+        self.forge_progress_lbl.config(text=f"✅ {n} asignaciones generadas. Revisá la tabla y presioná Procesar.")
+
+    def forge_reshuffle(self):
+        self.forge_preview_metadata()
+
+    def forge_process(self):
+        if not self.forge_video_paths:
+            return messagebox.showwarning("⚠️", "No hay videos en la lista.")
+        if not self.forge_meta_assignments:
+            return messagebox.showwarning("⚠️", "Generá el preview primero.")
+
+        tanda_name = self.e_forge_tanda.get().strip()
+        category = self.c_forge_cat.get()
+        auto_dist = self.forge_dist_var.get()
+
+        if not tanda_name:
+            return messagebox.showwarning("⚠️", "Ingresá un nombre para la tanda Forge.")
+        if not category:
+            return messagebox.showwarning("⚠️", "Seleccioná una categoría destino.")
+
+        try:
+            quota = int(self.e_forge_quota.get())
+        except ValueError:
+            return messagebox.showwarning("⚠️", "Cuota diaria inválida.")
+
+        days_input = self.e_forge_days.get().strip() or "MAX"
+
+        if not messagebox.askyesno("Confirmar Forge", (
+            f"¿Procesar {len(self.forge_video_paths)} videos con metadata iPhone única?\n\n"
+            f"Tanda: {tanda_name}\n"
+            f"Categoría: {category}\n"
+            f"Distribuir automáticamente: {'Sí' if auto_dist else 'No'}"
+        )):
+            return
+
+        videos = self.forge_video_paths[:]
+        meta_list = self.forge_meta_assignments[:]
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        output_dir = os.path.join(base_dir, "videos_finales", tanda_name)
+        db_ref = self.db
+
+        self.btn_forge_process.config(state=tk.DISABLED)
+        self.btn_forge_reshuffle.config(state=tk.DISABLED)
+        self.forge_progress.config(mode="indeterminate")
+        self.forge_progress.start(10)
+        self.forge_progress_lbl.config(text="Procesando con FFmpeg...")
+
+        def task():
+            import metadata_pool
+            os.makedirs(output_dir, exist_ok=True)
+            fingerprints = []
+
+            for i, (vid_path, meta) in enumerate(zip(videos, meta_list)):
+                filename = os.path.basename(vid_path)
+                base, ext = os.path.splitext(filename)
+                p1 = base.replace("__", "_")  # evita romper el parser de P1/P2
+                out_name = f"{tanda_name}__{p1}__v{i:04d}{ext}"
+                out_path = os.path.join(output_dir, out_name)
+                metadata_pool.apply_metadata_to_video(vid_path, out_path, meta)
+                fingerprints.append({
+                    "video_hash": metadata_pool.get_video_hash(vid_path),
+                    **meta,
+                })
+
+            db_ref.save_metadata_fingerprints(fingerprints)
+            db_ref.add_tanda(tanda_name, tanda_name, tanda_name, "")
+
+            msg = (
+                f"✅ {len(videos)} videos procesados con metadata iPhone.\n"
+                f"📁 Guardados en: videos_finales/{tanda_name}/\n"
+                f"🔮 Tanda '{tanda_name}' registrada en la DB."
+            )
+
+            if auto_dist:
+                import Organizador
+                dist_result = Organizador.distribute_tanda(
+                    tanda_name, category, quota, False, days_input
+                )
+                msg += f"\n\n{dist_result}"
+
+            return msg
+
+        def done(success, result):
+            self.btn_forge_process.config(state=tk.NORMAL)
+            self.btn_forge_reshuffle.config(state=tk.NORMAL)
+            self.forge_progress.stop()
+            self.forge_progress.config(mode="determinate", value=100 if success else 0)
+            if success:
+                self.forge_progress_lbl.config(text="✅ Completado")
+                messagebox.showinfo("✅ Forge completado", result)
+                self.reload_dist_lists()
+            else:
+                self.forge_progress_lbl.config(text="❌ Error")
+                messagebox.showerror("Error en Forge", result)
+
+        WorkerThread(self.root, done, task).start()
 
 
 # ==========================================

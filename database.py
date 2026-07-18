@@ -73,6 +73,16 @@ CREATE TABLE IF NOT EXISTS schedule_config (
     time_slots  TEXT NOT NULL,
     PRIMARY KEY (va_name, category, day_of_week)
 );
+
+CREATE TABLE IF NOT EXISTS forge_video_registry (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    tanda_name   TEXT NOT NULL,
+    source_name  TEXT NOT NULL,
+    output_name  TEXT NOT NULL,
+    video_hash   TEXT DEFAULT '',
+    processed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(tanda_name, source_name)
+);
 """
 
 class DatabaseManager:
@@ -293,6 +303,16 @@ class DatabaseManager:
             return {(r[0], r[1], r[2], r[3]) for r in cur.fetchall()}
         except Exception:
             return set()
+
+    def save_forge_video(self, tanda_name: str, source_name: str, output_name: str, video_hash: str = "") -> None:
+        """Registra cada video procesado por Forge para tracking y anti-choque."""
+        cur = self.conn.cursor()
+        cur.execute('''
+            INSERT OR REPLACE INTO forge_video_registry
+            (tanda_name, source_name, output_name, video_hash, processed_at)
+            VALUES (?, ?, ?, ?, datetime('now'))
+        ''', (tanda_name, source_name, output_name, video_hash))
+        self.conn.commit()
 
     def save_metadata_fingerprints(self, fingerprints: list):
         """Inserta batch de fingerprints (ignora duplicados por el UNIQUE constraint)."""

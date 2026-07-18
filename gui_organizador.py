@@ -107,12 +107,12 @@ class InstagramOrganizerGUI:
         self.tab_distribute = tk.Frame(self.notebook, bg="#16213e")
         self.tab_accounts = tk.Frame(self.notebook, bg="#16213e")
         self.tab_mix = tk.Frame(self.notebook, bg="#16213e")
-        
+
         self.notebook.add(self.tab_control, text="📊 Control General")
         self.notebook.add(self.tab_distribute, text="📅 Distribución por Días")
         self.notebook.add(self.tab_accounts, text="👥 Cuentas")
         self.notebook.add(self.tab_mix, text="🎞️ Mezclas de Videos")
-        
+
         # Crear contenido de cada pestaña
         self.create_control_tab()
         self.create_distribute_tab()
@@ -489,6 +489,7 @@ class InstagramOrganizerGUI:
             
         self.preview_text.insert(tk.END, "✅ Distribución completada (vista previa)\n")
         self.preview_text.insert(tk.END, "⚠️ Para ejecutar真正的 distribución, ejecute Organizador.py\n")
+
 
 
 # ==================== INICIO ====================
