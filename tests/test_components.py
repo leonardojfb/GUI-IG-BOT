@@ -19,3 +19,19 @@ def test_header_card_buttons_construct():
         K.DangerButton(r, text="D")
     finally:
         r.destroy()
+
+def test_inputs_construct():
+    from styles import components as K
+    r = _root()
+    try:
+        seg = K.SegmentedControl(r, ["A", "B", "C"], default="B")
+        assert seg.get() == "B"
+        st = K.Stepper(r, value=5, min=1, max=10)
+        st.set(20)
+        assert st.get() == 10          # clamped to max
+        st.set(0)
+        assert st.get() == 1           # clamped to min
+        tr = K.ToggleRow(r, "Enable", None)
+        assert tr.var.get() is False
+    finally:
+        r.destroy()
