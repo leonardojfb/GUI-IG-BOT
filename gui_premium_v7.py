@@ -1373,17 +1373,17 @@ class InstagramAutoPro(ctk.CTk):
         f.grid_columnconfigure((0, 1, 2), weight=1)
 
         # ── Header ──────────────────────────────────────────────────────
-        header = ctk.CTkFrame(f, fg_color="transparent")
-        header.grid(row=0, column=0, columnspan=3, sticky="ew", padx=24, pady=(20, 10))
-        ctk.CTkLabel(header, text="⚙️  Admin — VAs · Cuentas · Categorías · Tandas",
-                     font=ctk.CTkFont(size=22, weight="bold"),
-                     text_color=TEXT_H1).grid(row=0, column=0, sticky="w")
+        PageHeader(
+            f, "SISTEMA", "Admin",
+            "Gestión de equipo y configuración."
+        ).grid(row=0, column=0, columnspan=3, sticky="ew", padx=24, pady=(20, 10))
 
         # ══ FILA SUPERIOR ═══════════════════════════════════════════════
 
         # ── Columna 0: VAs ───────────────────────────────────────────────
-        col0 = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
-        col0.grid(row=1, column=0, sticky="nsew", padx=(24, 8), pady=(0, 8))
+        col0_card = Card(f)
+        col0_card.grid(row=1, column=0, sticky="nsew", padx=(24, 8), pady=(0, 8))
+        col0 = col0_card.body
         col0.grid_rowconfigure(1, weight=1)
         col0.grid_columnconfigure(0, weight=1)
 
@@ -1406,15 +1406,13 @@ class InstagramAutoPro(ctk.CTk):
                      font=ctk.CTkFont(size=11)).grid(row=2, column=0, sticky="w")
         self.e_va_tg = ctk.CTkEntry(va_form, fg_color=BG_INPUT, border_color=BORDER)
         self.e_va_tg.grid(row=3, column=0, sticky="ew", pady=(2, 8))
-        ctk.CTkButton(va_form, text="➕ Guardar VA", fg_color=SUCCESS,
-                      hover_color=self._darken(SUCCESS), text_color=BG_APP,
-                      corner_radius=BTN_RADIUS, height=BTN_H,
-                      font=ctk.CTkFont(weight="bold"),
+        PrimaryButton(va_form, text="Guardar VA",
                       command=self.add_va_ui).grid(row=4, column=0, sticky="ew")
 
         # ── Columna 1: Categorías ────────────────────────────────────────
-        col1 = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
-        col1.grid(row=1, column=1, sticky="nsew", padx=8, pady=(0, 8))
+        col1_card = Card(f)
+        col1_card.grid(row=1, column=1, sticky="nsew", padx=8, pady=(0, 8))
+        col1 = col1_card.body
         col1.grid_rowconfigure(1, weight=1)
         col1.grid_columnconfigure(0, weight=1)
 
@@ -1433,15 +1431,13 @@ class InstagramAutoPro(ctk.CTk):
                      font=ctk.CTkFont(size=11)).grid(row=0, column=0, sticky="w")
         self.e_cat_new = ctk.CTkEntry(cat_form, fg_color=BG_INPUT, border_color=BORDER)
         self.e_cat_new.grid(row=1, column=0, sticky="ew", pady=(2, 8))
-        ctk.CTkButton(cat_form, text="➕ Agregar", fg_color=WARNING,
-                      hover_color=self._darken(WARNING), text_color=BG_APP,
-                      corner_radius=BTN_RADIUS, height=BTN_H,
-                      font=ctk.CTkFont(weight="bold"),
+        PrimaryButton(cat_form, text="Agregar",
                       command=self.add_category_ui).grid(row=2, column=0, sticky="ew")
 
         # ── Columna 2: Tandas ────────────────────────────────────────────
-        col2 = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
-        col2.grid(row=1, column=2, sticky="nsew", padx=(8, 24), pady=(0, 8))
+        col2_card = Card(f)
+        col2_card.grid(row=1, column=2, sticky="nsew", padx=(8, 24), pady=(0, 8))
+        col2 = col2_card.body
         col2.grid_rowconfigure(1, weight=1)
         col2.grid_columnconfigure(0, weight=1)
 
@@ -1477,34 +1473,26 @@ class InstagramAutoPro(ctk.CTk):
                                           font=ctk.CTkFont(size=10), anchor="w")
         self.lbl_tanda_p2.grid(row=2, column=2, sticky="w")
 
-        ctk.CTkButton(tanda_form, text="📂 P1 (Inicio)", fg_color=NEON_PURPLE,
-                      hover_color=self._darken(NEON_PURPLE), text_color=TEXT_H1,
-                      corner_radius=BTN_RADIUS, height=BTN_H, font=ctk.CTkFont(size=11),
-                      command=self._tanda_admin_pick_p1).grid(row=3, column=0, sticky="ew", pady=(2, 6))
+        GhostButton(tanda_form, text="P1 (Inicio)",
+                    command=self._tanda_admin_pick_p1).grid(row=3, column=0, sticky="ew", pady=(2, 6))
         ctk.CTkFrame(tanda_form, width=8, fg_color="transparent").grid(row=3, column=1)
-        ctk.CTkButton(tanda_form, text="📂 P2 (Cierre)", fg_color=NEON_CYAN,
-                      hover_color=self._darken(NEON_CYAN), text_color=BG_APP,
-                      corner_radius=BTN_RADIUS, height=BTN_H, font=ctk.CTkFont(size=11),
+        PrimaryButton(tanda_form, text="P2 (Cierre)",
                       command=self._tanda_admin_pick_p2).grid(row=3, column=2, sticky="ew", pady=(2, 6))
 
         self.lbl_tanda_cap = ctk.CTkLabel(tanda_form, text="Captions: —", text_color=TEXT_MUTED,
                                            font=ctk.CTkFont(size=10), anchor="w")
         self.lbl_tanda_cap.grid(row=4, column=0, columnspan=3, sticky="w")
-        ctk.CTkButton(tanda_form, text="📄 Captions (.txt)", fg_color=WARNING,
-                      hover_color=self._darken(WARNING), text_color=BG_APP,
-                      corner_radius=BTN_RADIUS, height=BTN_H, font=ctk.CTkFont(size=11),
-                      command=self._tanda_admin_pick_cap).grid(row=5, column=0, columnspan=3, sticky="ew", pady=(2, 8))
+        GhostButton(tanda_form, text="Captions (.txt)",
+                    command=self._tanda_admin_pick_cap).grid(row=5, column=0, columnspan=3, sticky="ew", pady=(2, 8))
 
-        ctk.CTkButton(tanda_form, text="➕ Guardar Tanda", fg_color=IG_PINK,
-                      hover_color=self._darken(IG_PINK), text_color=TEXT_H1,
-                      corner_radius=BTN_RADIUS, height=BTN_H,
-                      font=ctk.CTkFont(weight="bold"),
+        PrimaryButton(tanda_form, text="Guardar Tanda",
                       command=self._tanda_admin_save).grid(row=6, column=0, columnspan=3, sticky="ew")
 
         # ══ FILA INFERIOR: Cuentas (ancho completo) ══════════════════════
 
-        col_acc = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
-        col_acc.grid(row=2, column=0, columnspan=3, sticky="nsew", padx=24, pady=(0, 24))
+        col_acc_card = Card(f)
+        col_acc_card.grid(row=2, column=0, columnspan=3, sticky="nsew", padx=24, pady=(0, 24))
+        col_acc = col_acc_card.body
         col_acc.grid_rowconfigure(1, weight=1)
         col_acc.grid_columnconfigure(0, weight=1)
 
@@ -1537,10 +1525,7 @@ class InstagramAutoPro(ctk.CTk):
                      font=ctk.CTkFont(size=11)).grid(row=0, column=2, padx=(0, 4))
         self.c_bulk_va = ctk.CTkComboBox(bulk_right, values=[], fg_color=BG_INPUT, border_color=BORDER, width=130)
         self.c_bulk_va.grid(row=0, column=3, padx=(0, 10), sticky="ew")
-        ctk.CTkButton(bulk_right, text="🚀 Cargar", fg_color=IG_PINK,
-                      hover_color=self._darken(IG_PINK), text_color=TEXT_H1,
-                      corner_radius=BTN_RADIUS, height=BTN_H,
-                      font=ctk.CTkFont(weight="bold"),
+        PrimaryButton(bulk_right, text="Cargar",
                       command=self.add_bulk_accounts).grid(row=0, column=4)
 
         self._acc_scroll = ctk.CTkScrollableFrame(col_acc, fg_color="transparent")
@@ -1650,14 +1635,10 @@ class InstagramAutoPro(ctk.CTk):
             )
             tz_menu.grid(row=0, column=2, padx=(4, 4))
 
-            ctk.CTkButton(r, text="TG", width=36, height=26, corner_radius=4,
-                          fg_color=BG_CARD2, text_color=TEXT_MUTED,
-                          hover_color=BORDER,
+            GhostButton(r, text="TG", width=36, height=26,
                           command=lambda n=name, t=tg: self._admin_edit_va_tg(n, t)
                           ).grid(row=0, column=3, padx=(2, 2))
-            ctk.CTkButton(r, text="×", width=28, height=26, corner_radius=4,
-                          fg_color=DANGER, text_color=TEXT_H1,
-                          hover_color=self._darken(DANGER),
+            DangerButton(r, text="×", width=28, height=26,
                           command=lambda n=name: self._admin_delete_va(n)
                           ).grid(row=0, column=4, padx=(2, 0))
 
@@ -1693,9 +1674,7 @@ class InstagramAutoPro(ctk.CTk):
             )
             c_va.set(assigned if assigned in vas_list else vas_list[0])
             c_va.grid(row=0, column=2, padx=(2, 2))
-            ctk.CTkButton(r, text="×", width=28, height=26, corner_radius=4,
-                          fg_color=DANGER, text_color=TEXT_H1,
-                          hover_color=self._darken(DANGER),
+            DangerButton(r, text="×", width=28, height=26,
                           command=lambda u=username: self._admin_delete_account(u)
                           ).grid(row=0, column=3, padx=(2, 0))
 
@@ -1708,9 +1687,7 @@ class InstagramAutoPro(ctk.CTk):
             r.grid_columnconfigure(0, weight=1)
             ctk.CTkLabel(r, text=cat, text_color=TEXT_BODY,
                          font=ctk.CTkFont(size=12), anchor="w").grid(row=0, column=0, sticky="w")
-            ctk.CTkButton(r, text="×", width=28, height=26, corner_radius=4,
-                          fg_color=DANGER, text_color=TEXT_H1,
-                          hover_color=self._darken(DANGER),
+            DangerButton(r, text="×", width=28, height=26,
                           command=lambda c=cat: self._admin_delete_cat(c)
                           ).grid(row=0, column=1, padx=(4, 0))
 
@@ -1798,14 +1775,10 @@ class InstagramAutoPro(ctk.CTk):
                          font=ctk.CTkFont(size=10), anchor="w"
                          ).grid(row=3, column=0, sticky="w", padx=8, pady=(0, 4))
 
-            ctk.CTkButton(r, text="✏️", width=30, height=26, corner_radius=4,
-                          fg_color=NEON_CYAN, text_color=BG_APP,
-                          hover_color=self._darken(NEON_CYAN),
+            GhostButton(r, text="✏️", width=30, height=26,
                           command=lambda t=tanda: self._admin_edit_tanda(t)
                           ).grid(row=0, column=1, padx=(4, 2), pady=(4, 0), sticky="ne")
-            ctk.CTkButton(r, text="×", width=28, height=26, corner_radius=4,
-                          fg_color=DANGER, text_color=TEXT_H1,
-                          hover_color=self._darken(DANGER),
+            DangerButton(r, text="×", width=28, height=26,
                           command=lambda n=name: self._admin_delete_tanda(n)
                           ).grid(row=0, column=2, padx=(2, 6), pady=(4, 0), sticky="ne")
 
