@@ -1969,69 +1969,68 @@ class InstagramAutoPro(ctk.CTk):
         f.grid_columnconfigure((0, 1), weight=1)
 
         # ── Header ──────────────────────────────────────────────────────
-        header = ctk.CTkFrame(f, fg_color="transparent")
-        header.grid(row=0, column=0, columnspan=2, sticky="ew", padx=24, pady=(20, 10))
-        ctk.CTkLabel(header, text="🎬  Creador de Tandas",
-                     font=ctk.CTkFont(size=22, weight="bold"),
-                     text_color=TEXT_H1).grid(row=0, column=0, sticky="w")
+        PageHeader(
+            f, "CONTENIDO", "Tandas",
+            "Lotes de videos forjados listos para distribuir."
+        ).grid(row=0, column=0, columnspan=2, sticky="ew", padx=24, pady=(20, 10))
 
         # ── Configuración Tanda ─────────────────────────────────────────
-        top_card = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        top_card = Card(f, title="Configuración de tanda")
         top_card.grid(row=1, column=0, columnspan=2, sticky="ew", padx=24, pady=10)
+        top_body = top_card.body
         
-        ctk.CTkLabel(top_card, text="Nombre/ID de la Tanda:", text_color=TEXT_MUTED,
-                     font=ctk.CTkFont(weight="bold")).pack(side="left", padx=20, pady=20)
-        self.e_tanda_name = ctk.CTkEntry(top_card, fg_color=BG_INPUT, border_color=BORDER, width=300)
-        self.e_tanda_name.pack(side="left", padx=10, pady=20)
+        ctk.CTkLabel(top_body, text="Nombre/ID de la Tanda:", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(weight="bold")).pack(side="left")
+        self.e_tanda_name = ctk.CTkEntry(top_body, fg_color=BG_INPUT, border_color=BORDER, width=300)
+        self.e_tanda_name.pack(side="left", padx=10)
 
         # ── P1 y P2 (Paneles scrollables) ───────────────────────────────
-        self.f_p1 = ctk.CTkScrollableFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
-        self.f_p1.grid(row=2, column=0, sticky="nsew", padx=(24, 12), pady=10)
+        p1_card = Card(f, title="P1 · Inicio")
+        p1_card.grid(row=2, column=0, sticky="nsew", padx=(24, 12), pady=10)
+        self.f_p1 = ctk.CTkScrollableFrame(p1_card.body, fg_color="transparent")
+        self.f_p1.grid(row=0, column=0, sticky="nsew")
+        p1_card.body.grid_rowconfigure(0, weight=1)
         
-        ctk.CTkButton(self.f_p1, text="📂 Buscar Carpeta P1 (Inicio)", fg_color=NEON_PURPLE,
-                      hover_color=self._darken(NEON_PURPLE), font=ctk.CTkFont(weight="bold"),
-                      command=lambda: self.pick_folder(1)).pack(pady=10, padx=10, fill="x")
+        GhostButton(self.f_p1, text="Buscar Carpeta P1 (Inicio)",
+                    command=lambda: self.pick_folder(1)).pack(pady=10, padx=10, fill="x")
         self.lbl_p1_count = ctk.CTkLabel(self.f_p1, text="0 videos", text_color=TEXT_MUTED)
         self.lbl_p1_count.pack()
         
-        self.f_p2 = ctk.CTkScrollableFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
-        self.f_p2.grid(row=2, column=1, sticky="nsew", padx=(12, 24), pady=10)
+        p2_card = Card(f, title="P2 · Cierre")
+        p2_card.grid(row=2, column=1, sticky="nsew", padx=(12, 24), pady=10)
+        self.f_p2 = ctk.CTkScrollableFrame(p2_card.body, fg_color="transparent")
+        self.f_p2.grid(row=0, column=0, sticky="nsew")
+        p2_card.body.grid_rowconfigure(0, weight=1)
         
-        ctk.CTkButton(self.f_p2, text="📂 Buscar Carpeta P2 (Cierre)", fg_color=NEON_CYAN,
-                      text_color=BG_APP, hover_color=self._darken(NEON_CYAN), font=ctk.CTkFont(weight="bold"),
+        PrimaryButton(self.f_p2, text="Buscar Carpeta P2 (Cierre)",
                       command=lambda: self.pick_folder(2)).pack(pady=10, padx=10, fill="x")
         self.lbl_p2_count = ctk.CTkLabel(self.f_p2, text="0 videos", text_color=TEXT_MUTED)
         self.lbl_p2_count.pack()
 
         # ── Controles Inferiores ────────────────────────────────────────
-        bot_card = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        bot_card = Card(f, title="Renderizado")
         bot_card.grid(row=3, column=0, columnspan=2, sticky="ew", padx=24, pady=(10, 24))
+        bot_body = bot_card.body
         
-        ctk.CTkButton(bot_card, text="📄 Archivo Captions (.txt)", fg_color=WARNING, text_color=BG_APP,
-                      hover_color=self._darken(WARNING), font=ctk.CTkFont(weight="bold"),
-                      command=self.pick_captions).pack(side="left", padx=20, pady=20)
+        GhostButton(bot_body, text="Archivo Captions (.txt)",
+                    command=self.pick_captions).pack(side="left")
         
-        self.lbl_cap = ctk.CTkLabel(bot_card, text="Ningún archivo seleccionado", text_color=TEXT_MUTED)
+        self.lbl_cap = ctk.CTkLabel(bot_body, text="Ningún archivo seleccionado", text_color=TEXT_MUTED)
         self.lbl_cap.pack(side="left", padx=10)
         
-        self.btn_render = ctk.CTkButton(bot_card, text="⚙️ INICIAR RENDER", fg_color=SUCCESS,
-                                        text_color=BG_APP, hover_color=self._darken(SUCCESS),
-                                        font=ctk.CTkFont(size=14, weight="bold"), height=BTN_H_LG,
+        self.btn_render = PrimaryButton(bot_body, text="INICIAR RENDER", height=BTN_H_LG,
                                         command=self.process_tanda)
-        self.btn_render.pack(side="right", padx=20, pady=20)
+        self.btn_render.pack(side="right")
 
         # ── Lista de Tandas registradas ─────────────────────────────────
-        tandas_card = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        tandas_card = Card(f, title="Tandas registradas")
         tandas_card.grid(row=4, column=0, columnspan=2, sticky="ew", padx=24, pady=(0, 24))
-        tandas_card.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(tandas_card, text="📋  Tandas registradas",
-                     font=ctk.CTkFont(size=13, weight="bold"),
-                     text_color=TEXT_MUTED).grid(row=0, column=0, sticky="w", padx=16, pady=(12, 6))
+        tandas_body = tandas_card.body
+        tandas_body.grid_columnconfigure(0, weight=1)
 
         self._tandas_list_scroll = ctk.CTkScrollableFrame(
-            tandas_card, fg_color="transparent", height=140)
-        self._tandas_list_scroll.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 12))
+            tandas_body, fg_color="transparent", height=140)
+        self._tandas_list_scroll.grid(row=0, column=0, sticky="ew")
         self._tandas_list_scroll.grid_columnconfigure(0, weight=1)
 
         self._refresh_tandas_list()
@@ -2092,10 +2091,8 @@ class InstagramAutoPro(ctk.CTk):
                 r, text=f"🎬  {name}   ·   {p1} → {p2}",
                 anchor="w", text_color=TEXT_BODY, font=ctk.CTkFont(size=11)
             ).grid(row=0, column=0, sticky="w")
-            ctk.CTkButton(
-                r, text="×", width=28, height=26, corner_radius=4,
-                fg_color=DANGER, text_color=TEXT_H1,
-                hover_color=self._darken(DANGER),
+            DangerButton(
+                r, text="×", width=28, height=26,
                 command=lambda n=name: self._delete_tanda_ui(n)
             ).grid(row=0, column=1, padx=(8, 0))
 
