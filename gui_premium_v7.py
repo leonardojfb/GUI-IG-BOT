@@ -2702,119 +2702,109 @@ class InstagramAutoPro(ctk.CTk):
         f.grid_columnconfigure((0, 1), weight=1)
 
         # ── Header ──────────────────────────────────────────────────────
-        header = ctk.CTkFrame(f, fg_color="transparent")
-        header.grid(row=0, column=0, columnspan=2, sticky="ew", padx=24, pady=(20, 10))
-        header.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(header, text="📲  Telegram Bot Control",
-                     font=ctk.CTkFont(size=22, weight="bold"),
-                     text_color=TEXT_H1).grid(row=0, column=0, sticky="w")
+        PageHeader(
+            f, "DISTRIBUCIÓN", "Telegram",
+            "Envío programado vía Telegram."
+        ).grid(row=0, column=0, columnspan=2, sticky="ew", padx=24, pady=(20, 10))
 
         # ── Panel Izquierdo: Cuentas y Controles ────────────────────────
-        ctrl_card = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        ctrl_card = Card(f, title="Cuentas programadas")
         ctrl_card.grid(row=1, column=0, sticky="nsew", padx=(24, 12), pady=10)
-        ctrl_card.grid_rowconfigure(4, weight=1)
-        ctrl_card.grid_columnconfigure(0, weight=1)
+        ctrl = ctrl_card.body
+        ctrl.grid_rowconfigure(4, weight=1)
+        ctrl.grid_columnconfigure(0, weight=1)
 
         # Fila 0: título + botón cargar
-        hdr_row = ctk.CTkFrame(ctrl_card, fg_color="transparent")
-        hdr_row.grid(row=0, column=0, sticky="ew", padx=20, pady=(20, 5))
+        hdr_row = ctk.CTkFrame(ctrl, fg_color="transparent")
+        hdr_row.grid(row=0, column=0, sticky="ew", pady=(0, 5))
         hdr_row.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(hdr_row, text="Cuentas Programadas", text_color=NEON_CYAN,
-                     font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, sticky="w")
-        self.btn_load_tg = ctk.CTkButton(hdr_row, text="🔄 Cargar", fg_color=BG_CARD2, text_color=TEXT_BODY,
-                                         border_width=1, border_color=BORDER, hover_color=BORDER,
-                                         command=self.load_organized_accounts)
+        self.btn_load_tg = GhostButton(hdr_row, text="Cargar",
+                                       command=self.load_organized_accounts)
         self.btn_load_tg.grid(row=0, column=1, sticky="e")
 
         # Fila 1: filtro + seleccionar todos/ninguno
-        filter_row = ctk.CTkFrame(ctrl_card, fg_color="transparent")
-        filter_row.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 4))
+        filter_row = ctk.CTkFrame(ctrl, fg_color="transparent")
+        filter_row.grid(row=1, column=0, sticky="ew", pady=(0, 4))
         filter_row.grid_columnconfigure(0, weight=1)
         self._tg_only_with_videos = tk.BooleanVar(value=True)
-        ctk.CTkCheckBox(filter_row, text="Solo con videos", variable=self._tg_only_with_videos,
-                        text_color=TEXT_MUTED, checkbox_width=16, checkbox_height=16,
-                        command=self.load_organized_accounts).grid(row=0, column=0, sticky="w")
+        tg_filter_toggle = ToggleRow(
+            filter_row, "Solo con videos", variable=self._tg_only_with_videos
+        )
+        tg_filter_toggle.switch.configure(command=self.load_organized_accounts)
+        tg_filter_toggle.grid(row=0, column=0, sticky="w")
         sel_frame = ctk.CTkFrame(filter_row, fg_color="transparent")
         sel_frame.grid(row=0, column=1, sticky="e")
-        ctk.CTkButton(sel_frame, text="✓ Todos", width=72, fg_color=BG_CARD2, text_color=TEXT_MUTED,
-                      border_width=1, border_color=BORDER, hover_color=BORDER,
-                      command=lambda: self.list_tg.select_set(0, "end")).pack(side="left", padx=(0, 4))
-        ctk.CTkButton(sel_frame, text="✗ Ninguno", width=78, fg_color=BG_CARD2, text_color=TEXT_MUTED,
-                      border_width=1, border_color=BORDER, hover_color=BORDER,
-                      command=lambda: self.list_tg.selection_clear(0, "end")).pack(side="left")
+        GhostButton(sel_frame, text="Todos", width=72,
+                    command=lambda: self.list_tg.select_set(0, "end")).pack(side="left", padx=(0, 4))
+        GhostButton(sel_frame, text="Ninguno", width=78,
+                    command=lambda: self.list_tg.selection_clear(0, "end")).pack(side="left")
 
         # Fila 2: toggle "Configurar Horarios"
         self._schedule_panel_expanded = False
-        sched_header = ctk.CTkFrame(ctrl_card, fg_color="transparent")
-        sched_header.grid(row=2, column=0, sticky="ew", padx=20, pady=(4, 0))
+        sched_header = ctk.CTkFrame(ctrl, fg_color="transparent")
+        sched_header.grid(row=2, column=0, sticky="ew", pady=(4, 0))
         sched_header.grid_columnconfigure(0, weight=1)
-        self.btn_toggle_sched = ctk.CTkButton(
+        self.btn_toggle_sched = GhostButton(
             sched_header, text="▶ Configurar Horarios", anchor="w",
-            fg_color=BG_CARD2, text_color=TEXT_BODY, hover_color=BORDER,
             command=self._toggle_schedule_panel,
         )
         self.btn_toggle_sched.grid(row=0, column=0, sticky="ew")
 
         # Fila 3: panel de horarios (oculto inicialmente)
-        self.sched_panel = ctk.CTkScrollableFrame(ctrl_card, fg_color=BG_INPUT, height=160)
+        self.sched_panel = ctk.CTkScrollableFrame(ctrl, fg_color=BG_INPUT, height=160)
         # NO se ejecuta .grid() aquí — se invoca en _toggle_schedule_panel al expandir
 
         # Fila 4: listbox con selección múltiple
-        self.list_tg = tk.Listbox(ctrl_card, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
+        self.list_tg = tk.Listbox(ctrl, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
                                   selectbackground=self.themed(ACCENT),
                                   selectforeground=self.themed(ACCENT_TEXT),
                                   selectmode=tk.EXTENDED,
                                   borderwidth=0, highlightthickness=1,
                                   highlightbackground=self.themed(BORDER), font=FONT_BODY)
-        self.list_tg.grid(row=4, column=0, sticky="nsew", padx=20, pady=(0, 10))
+        self.list_tg.grid(row=4, column=0, sticky="nsew", pady=(0, 10))
 
         # Controles inferiores
-        bot_ctrl = ctk.CTkFrame(ctrl_card, fg_color="transparent")
-        bot_ctrl.grid(row=5, column=0, sticky="ew", padx=20, pady=(10, 20))
+        bot_ctrl = ctk.CTkFrame(ctrl, fg_color="transparent")
+        bot_ctrl.grid(row=5, column=0, sticky="ew", pady=(10, 20))
         
         ctk.CTkLabel(bot_ctrl, text="Fecha Inicio (YYYY-MM-DD):", text_color=TEXT_MUTED).pack(side="left")
         self.e_date_tg = ctk.CTkEntry(bot_ctrl, fg_color=BG_INPUT, border_color=BORDER, width=120)
         self.e_date_tg.pack(side="left", padx=10)
         self.e_date_tg.insert(0, datetime.now().strftime("%Y-%m-%d"))
 
-        btn_row = ctk.CTkFrame(ctrl_card, fg_color="transparent")
-        btn_row.grid(row=6, column=0, sticky="ew", padx=20, pady=(0, 20))
+        btn_row = ctk.CTkFrame(ctrl, fg_color="transparent")
+        btn_row.grid(row=6, column=0, sticky="ew", pady=(0, 0))
         
-        self.btn_start_tg = ctk.CTkButton(btn_row, text="▶ INICIAR", fg_color=SUCCESS, text_color=BG_APP,
-                                          hover_color=self._darken(SUCCESS), font=ctk.CTkFont(weight="bold"),
-                                          command=self.start_tg_bot)
+        self.btn_start_tg = PrimaryButton(btn_row, text="▶ INICIAR", fg_color=TELEGRAM,
+                                          text_color=TEXT_ON_DANGER, command=self.start_tg_bot)
         self.btn_start_tg.pack(side="left", expand=True, padx=(0, 5))
         
-        self.btn_pause_tg = ctk.CTkButton(btn_row, text="⏸ PAUSAR", fg_color=WARNING, text_color=BG_APP,
-                                          hover_color=self._darken(WARNING), font=ctk.CTkFont(weight="bold"),
+        self.btn_pause_tg = GhostButton(btn_row, text="⏸ PAUSAR",
                                           state="disabled", command=self.pause_tg_bot)
         self.btn_pause_tg.pack(side="left", expand=True, padx=5)
         
-        self.btn_stop_tg = ctk.CTkButton(btn_row, text="⏹ DETENER", fg_color=DANGER, text_color=TEXT_H1,
-                                         hover_color=self._darken(DANGER), font=ctk.CTkFont(weight="bold"),
+        self.btn_stop_tg = DangerButton(btn_row, text="⏹ DETENER",
                                          state="disabled", command=self.stop_tg_bot)
         self.btn_stop_tg.pack(side="left", expand=True, padx=(5, 0))
 
         # ── Panel Derecho: Live Log ─────────────────────────────────────
-        log_card = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        log_card = Card(f, title="Registro de actividad")
         log_card.grid(row=1, column=1, sticky="nsew", padx=(12, 24), pady=10)
-        log_card.grid_rowconfigure(1, weight=1)
-        log_card.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(log_card, text="Registro de Actividad", text_color=NEON_PURPLE,
-                     font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, sticky="w", padx=20, pady=(20, 10))
+        log = log_card.body
+        log.grid_rowconfigure(0, weight=1)
+        log.grid_columnconfigure(0, weight=1)
         
-        self.tg_log = ctk.CTkTextbox(log_card, fg_color=BG_INPUT, text_color=TEXT_BODY, font=FONT_MONO,
+        self.tg_log = ctk.CTkTextbox(log, fg_color=BG_INPUT, text_color=TEXT_BODY, font=FONT_MONO,
                                      border_width=1, border_color=BORDER)
-        self.tg_log.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 20))
+        self.tg_log.grid(row=0, column=0, sticky="nsew")
         
         self.tg_log.tag_config("INFO", foreground=self.themed(INFO))
         self.tg_log.tag_config("SUCCESS", foreground=self.themed(SUCCESS))
         self.tg_log.tag_config("WARNING", foreground=self.themed(WARNING))
         self.tg_log.tag_config("ERROR", foreground=self.themed(DANGER))
         
-        self.pb_tg = ctk.CTkProgressBar(log_card, fg_color=BG_INPUT, progress_color=NEON_CYAN)
-        self.pb_tg.grid(row=2, column=0, sticky="ew", padx=20, pady=(0, 20))
+        self.pb_tg = ctk.CTkProgressBar(log, fg_color=BG_INPUT, progress_color=NEON_CYAN)
+        self.pb_tg.grid(row=1, column=0, sticky="ew", pady=(12, 0))
         self.pb_tg.set(0)
 
     # ── Horarios: toggle / editor de grilla ─────────────────────────────────
