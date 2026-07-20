@@ -1385,17 +1385,16 @@ class InstagramAutoPro(ctk.CTk):
         tv.heading(col, command=lambda: self._sort_tree(tv, col, not reverse))
 
     def _build_team_frame(self):
-        """Panel Admin — fila superior: VAs / Categorías / Tandas  |  fila inferior: Cuentas (ancho completo)."""
+        """Panel Admin para VAs y categorías; las tandas se gestionan en su pestaña."""
         f = self._frames["Equipo"]
         f.grid_rowconfigure(1, weight=1)   # fila superior
-        f.grid_rowconfigure(2, weight=2)   # fila inferior (Cuentas) — más espacio vertical
-        f.grid_columnconfigure((0, 1, 2), weight=1)
+        f.grid_columnconfigure((0, 1), weight=1)
 
         # ── Header ──────────────────────────────────────────────────────
         PageHeader(
             f, "SISTEMA", "Admin",
             "Gestión de equipo y configuración."
-        ).grid(row=0, column=0, columnspan=3, sticky="ew", padx=24, pady=(20, 10))
+        ).grid(row=0, column=0, columnspan=2, sticky="ew", padx=24, pady=(20, 10))
 
         # ══ FILA SUPERIOR ═══════════════════════════════════════════════
 
@@ -1430,7 +1429,7 @@ class InstagramAutoPro(ctk.CTk):
 
         # ── Columna 1: Categorías ────────────────────────────────────────
         col1_card = Card(f)
-        col1_card.grid(row=1, column=1, sticky="nsew", padx=8, pady=(0, 8))
+        col1_card.grid(row=1, column=1, sticky="nsew", padx=(8, 24), pady=(0, 8))
         col1 = col1_card.body
         col1.grid_rowconfigure(1, weight=1)
         col1.grid_columnconfigure(0, weight=1)
@@ -1452,6 +1451,9 @@ class InstagramAutoPro(ctk.CTk):
         self.e_cat_new.grid(row=1, column=0, sticky="ew", pady=(2, 8))
         PrimaryButton(cat_form, text="Agregar",
                       command=self.add_category_ui).grid(row=2, column=0, sticky="ew")
+
+        self._admin_refresh()
+        return
 
         # ── Columna 2: Tandas ────────────────────────────────────────────
         col2_card = Card(f)
