@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.5",
+    "version":  "1.0.6",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.5",
-    "asset_name":  "MetodoIG-v1.0.5.zip",
-    "sha256":  "a2bfdf886858de4ad3d1b7fd7af350fc00640f077cfe0d4d0a3a084fc0857c5f",
-    "notes":  "Correccion: Abrir GUI vuelve a usar el entorno local con dependencias.",
+    "github_release_tag":  "v1.0.6",
+    "asset_name":  "MetodoIG-v1.0.6.zip",
+    "sha256":  "a23989ec8d0246e6a6009548fa85fa47e880fb70524ef647262e99f4ac24c39a",
+    "notes":  "Hotfix: incluye styles/components.py requerido por la GUI.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",
@@ -28,6 +28,7 @@
                   "vercuentas.py",
                   "logo_elittisse.svg",
                   "styles/colors.py",
+                  "styles/components.py",
                   "styles/__init__.py"
               ]
 }

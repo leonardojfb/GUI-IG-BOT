@@ -38,6 +38,7 @@ $ReleaseFiles = @(
     "vercuentas.py",
     "logo_elittisse.svg",
     "styles/colors.py",
+    "styles/components.py",
     "styles/__init__.py"
 )
 
