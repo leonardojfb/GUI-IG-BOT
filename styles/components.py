@@ -36,7 +36,7 @@ class DangerButton(ctk.CTkButton):
     def __init__(self, master, **kw):
         kw.setdefault("fg_color", C.DANGER)
         kw.setdefault("hover_color", C.darken(C.DANGER))
-        kw.setdefault("text_color", ("#ffffff", "#ffffff"))
+        kw.setdefault("text_color", C.TEXT_ON_DANGER)
         kw.setdefault("corner_radius", C.BTN_RADIUS)
         kw.setdefault("height", C.BTN_H)
         kw.setdefault("font", ctk.CTkFont(**_font(C.FONT_H3)))

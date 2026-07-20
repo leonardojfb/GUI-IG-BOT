@@ -37,8 +37,9 @@ TEXT_BODY  = ("#55534c", "#a0a0a6")
 TEXT_MUTED = ("#8b887f", "#6c6c72")
 
 # ── Texto/hover sobre acento peach ──
-ACCENT_TEXT  = ("#1c1710", "#1c1710")
-ACCENT_HOVER = ("#b87d38", "#dcb489")
+ACCENT_TEXT     = ("#1c1710", "#1c1710")
+TEXT_ON_DANGER  = ("#ffffff", "#ffffff")  # Texto sobre botón destructivo (rojo), invariante a tema
+ACCENT_HOVER    = ("#b87d38", "#dcb489")
 
 # ── Aliases semánticos ──
 GROUND   = BG_APP
