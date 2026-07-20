@@ -57,6 +57,15 @@ LABEL_COLORS  = {
     "muerta":   "#6b7280",
 }
 
+ACCOUNT_STATUS_OPTIONS = ["unknown", "alive", "limited", "dead"]
+LIMITATION_OPTIONS = [
+    "Restricción de acciones",
+    "Shadowban",
+    "No distribuir",
+    "Requiere calentamiento",
+    "Revisión manual",
+]
+
 MAX_PER_SESSION = 10
 DELAY_MIN = 300    # 5 min
 DELAY_MAX = 600    # 10 min
@@ -154,16 +163,10 @@ class AccountStatusPanel(ctk.CTkFrame):
     # ── Construcción UI ───────────────────────────────────────────────────────
 
     def _build_header(self):
-        h = ctk.CTkFrame(self, fg_color="transparent")
-        h.grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 0))
-        ctk.CTkLabel(
-            h, text="📡  Estado de Cuentas",
-            font=ctk.CTkFont(size=22, weight="bold"), text_color=TEXT_H1
-        ).pack(side="left")
-        ctk.CTkLabel(
-            h, text=f"Modo sigiloso · máx {MAX_PER_SESSION} cuentas/sesión · delay 5-10 min",
-            font=ctk.CTkFont(size=12), text_color=TEXT_MUTED
-        ).pack(side="left", padx=(14, 0), anchor="s")
+        PageHeader(
+            self, "LEGACY", "Verify Legacy",
+            f"Verificación HTTP con cookies y proxy · máx {MAX_PER_SESSION} cuentas por sesión."
+        ).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 0))
 
     def _build_config_card(self):
         card = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
@@ -866,7 +869,8 @@ class InstagramAutoPro(ctk.CTk):
             ("Distribución", [("🚀   Logística", "Logistica"), ("📡   Cuentas", "Cuentas"),
                               ("📲   Telegram", "Telegram")]),
             ("Control",      [("📊   Dashboard", "Dashboard")]),
-            ("Sistema",      [("⚙️   Admin", "Equipo"), ("⬇   Actualizaciones", "Actualizaciones")]),
+            ("Sistema",      [("⚙️   Admin", "Equipo"), ("🔍   Verify Legacy", "VerifyLegacy"),
+                              ("⬇   Actualizaciones", "Actualizaciones")]),
         ]
         self._nav_btns = {}
         row = 2
@@ -917,7 +921,7 @@ class InstagramAutoPro(ctk.CTk):
         container.grid_columnconfigure(0, weight=1)
         self._container = container
 
-        for name in ["Dashboard", "Equipo", "Tandas", "Logistica", "Telegram", "Cuentas", "AIAdvisor", "Forge", "Actualizaciones"]:
+        for name in ["Dashboard", "Equipo", "Tandas", "Logistica", "Telegram", "Cuentas", "VerifyLegacy", "AIAdvisor", "Forge", "Actualizaciones"]:
             f = ctk.CTkFrame(container, fg_color=BG_APP, corner_radius=0)
             f.grid(row=0, column=0, sticky="nsew")
             self._frames[name] = f
@@ -929,6 +933,7 @@ class InstagramAutoPro(ctk.CTk):
         self._build_dist_frame()
         self._build_tg_frame()
         self._build_cuentas_frame()
+        self._build_verify_legacy_frame()
         self._build_ai_frame()
         self._build_forge_frame()
         self._build_updates_frame()
@@ -967,6 +972,8 @@ class InstagramAutoPro(ctk.CTk):
         self._frames[name].tkraise()
         if name == "Cuentas" and hasattr(self, "_acc_scroll"):
             self._admin_load_accounts()
+        if name == "VerifyLegacy" and hasattr(self, "_verify_legacy_panel"):
+            self._verify_legacy_panel.refresh()
         if name == "Tandas" and hasattr(self, "_tandas_list_scroll"):
             self._refresh_tandas_list()
 
@@ -1686,6 +1693,25 @@ class InstagramAutoPro(ctk.CTk):
             )
             c_label.set(label)
             c_label.grid(row=0, column=1, padx=(4, 2), pady=6)
+            followers_var = tk.StringVar(value=str(acc.get("followers") or 0))
+            followers = ctk.CTkEntry(
+                r, textvariable=followers_var, width=78, height=30, justify="center",
+                fg_color=BG_INPUT, border_color=BORDER,
+            )
+            followers.bind("<FocusOut>", lambda _e, u=username, v=followers_var: self._set_account_followers(u, v.get()))
+            followers.bind("<Return>", lambda _e, u=username, v=followers_var: self._set_account_followers(u, v.get()))
+            followers.grid(row=0, column=2, padx=(2, 2), pady=6)
+            status = acc.get("ig_status", "unknown")
+            if status not in ACCOUNT_STATUS_OPTIONS:
+                status = "unknown"
+            c_status = ctk.CTkOptionMenu(
+                r, values=ACCOUNT_STATUS_OPTIONS, width=98, height=30,
+                fg_color=BG_INPUT, button_color=BG_CARD2, button_hover_color=BORDER,
+                text_color=TEXT_BODY, font=ctk.CTkFont(size=11),
+                command=lambda v, u=username: self._set_account_status(u, v),
+            )
+            c_status.set(status)
+            c_status.grid(row=0, column=3, padx=(2, 2), pady=6)
             c_type = ctk.CTkOptionMenu(
                 r, values=cats_list, width=120, height=30,
                 fg_color=BG_INPUT, button_color=BG_CARD2, button_hover_color=BORDER,
@@ -1693,7 +1719,7 @@ class InstagramAutoPro(ctk.CTk):
                 command=lambda v, u=username: self._set_account_category(u, v)
             )
             c_type.set(acc_type if acc_type in cats_list else cats_list[0])
-            c_type.grid(row=0, column=2, padx=(2, 2), pady=6)
+            c_type.grid(row=0, column=4, padx=(2, 2), pady=6)
             c_va = ctk.CTkOptionMenu(
                 r, values=vas_list, width=150, height=30,
                 fg_color=BG_INPUT, button_color=BG_CARD2, button_hover_color=BORDER,
@@ -1701,10 +1727,23 @@ class InstagramAutoPro(ctk.CTk):
                 command=lambda v, u=username: self._set_account_va(u, v)
             )
             c_va.set(assigned if assigned in vas_list else vas_list[0])
-            c_va.grid(row=0, column=3, padx=(2, 4), pady=6)
+            c_va.grid(row=0, column=5, padx=(2, 4), pady=6)
+            notes_var = tk.StringVar(value=acc.get("notes") or "")
+            notes = ctk.CTkEntry(
+                r, textvariable=notes_var, width=150, height=30,
+                fg_color=BG_INPUT, border_color=BORDER, placeholder_text="Notas",
+            )
+            notes.bind("<FocusOut>", lambda _e, u=username, v=notes_var: self._set_account_notes(u, v.get()))
+            notes.bind("<Return>", lambda _e, u=username, v=notes_var: self._set_account_notes(u, v.get()))
+            notes.grid(row=0, column=6, padx=(2, 4), pady=6)
+            limitations = self._parse_account_limitations(acc.get("limitations"))
+            GhostButton(
+                r, text=f"Checks ({len(limitations)})", width=108, height=30,
+                command=lambda u=username, values=limitations: self._edit_account_limitations(u, values),
+            ).grid(row=0, column=7, padx=(2, 4), pady=6)
             DangerButton(r, text="×", width=28, height=30,
                           command=lambda u=username: self._admin_delete_account(u)
-                          ).grid(row=0, column=4, padx=(2, 8), pady=6)
+                          ).grid(row=0, column=8, padx=(2, 8), pady=6)
 
     def _set_account_label(self, username: str, value: str):
         self.db.update_account(username, ig_label=value)
@@ -1717,6 +1756,58 @@ class InstagramAutoPro(ctk.CTk):
     def _set_account_va(self, username: str, value: str):
         self.db.update_account(username, assigned_va=value)
         self.refresh_dashboard()
+
+    def _set_account_followers(self, username: str, value: str):
+        try:
+            followers = max(0, int(value.strip() or 0))
+        except ValueError:
+            return
+        self.db.update_account(username, followers=followers)
+
+    def _set_account_status(self, username: str, value: str):
+        self.db.update_account(username, ig_status=value)
+
+    def _set_account_notes(self, username: str, value: str):
+        self.db.update_account(username, notes=value.strip())
+
+    @staticmethod
+    def _parse_account_limitations(raw) -> list[str]:
+        if not raw:
+            return []
+        try:
+            values = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            return []
+        return [value for value in values if value in LIMITATION_OPTIONS]
+
+    def _edit_account_limitations(self, username: str, selected: list[str]):
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(f"Limitaciones — @{username}")
+        dialog.geometry("380x330")
+        dialog.configure(fg_color=BG_CARD)
+        dialog.transient(self)
+        dialog.grab_set()
+        ctk.CTkLabel(dialog, text=f"Limitaciones de @{username}", text_color=TEXT_H1,
+                     font=ctk.CTkFont(size=15, weight="bold")).pack(anchor="w", padx=20, pady=(20, 8))
+        ctk.CTkLabel(dialog, text="Marca todas las que correspondan.", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11)).pack(anchor="w", padx=20, pady=(0, 8))
+        vars_by_option = {}
+        for option in LIMITATION_OPTIONS:
+            var = tk.BooleanVar(value=option in selected)
+            vars_by_option[option] = var
+            ctk.CTkCheckBox(dialog, text=option, variable=var, text_color=TEXT_BODY,
+                             fg_color=ACCENT, hover_color=ACCENT_HOVER).pack(anchor="w", padx=20, pady=4)
+
+        def save():
+            values = [option for option, var in vars_by_option.items() if var.get()]
+            self.db.update_account(username, limitations=json.dumps(values, ensure_ascii=False))
+            dialog.destroy()
+            self._admin_load_accounts()
+
+        buttons = ctk.CTkFrame(dialog, fg_color="transparent")
+        buttons.pack(fill="x", padx=20, pady=(14, 20))
+        GhostButton(buttons, text="Cancelar", command=dialog.destroy).pack(side="right")
+        PrimaryButton(buttons, text="Guardar", command=save).pack(side="right", padx=(0, 8))
 
     def _admin_load_cats(self):
         for w in self._cat_scroll.winfo_children():
@@ -3121,7 +3212,7 @@ class InstagramAutoPro(ctk.CTk):
         accounts_card = Card(f, title="Cuentas destino")
         accounts_card.grid(row=2, column=0, sticky="nsew", padx=24, pady=(0, 20))
         accounts_body = accounts_card.body
-        accounts_body.grid_rowconfigure(1, weight=1)
+        accounts_body.grid_rowconfigure(2, weight=1)
         accounts_body.grid_columnconfigure(0, weight=1)
 
         accounts_header = ctk.CTkFrame(accounts_body, fg_color="transparent")
@@ -3135,10 +3226,31 @@ class InstagramAutoPro(ctk.CTk):
         GhostButton(accounts_header, text="Actualizar", width=110,
                     command=self._admin_load_accounts).grid(row=0, column=1, sticky="e")
 
+        columns = ctk.CTkFrame(accounts_body, fg_color=BG_CARD2, corner_radius=BTN_RADIUS)
+        columns.grid(row=1, column=0, sticky="ew", pady=(0, 6))
+        columns.grid_columnconfigure(0, weight=1)
+        for index, (title, width) in enumerate([
+            ("Cuenta", 0), ("Etiqueta", 105), ("Seguidores", 78), ("Estado", 98),
+            ("Categoría", 120), ("VA", 150), ("Notas", 150), ("Limitaciones", 108), ("", 28),
+        ]):
+            ctk.CTkLabel(columns, text=title, text_color=TEXT_MUTED,
+                         font=ctk.CTkFont(size=10, weight="bold"), width=width,
+                         anchor="w" if index == 0 else "center").grid(
+                             row=0, column=index, padx=(12, 4) if index == 0 else (2, 2), pady=6,
+                             sticky="ew" if index == 0 else "")
+
         self._acc_scroll = ctk.CTkScrollableFrame(accounts_body, fg_color="transparent", height=380)
-        self._acc_scroll.grid(row=1, column=0, sticky="nsew")
+        self._acc_scroll.grid(row=2, column=0, sticky="nsew")
         self._acc_scroll.grid_columnconfigure(0, weight=1)
         self._admin_refresh()
+
+    def _build_verify_legacy_frame(self):
+        """Aísla el verificador HTTP heredado de la gestión operativa de cuentas."""
+        f = self._frames["VerifyLegacy"]
+        f.grid_rowconfigure(0, weight=1)
+        f.grid_columnconfigure(0, weight=1)
+        self._verify_legacy_panel = AccountStatusPanel(f, self.db)
+        self._verify_legacy_panel.grid(row=0, column=0, sticky="nsew")
 
     # ── AI Advisor (Gemini Integration) ──────────────────────────────────────
     def _build_ai_frame(self):

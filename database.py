@@ -107,6 +107,9 @@ class DatabaseManager:
         migrations = [
             "ALTER TABLE virtual_accounts ADD COLUMN ig_status TEXT DEFAULT 'unknown'",
             "ALTER TABLE virtual_accounts ADD COLUMN ig_label  TEXT DEFAULT 'nuevo'",
+            "ALTER TABLE virtual_accounts ADD COLUMN followers INTEGER DEFAULT 0",
+            "ALTER TABLE virtual_accounts ADD COLUMN notes TEXT DEFAULT ''",
+            "ALTER TABLE virtual_accounts ADD COLUMN limitations TEXT DEFAULT '[]'",
             "ALTER TABLE virtual_assistants ADD COLUMN timezone TEXT DEFAULT 'America/Argentina/Buenos_Aires'",
         ]
         cur = self.conn.cursor()
