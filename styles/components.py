@@ -144,5 +144,5 @@ class ToggleRow(ctk.CTkFrame):
         self.var = variable if variable is not None else ctk.BooleanVar(value=False)
         self.switch = ctk.CTkSwitch(self, text="", variable=self.var,
                                     progress_color=C.ACCENT,
-                                    button_color=("#ffffff", "#ffffff"))
+                                    button_color=C.SWITCH_KNOB)
         self.switch.grid(row=0, column=1, sticky="e", padx=16)
