@@ -146,3 +146,71 @@ class ToggleRow(ctk.CTkFrame):
                                     progress_color=C.ACCENT,
                                     button_color=C.SWITCH_KNOB)
         self.switch.grid(row=0, column=1, sticky="e", padx=16)
+
+
+class KeyValueRow(ctk.CTkFrame):
+    def __init__(self, master, key, value, divider=True, **kw):
+        kw.setdefault("fg_color", "transparent")
+        super().__init__(master, **kw)
+        self.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(self, text=key, anchor="w",
+                     font=ctk.CTkFont(**_font(C.FONT_BODY)),
+                     text_color=C.TEXT_MUTED).grid(row=0, column=0, sticky="w", pady=10)
+        self.value_lbl = ctk.CTkLabel(self, text=value, anchor="e",
+                                      font=ctk.CTkFont(**_font(C.FONT_BODY)),
+                                      text_color=C.TEXT_H1)
+        self.value_lbl.grid(row=0, column=1, sticky="e", pady=10)
+        if divider:
+            ctk.CTkFrame(self, height=1, fg_color=C.LINE).grid(
+                row=1, column=0, columnspan=2, sticky="ew")
+
+
+class Dropzone(ctk.CTkFrame):
+    def __init__(self, master, title, subtitle="", on_browse=None,
+                 browse_text="Browse files", **kw):
+        kw.setdefault("fg_color", C.SURFACE)
+        kw.setdefault("corner_radius", C.CARD_RADIUS)
+        kw.setdefault("border_width", 2)
+        kw.setdefault("border_color", C.LINE)
+        super().__init__(master, **kw)
+        inner = ctk.CTkFrame(self, fg_color="transparent")
+        inner.pack(expand=True, pady=40)
+        ctk.CTkLabel(inner, text=title, font=ctk.CTkFont(**_font(C.FONT_H2)),
+                     text_color=C.TEXT_H1).pack()
+        if subtitle:
+            ctk.CTkLabel(inner, text=subtitle, font=ctk.CTkFont(**_font(C.FONT_BODY)),
+                         text_color=C.TEXT_MUTED).pack(pady=(4, 0))
+        ctk.CTkLabel(inner, text="or", font=ctk.CTkFont(**_font(C.FONT_BODY)),
+                     text_color=C.TEXT_MUTED).pack(pady=8)
+        if on_browse:
+            PrimaryButton(inner, text=browse_text, command=on_browse).pack()
+
+
+class PhonePreview(ctk.CTkFrame):
+    def __init__(self, master, **kw):
+        kw.setdefault("fg_color", C.BG_CARD2)
+        kw.setdefault("corner_radius", 18)
+        kw.setdefault("width", 260)
+        kw.setdefault("height", 462)   # ~9:16
+        super().__init__(master, **kw)
+        self.grid_propagate(False)
+        self.pack_propagate(False)
+
+
+class NavItem(ctk.CTkButton):
+    def __init__(self, master, text, command=None, **kw):
+        kw.setdefault("anchor", "w")
+        kw.setdefault("height", 40)
+        kw.setdefault("corner_radius", C.BTN_RADIUS)
+        kw.setdefault("fg_color", "transparent")
+        kw.setdefault("text_color", C.TEXT_BODY)
+        kw.setdefault("hover_color", C.SURFACE2)
+        kw.setdefault("border_width", 0)
+        kw.setdefault("font", ctk.CTkFont(**_font(C.FONT_BODY)))
+        super().__init__(master, text=text, command=command, **kw)
+
+    def set_active(self, active):
+        if active:
+            self.configure(fg_color=C.ACCENT_WEAK, text_color=C.ACCENT)
+        else:
+            self.configure(fg_color="transparent", text_color=C.TEXT_BODY)

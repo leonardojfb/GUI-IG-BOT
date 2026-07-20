@@ -35,3 +35,16 @@ def test_inputs_construct():
         assert tr.var.get() is False
     finally:
         r.destroy()
+
+def test_rows_zones_construct():
+    from styles import components as K
+    r = _root()
+    try:
+        K.KeyValueRow(r, "Status", "Active")
+        K.Dropzone(r, "Drop files", "Image or video", on_browse=lambda: None)
+        K.PhonePreview(r)
+        nav = K.NavItem(r, "Forge", command=lambda: None)
+        nav.set_active(True)
+        nav.set_active(False)
+    finally:
+        r.destroy()
