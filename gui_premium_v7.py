@@ -192,10 +192,8 @@ class AccountStatusPanel(ctk.CTkFrame):
         if cfg.get("proxy"):
             self.e_proxy.insert(0, cfg["proxy"])
 
-        ctk.CTkButton(
-            card, text="💾 Guardar", fg_color=NEON_CYAN, text_color=BG_APP,
-            corner_radius=BTN_RADIUS, height=BTN_H, width=110,
-            font=ctk.CTkFont(size=12, weight="bold"), command=self._save_cfg
+        PrimaryButton(
+            card, text="Guardar", width=110, command=self._save_cfg
         ).grid(row=0, column=2, rowspan=2, padx=20, pady=16)
 
     def _build_controls(self):
@@ -203,45 +201,28 @@ class AccountStatusPanel(ctk.CTkFrame):
         ctrl.grid(row=2, column=0, sticky="ew", padx=24, pady=10)
         ctrl.grid_columnconfigure(7, weight=1)
 
-        self.btn_check = ctk.CTkButton(
-            ctrl, text=f"▶  Verificar  (máx {MAX_PER_SESSION})",
-            fg_color=SUCCESS, text_color="#000000",
-            corner_radius=BTN_RADIUS, height=BTN_H,
-            font=ctk.CTkFont(size=12, weight="bold"),
+        self.btn_check = PrimaryButton(
+            ctrl, text=f"Verificar (máx {MAX_PER_SESSION})",
             command=self.start_check
         )
         self.btn_check.grid(row=0, column=0, padx=(0, 8))
 
-        self.btn_stop = ctk.CTkButton(
-            ctrl, text="⏹  Detener",
-            fg_color=DANGER, text_color=TEXT_H1,
-            corner_radius=BTN_RADIUS, height=BTN_H,
-            font=ctk.CTkFont(size=12, weight="bold"),
+        self.btn_stop = DangerButton(
+            ctrl, text="Detener",
             state="disabled", command=self.stop_check
         )
         self.btn_stop.grid(row=0, column=1, padx=(0, 8))
 
-        ctk.CTkButton(
-            ctrl, text="🔄 Reiniciar",
-            fg_color=BG_CARD2, text_color=TEXT_MUTED,
-            border_width=1, border_color=BORDER,
-            corner_radius=BTN_RADIUS, height=BTN_H,
-            font=ctk.CTkFont(size=12), command=self._reset_all_status
+        GhostButton(
+            ctrl, text="Reiniciar", command=self._reset_all_status
         ).grid(row=0, column=2, padx=(0, 8))
 
-        ctk.CTkButton(
-            ctrl, text="↺ Recargar lista",
-            fg_color=BG_CARD2, text_color=TEXT_MUTED,
-            border_width=1, border_color=BORDER,
-            corner_radius=BTN_RADIUS, height=BTN_H,
-            font=ctk.CTkFont(size=12), command=self.load_accounts
+        GhostButton(
+            ctrl, text="Recargar lista", command=self.load_accounts
         ).grid(row=0, column=3, padx=(0, 8))
 
-        self.btn_delete_sel = ctk.CTkButton(
-            ctrl, text="🗑  Eliminar sel.",
-            fg_color=DANGER, text_color=TEXT_H1,
-            corner_radius=BTN_RADIUS, height=BTN_H,
-            font=ctk.CTkFont(size=12, weight="bold"),
+        self.btn_delete_sel = DangerButton(
+            ctrl, text="Eliminar sel.",
             command=self._delete_selected
         )
         self.btn_delete_sel.grid(row=0, column=4, padx=(0, 6))
@@ -3101,11 +3082,18 @@ class InstagramAutoPro(ctk.CTk):
     # ── Panel Estado de Cuentas ───────────────────────────────────────────────
     def _build_cuentas_frame(self):
         f = self._frames["Cuentas"]
-        f.grid_rowconfigure(0, weight=1)
+        f.grid_rowconfigure(1, weight=1)
         f.grid_columnconfigure(0, weight=1)
 
-        self._cuentas_panel = AccountStatusPanel(f, self.db)
+        PageHeader(
+            f, "DISTRIBUCIÓN", "Cuentas",
+            "Cuentas de Instagram y su estado."
+        ).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 0))
+        panel_card = Card(f, title="Estado de cuentas")
+        panel_card.grid(row=1, column=0, sticky="nsew", padx=24, pady=(14, 20))
+        self._cuentas_panel = AccountStatusPanel(panel_card.body, self.db)
         self._cuentas_panel.grid(row=0, column=0, sticky="nsew")
+        panel_card.body.grid_rowconfigure(0, weight=1)
 
     # ── AI Advisor (Gemini Integration) ──────────────────────────────────────
     def _build_ai_frame(self):
