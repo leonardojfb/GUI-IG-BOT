@@ -11,11 +11,15 @@ if exist ".venv\Scripts\pythonw.exe" (
     )
 )
 
-rem 2) Otherwise use the system pythonw (still windowless).
-for %%I in (pythonw.exe) do if not defined PYW set "PYW=%%~$PATH:I"
-if defined PYW (
-    start "" "%PYW%" launcher.py
-    exit /b
+rem 2) Derive pythonw from the working system python.  Do not resolve the
+rem    WindowsApps pythonw.exe alias: it is a Store stub and exits silently.
+for /f "usebackq delims=" %%P in (`python -c "import sys; print(sys.executable)" 2^>nul`) do set "PYTHON_EXE=%%P"
+if defined PYTHON_EXE (
+    for %%P in ("%PYTHON_EXE%") do set "PYW=%%~dpPpythonw.exe"
+    if exist "%PYW%" (
+        start "" "%PYW%" "%~dp0launcher.py"
+        exit /b
+    )
 )
 
 rem 3) Last resort: the py launcher in windowless mode.
