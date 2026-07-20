@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.3",
+    "version":  "1.0.4",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.3",
-    "asset_name":  "MetodoIG-v1.0.3.zip",
-    "sha256":  "6fa2052358418c760efbdff99f6d216ef80bc888b6fffa27c624c5b4834d2148",
-    "notes":  "Instala automaticamente tzdata cuando falta el soporte de zonas horarias, evitando fallos al enviar a Telegram.",
+    "github_release_tag":  "v1.0.4",
+    "asset_name":  "MetodoIG-v1.0.4.zip",
+    "sha256":  "65df05cc863f4a492cc5334f47009358494e193eb49a7a8f5ae83be2275fafeb",
+    "notes":  "Logistica ahora sincroniza el desplegable con las carpetas de videos_finales: detecta carpetas nuevas o renombradas, las registra en la DB y oculta tandas Forge sin carpeta. Corrige tandas con nombre repetido que aparecian con el conteo viejo.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",

@@ -268,6 +268,50 @@ class DatabaseManager:
         row = cur.fetchone()
         return dict(row) if row else None
 
+    def list_and_sync_tandas(self, videos_finales_root: str) -> list[str]:
+        """Sincroniza el desplegable de logística con la realidad del disco.
+
+        1. Escanea ``videos_finales/``: cada subcarpeta con al menos un video se
+           registra como tanda si aún no existe (upsert NO destructivo — nunca
+           pisa filas ya presentes).
+        2. Devuelve los nombres a mostrar: todas las tandas de la DB, pero
+           ocultando las tandas tipo Forge (``p1==p2==nombre``) cuya carpeta ya
+           no existe en disco (evita "fantasmas" tras renombrar/borrar carpetas).
+           Las tandas legacy P1+P2 (``p1 != p2``) siempre se muestran.
+
+        El orden respeta ``get_all_tandas`` (created_at DESC), así las carpetas
+        recién detectadas quedan arriba.
+        """
+        video_exts = (".mp4", ".mov", ".avi")
+        folder_names = set()
+        if os.path.isdir(videos_finales_root):
+            for name in os.listdir(videos_finales_root):
+                fpath = os.path.join(videos_finales_root, name)
+                if not os.path.isdir(fpath):
+                    continue
+                try:
+                    has_video = any(
+                        f.lower().endswith(video_exts) for f in os.listdir(fpath)
+                    )
+                except OSError:
+                    has_video = False
+                if not has_video:
+                    continue
+                folder_names.add(name)
+                if not self.get_tanda_by_name(name):
+                    self.add_tanda(name, name, name, "")
+
+        visible = []
+        for t in self.get_all_tandas():
+            name = t.get("tanda_name")
+            if not name:
+                continue
+            is_forge = (t.get("p1_folder") == name and t.get("p2_folder") == name)
+            if is_forge and name not in folder_names:
+                continue  # tanda Forge huérfana: carpeta borrada o renombrada
+            visible.append(name)
+        return visible
+
     def get_video_types(self):
         """Devuelve los tipos de video derivados de las categorías existentes."""
         cats = self.get_categories()

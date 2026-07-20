@@ -2392,9 +2392,11 @@ class InstagramAutoPro(ctk.CTk):
     # ── Lógica Logística ─────────────────────────────────────────────────────
     def reload_dist_lists(self, event=None):
         try:
-            tandas_raw = self.db.get_all_tandas()
-            tandas = [t["tanda_name"] if isinstance(t, dict) else t.get("tanda_name") for t in tandas_raw]
-            tandas = [t for t in tandas if t]
+            # La lista de logística se sincroniza con el disco: registra en la DB
+            # cualquier carpeta nueva de videos_finales/ y oculta tandas Forge
+            # huérfanas (carpeta renombrada/borrada). Ver DatabaseManager.list_and_sync_tandas.
+            vf_root = os.path.join(_BASE_DIR, "videos_finales")
+            tandas = self.db.list_and_sync_tandas(vf_root)
 
             if hasattr(self, "c_tandas"):
                 self.c_tandas.configure(values=tandas)
