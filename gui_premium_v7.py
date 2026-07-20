@@ -3259,17 +3259,21 @@ class InstagramAutoPro(ctk.CTk):
         self.forge_meta_assignments = []
 
         f = self._frames["Forge"]
-        f.grid_rowconfigure(2, weight=1)
+        f.grid_rowconfigure(0, weight=1)
         f.grid_columnconfigure(0, weight=1)
 
+        scroll = ctk.CTkScrollableFrame(f, fg_color="transparent")
+        scroll.grid(row=0, column=0, sticky="nsew")
+        scroll.grid_columnconfigure(0, weight=1)
+
         # ── Header ──────────────────────────────────────────────────────
-        PageHeader(f, kicker="CONTENIDO", title="Forge de Metadata",
+        PageHeader(scroll, kicker="CONTENIDO", title="Forge de Metadata",
                    description="Inyecta fingerprints iPhone únicos · 276,000 combinaciones disponibles",
                    action=("Tanda", self.forge_preview_metadata)
                    ).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 0))
 
         # ── Top: dos tarjetas (Videos | Config) ─────────────────────────
-        top = ctk.CTkFrame(f, fg_color="transparent")
+        top = ctk.CTkFrame(scroll, fg_color="transparent")
         top.grid(row=1, column=0, sticky="ew", padx=24, pady=(14, 0))
         top.grid_columnconfigure(0, weight=1)
         top.grid_columnconfigure(1, weight=1)
@@ -3373,6 +3377,7 @@ class InstagramAutoPro(ctk.CTk):
         fx_frame.grid(row=6, column=0, columnspan=2, sticky="ew",
                       padx=18, pady=(4, 16))
         fx_frame.grid_columnconfigure(0, weight=1)
+        fx_frame.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(fx_frame, text="Micro-ediciones por copia:",
                      font=ctk.CTkFont(size=11, weight="bold"),
                      text_color=NEON_PURPLE).grid(row=0, column=0,
@@ -3382,10 +3387,10 @@ class InstagramAutoPro(ctk.CTk):
             var = tk.BooleanVar(value=True)
             self.forge_fx_vars[key] = var
             ToggleRow(fx_frame, lbl, variable=var).grid(
-                row=1 + i, column=0, sticky="ew", pady=3)
+                row=1 + i // 2, column=i % 2, sticky="ew", padx=(0, 8), pady=3)
 
         # ── Tabla Preview ────────────────────────────────────────────────
-        preview_card = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        preview_card = ctk.CTkFrame(scroll, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
         preview_card.grid(row=2, column=0, sticky="nsew", padx=24, pady=(14, 0))
         preview_card.grid_rowconfigure(1, weight=1)
         preview_card.grid_columnconfigure(0, weight=1)
@@ -3405,7 +3410,7 @@ class InstagramAutoPro(ctk.CTk):
 
         cols = ("Video", "Modelo iPhone", "Ciudad", "Carrier", "iOS")
         self.forge_tree = ttk.Treeview(tree_wrap, columns=cols, show="headings",
-                                       style="Premium.Treeview", height=7)
+                                       style="Premium.Treeview", height=10)
         col_w = {"Video": 200, "Modelo iPhone": 190, "Ciudad": 140, "Carrier": 170, "iOS": 70}
         for col in cols:
             self.forge_tree.heading(col, text=col)
@@ -3416,7 +3421,7 @@ class InstagramAutoPro(ctk.CTk):
         scr.grid(row=0, column=1, sticky="ns", padx=(2, 0))
 
         # ── Botonera + Progreso ──────────────────────────────────────────
-        bot = ctk.CTkFrame(f, fg_color="transparent")
+        bot = ctk.CTkFrame(scroll, fg_color="transparent")
         bot.grid(row=3, column=0, sticky="ew", padx=24, pady=(14, 20))
         bot.grid_columnconfigure(3, weight=1)
 
@@ -3444,8 +3449,6 @@ class InstagramAutoPro(ctk.CTk):
                                           font=ctk.CTkFont(size=11),
                                           text_color=TEXT_MUTED)
         self.forge_pb_lbl.grid(row=1, column=0, sticky="w")
-
-        f.grid_rowconfigure(3, weight=0)
 
     def _forge_reload_cats(self):
         cats = self.db.get_categories()
