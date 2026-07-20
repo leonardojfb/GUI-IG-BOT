@@ -4,8 +4,8 @@
     "github_repository":  "leonardojfb/GUI-IG-BOT",
     "github_release_tag":  "v1.0.4",
     "asset_name":  "MetodoIG-v1.0.4.zip",
-    "sha256":  "65df05cc863f4a492cc5334f47009358494e193eb49a7a8f5ae83be2275fafeb",
-    "notes":  "Logistica ahora sincroniza el desplegable con las carpetas de videos_finales: detecta carpetas nuevas o renombradas, las registra en la DB y oculta tandas Forge sin carpeta. Corrige tandas con nombre repetido que aparecian con el conteo viejo.",
+    "sha256":  "95933ad3d957ab08ede0cd54448568f61e85956ffbf307d4d7ad7f8eeb8a1956",
+    "notes":  "Nueva interfaz visual, gestion de cuentas destino centralizada, Verify legacy separado, Admin simplificado y correccion del lanzador de Windows.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",
