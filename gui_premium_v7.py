@@ -1162,24 +1162,18 @@ class InstagramAutoPro(ctk.CTk):
     def _build_dashboard_frame(self):
         """TAREA 2 — Dashboard: header, KPI cards, tabla de cuentas, botones."""
         f = self._frames["Dashboard"]
-        f.grid_rowconfigure(1, weight=1)
+        f.grid_rowconfigure(2, weight=1)
         f.grid_columnconfigure(0, weight=1)
 
         # ── Header ──────────────────────────────────────────────────────
-        header = ctk.CTkFrame(f, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 0))
-        header.grid_columnconfigure(3, weight=1)
-
-        ctk.CTkLabel(header, text="📊  Dashboard",
-                     font=ctk.CTkFont(size=22, weight="bold"),
-                     text_color=TEXT_H1).grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(header, text="Vista en tiempo real de todas las cuentas",
-                     font=ctk.CTkFont(size=12), text_color=TEXT_MUTED
-                     ).grid(row=1, column=0, sticky="w")
+        PageHeader(
+            f, "CONTROL", "Dashboard",
+            "Estado del sistema y actividad reciente."
+        ).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 0))
 
         # ── KPI Cards ───────────────────────────────────────────────────
         kpi_row = ctk.CTkFrame(f, fg_color="transparent")
-        kpi_row.grid(row=0, column=0, sticky="ew", padx=24, pady=(60, 0))
+        kpi_row.grid(row=1, column=0, sticky="ew", padx=24, pady=(18, 0))
 
         self.kpi_cuentas = self._make_kpi_card(kpi_row, "📱", "Cuentas", "0", NEON_CYAN, 0)
         self.kpi_videos  = self._make_kpi_card(kpi_row, "🎬", "Videos Enviados", "0", NEON_PURPLE, 1)
@@ -1187,12 +1181,14 @@ class InstagramAutoPro(ctk.CTk):
 
         # ── Área Central (Tabla) ─────────────────────────────────────────
         center_row = ctk.CTkFrame(f, fg_color="transparent")
-        center_row.grid(row=1, column=0, sticky="nsew", padx=24, pady=(14, 0))
+        center_row.grid(row=2, column=0, sticky="nsew", padx=24, pady=(14, 0))
         center_row.grid_rowconfigure(0, weight=1)
         center_row.grid_columnconfigure(0, weight=1)
 
         # ── Tabla ───────────────────────────────────────────────────────
-        table_frame = ctk.CTkFrame(center_row, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        table_card = Card(center_row, title="Cuentas registradas")
+        table_card.grid(row=0, column=0, sticky="nsew")
+        table_frame = table_card.body
         table_frame.grid(row=0, column=0, sticky="nsew")
         table_frame.grid_rowconfigure(1, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
@@ -1201,9 +1197,6 @@ class InstagramAutoPro(ctk.CTk):
         th = ctk.CTkFrame(table_frame, fg_color="transparent")
         th.grid(row=0, column=0, sticky="ew", padx=14, pady=(12, 6))
         th.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(th, text="Cuentas registradas",
-                     font=ctk.CTkFont(size=13, weight="bold"),
-                     text_color=TEXT_BODY).grid(row=0, column=0, sticky="w")
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", lambda *_: self._filter_tree())
         srch = ctk.CTkEntry(th, textvariable=self.search_var, width=200,
@@ -1235,33 +1228,27 @@ class InstagramAutoPro(ctk.CTk):
 
         # ── Botones de acción ────────────────────────────────────────────
         btn_bar = ctk.CTkFrame(f, fg_color="transparent")
-        btn_bar.grid(row=2, column=0, sticky="ew", padx=24, pady=(10, 16))
+        btn_bar.grid(row=3, column=0, sticky="ew", padx=24, pady=(10, 16))
 
-        btn_cfg = [
-            ("📁  Cambiar Categoría", IG_PINK,    self.change_account_category),
-            ("👤  Reasignar VA",      INFO,        self.reassign_va),
-            ("🗑️  Eliminar",          DANGER,      self.delete_account),
-            ("🔄  Actualizar",        NEON_CYAN,   self.refresh_dashboard),
-        ]
-        for label, color, cmd in btn_cfg:
-            ctk.CTkButton(btn_bar, text=label, fg_color=color,
-                          hover_color=self._darken(color),
-                          text_color=BG_APP if color == NEON_CYAN else TEXT_H1,
-                          height=BTN_H, corner_radius=BTN_RADIUS,
-                          font=ctk.CTkFont(size=12, weight="bold"),
-                          command=cmd).pack(side="left", padx=(0, 8))
+        GhostButton(btn_bar, text="Cambiar Categoría",
+                    command=self.change_account_category).pack(side="left", padx=(0, 8))
+        GhostButton(btn_bar, text="Reasignar VA",
+                    command=self.reassign_va).pack(side="left", padx=(0, 8))
+        DangerButton(btn_bar, text="Eliminar",
+                     command=self.delete_account).pack(side="left", padx=(0, 8))
+        PrimaryButton(btn_bar, text="Actualizar",
+                      command=self.refresh_dashboard).pack(side="left")
 
         self.refresh_dashboard()
 
     # ── KPI Card helper ───────────────────────────────────────────────────────
     def _make_kpi_card(self, parent, icon, label, value, accent, col):
-        card = ctk.CTkFrame(parent, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
-                            border_width=1, border_color=BORDER)
+        card = Card(parent)
         card.grid(row=0, column=col, padx=(0, 12), sticky="ew")
         parent.grid_columnconfigure(col, weight=1)
 
-        inner = ctk.CTkFrame(card, fg_color="transparent")
-        inner.pack(fill="both", expand=True, padx=18, pady=14)
+        inner = card.body
+        inner.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(inner, text=f"{icon}  {label}",
                      font=ctk.CTkFont(size=11), text_color=TEXT_MUTED).pack(anchor="w")
