@@ -7,6 +7,7 @@ that the GUI reads to show a friendly in-app notice instead of a console error.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -84,6 +85,23 @@ def _run_update_check() -> None:
         pass
 
 
+def _ensure_database() -> None:
+    """Siembra la base de un cliente NUEVO desde la plantilla empaquetada, una sola vez.
+
+    Copia organizador.default.db -> organizador.db SOLO si organizador.db no existe.
+    Nunca sobrescribe la base de un cliente existente, así que sus datos (cuentas,
+    tandas, historial) se conservan tras reinstalar o descomprimir encima. Si no hay
+    plantilla, la app crea una base vacía sola al conectar (database.initialize)."""
+    db = APP_DIR / "organizador.db"
+    template = APP_DIR / "organizador.default.db"
+    if db.exists() or not template.exists():
+        return
+    try:
+        shutil.copy2(template, db)
+    except OSError:
+        pass  # la app creará una base vacía al conectar como respaldo
+
+
 def _windowless_python() -> str:
     """Return pythonw.exe next to the current interpreter if it exists, so the
     GUI child also runs without a console; fall back to the interpreter."""
@@ -100,6 +118,7 @@ def main() -> int:
             pass
         return 1
 
+    _ensure_database()
     _run_update_check()
     try:
         subprocess.Popen([_windowless_python(), str(GUI)], cwd=str(APP_DIR))

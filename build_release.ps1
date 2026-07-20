@@ -73,11 +73,14 @@ try {
     }
 
     if ($IncludeClientDatabase) {
-        $DatabaseSource = Join-Path $Root "organizador.db"
-        if (-not (Test-Path -LiteralPath $DatabaseSource -PathType Leaf)) {
-            throw "No existe organizador.db para la entrega inicial."
+        # Empaquetar una PLANTILLA limpia y vacia (organizador.default.db), NUNCA la
+        # DB real del desarrollador. launcher.py la copia a organizador.db solo si el
+        # cliente aun no tiene una: jamas pisa la base de un cliente existente.
+        $DefaultDbDest = Join-Path $StagePath "organizador.default.db"
+        & python (Join-Path $Root "make_default_db.py") $DefaultDbDest
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $DefaultDbDest -PathType Leaf)) {
+            throw "No se pudo generar organizador.default.db para la entrega inicial."
         }
-        Copy-Item -LiteralPath $DatabaseSource -Destination (Join-Path $StagePath "organizador.db")
     }
 
     if (Test-Path -LiteralPath $ZipPath) {
