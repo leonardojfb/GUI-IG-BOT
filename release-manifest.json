@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.6",
+    "version":  "1.0.7",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.6",
-    "asset_name":  "MetodoIG-v1.0.6.zip",
-    "sha256":  "a23989ec8d0246e6a6009548fa85fa47e880fb70524ef647262e99f4ac24c39a",
-    "notes":  "Hotfix: incluye styles/components.py requerido por la GUI.",
+    "github_release_tag":  "v1.0.7",
+    "asset_name":  "MetodoIG-v1.0.7.zip",
+    "sha256":  "86f115422556337b55a05a10d3beb4c9a9ba116a31c52188ae33061a1d358f5b",
+    "notes":  "Hotfix: incluye styles/components.py, requerido para abrir la GUI.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",
