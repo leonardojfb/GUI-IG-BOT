@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.2",
+    "version":  "1.0.4",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.2",
-    "asset_name":  "MetodoIG-v1.0.2.zip",
-    "sha256":  "42af15ac48c4463c53d94d2d8e67b5727fcf8b0158936fd3f21592c884069f76",
-    "notes":  "Arranque sin consola, aviso amigable para fallos de actualizacion y mejoras de interfaz.",
+    "github_release_tag":  "v1.0.4",
+    "asset_name":  "MetodoIG-v1.0.4.zip",
+    "sha256":  "1214e1b01ae91cfef6e91aeee3156a0f87f8d794cb5051c5aa00b616bd48e17b",
+    "notes":  "Nueva interfaz visual, gestion de cuentas destino centralizada, Verify legacy separado, Admin simplificado y correccion del lanzador de Windows.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",

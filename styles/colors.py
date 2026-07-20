@@ -4,47 +4,62 @@ Inspirado en patrones de SaaS dashboards modernos (natural light + dark).
 Todos los valores son tokens centralizados; nunca hardcodear colores fuera de este módulo.
 """
 
-# ── Fondos ── (light, dark) ────────────────────────────────────────────────
-BG_APP     = ("#e5e1d3", "#16181d")   # Fondo raíz de la ventana (beige cálido)
-BG_SIDEBAR = ("#dcd7c6", "#1b1e25")   # Panel de navegación lateral
-BG_CARD    = ("#efece2", "#22262e")   # Cards primarias (crema, no blanco puro)
-BG_CARD2   = ("#e3dece", "#2a2f38")   # Cards secundarias / hover
-BG_INPUT   = ("#eae6d9", "#262b33")   # Campos de entrada
-BORDER     = ("#ccc6b4", "#333944")   # Bordes y separadores
+# ── Fondos ── (light, dark) ─────────────────────────────────────────────
+BG_APP     = ("#faf9f6", "#0c0c0e")   # Fondo raíz (near-black cálido en dark)
+BG_SIDEBAR = ("#f3f1ea", "#0e0e10")   # Panel lateral
+BG_CARD    = ("#ffffff", "#141416")   # Cards primarias
+BG_CARD2   = ("#f0eee7", "#1a1a1d")   # Cards secundarias / hover
+BG_INPUT   = ("#f3f1ea", "#141416")   # Campos de entrada
+BORDER     = ("#e7e3d9", "#242428")   # Bordes y separadores
 
-# ── Acentos ── (light, dark) ────────────────────────────────────────────────
-NEON_CYAN   = ("#2f8f7d", "#4db6a2")  # Acento primario (teal-sage), CTA, nav activo
-ACCENT_WEAK = ("#dcefe9", "#223a37")  # Fondo del nav activo
-NEON_PURPLE = ("#5b7fb0", "#7f9fcf")  # Acento secundario (slate-blue apagado)
-IG_PINK     = ("#c9564e", "#e07a6f")  # Acciones destructivas (rosa apagado)
-IG_ORANGE   = ("#c2872f", "#e0a94e")  # Ámbar apagado
+# ── Acentos ── (light, dark) — peach/almond, acento único OOPSIE ─────────
+NEON_CYAN   = ("#c98a3f", "#e9c7a3")  # ACENTO PRIMARIO (peach). Nombre legacy.
+ACCENT_WEAK = ("#f3e6d3", "#2a2118")  # Fondo del nav activo (peach tenue)
+NEON_PURPLE = ("#7a6a52", "#c9b48f")  # Acento secundario apagado (legacy)
+IG_PINK     = ("#c9564e", "#e5675f")  # Destructivas
+IG_ORANGE   = ("#c2872f", "#e0a94e")  # Ámbar
 
-# ── Semánticos ── (light, dark) ─────────────────────────────────────────────
-SUCCESS = ("#3f9d6d", "#54b184")
-WARNING = ("#c2872f", "#e0a94e")
-DANGER  = ("#c9564e", "#e07a6f")
-INFO    = ("#4a7fb0", "#6398c9")
+# ── Semánticos ──
+SUCCESS  = ("#3f9d6d", "#3fb768")
+WARNING  = ("#c2872f", "#e0a94e")
+DANGER   = ("#c9564e", "#e5675f")
+INFO     = ("#2f88c2", "#29a9ea")
+TELEGRAM = ("#2f88c2", "#29a9ea")     # Botón de soporte Telegram
 
-# ── Tipografía ── (light, dark) ─────────────────────────────────────────────
-TEXT_H1    = ("#2a2925", "#e9eaec")   # Títulos
-TEXT_BODY  = ("#55534c", "#bdc2ca")   # Cuerpo
-TEXT_MUTED = ("#8b887f", "#7d838d")   # Secundario / placeholder
+# ── Marcas de plataforma (el icono conserva color de marca) ──
+BRAND_REDDIT = ("#ff4500", "#ff4500")
+BRAND_X      = ("#1d1d1f", "#e7e9ea")
+BRAND_IG     = ("#e1306c", "#e1306c")
 
-# ── Aliases semánticos (nombres claros para código nuevo) ────────────────────
-GROUND      = BG_APP
-RAIL        = BG_SIDEBAR
-SURFACE     = BG_CARD
-SURFACE2    = BG_CARD2
-LINE        = BORDER
-ACCENT      = NEON_CYAN
+# ── Tipografía ── (light, dark) ──
+TEXT_H1    = ("#1b1a17", "#f5f5f5")
+TEXT_BODY  = ("#55534c", "#a0a0a6")
+TEXT_MUTED = ("#8b887f", "#6c6c72")
 
-# ── Fuentes ──────────────────────────────────────────────────────────────────
-FONT_TITLE  = ("Segoe UI", 22, "bold")
+# ── Texto/hover sobre acento peach ──
+ACCENT_TEXT     = ("#1c1710", "#1c1710")
+TEXT_ON_DANGER  = ("#ffffff", "#ffffff")  # Texto sobre botón destructivo (rojo), invariante a tema
+SWITCH_KNOB     = ("#ffffff", "#ffffff")  # Perilla del CTkSwitch, blanca en ambos temas
+ACCENT_HOVER    = ("#b87d38", "#dcb489")
+
+# ── Aliases semánticos ──
+GROUND   = BG_APP
+RAIL     = BG_SIDEBAR
+SURFACE  = BG_CARD
+SURFACE2 = BG_CARD2
+LINE     = BORDER
+ACCENT   = NEON_CYAN
+ACCENT_2 = NEON_PURPLE
+
+# ── Fuentes ──
+FONT_TITLE  = ("Segoe UI", 28, "bold")   # Título de página grande
+FONT_KICKER = ("Segoe UI", 11, "bold")   # Eyebrow uppercase
+FONT_DESC   = ("Segoe UI", 14)           # Descripción bajo el título
 FONT_H2     = ("Segoe UI", 15, "bold")
 FONT_H3     = ("Segoe UI", 12, "bold")
 FONT_BODY   = ("Segoe UI", 12)
 FONT_SMALL  = ("Segoe UI", 10)
-FONT_MONO   = ("Consolas", 10)  # Para logs y output técnico
+FONT_MONO   = ("Consolas", 10)
 
 
 def resolve(value, mode):
@@ -70,10 +85,11 @@ def darken(value, factor=0.75):
     b = int(value[5:7], 16)
     return f"#{int(r*factor):02x}{int(g*factor):02x}{int(b*factor):02x}"
 
-# ── Tamaños de componentes ───────────────────────────────────────────────────
-SIDEBAR_W   = 210    # Ancho del sidebar en píxeles
-STATUS_H    = 28     # Alto de la status bar
-CARD_RADIUS = 10     # Radio de esquinas de las cards
-BTN_RADIUS  = 8      # Radio de esquinas de los botones
-BTN_H       = 38     # Alto estándar de botones
-BTN_H_LG   = 46     # Alto de botones de acción principal
+# ── Tamaños de componentes ──
+SIDEBAR_W    = 240
+STATUS_H     = 28
+CARD_RADIUS  = 16
+BTN_RADIUS   = 10
+INPUT_RADIUS = 10
+BTN_H        = 40
+BTN_H_LG     = 46

@@ -26,11 +26,15 @@ _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _ACCT_HIST_FILE = os.path.join(_BASE_DIR, "dist_accounts_history.json")
 from styles.colors import (
     BG_APP, BG_SIDEBAR, BG_CARD, BG_CARD2, BG_INPUT, BORDER,
-    NEON_CYAN, NEON_PURPLE, IG_PINK, SUCCESS, WARNING, DANGER, INFO,
-    ACCENT_WEAK, resolve, darken,
-    TEXT_H1, TEXT_BODY, TEXT_MUTED,
+    NEON_CYAN, NEON_PURPLE, IG_PINK, SUCCESS, WARNING, DANGER, INFO, TELEGRAM,
+    ACCENT_WEAK, ACCENT, ACCENT_TEXT, ACCENT_HOVER, SURFACE2, resolve, darken,
+    TEXT_H1, TEXT_BODY, TEXT_MUTED, TEXT_ON_DANGER,
     FONT_TITLE, FONT_H2, FONT_H3, FONT_BODY, FONT_SMALL, FONT_MONO,
     SIDEBAR_W, STATUS_H, CARD_RADIUS, BTN_RADIUS, BTN_H, BTN_H_LG,
+)
+from styles.components import (
+    NavItem, GhostButton, PrimaryButton, DangerButton, Card, PageHeader,
+    SegmentedControl, Stepper, ToggleRow, KeyValueRow, Dropzone, PhonePreview,
 )
 
 # ── Configuración global de CustomTkinter ──────────────────────────────────
@@ -52,6 +56,15 @@ LABEL_COLORS  = {
     "limitada": "#eab308",
     "muerta":   "#6b7280",
 }
+
+ACCOUNT_STATUS_OPTIONS = ["unknown", "alive", "limited", "dead"]
+LIMITATION_OPTIONS = [
+    "Restricción de acciones",
+    "Shadowban",
+    "No distribuir",
+    "Requiere calentamiento",
+    "Revisión manual",
+]
 
 MAX_PER_SESSION = 10
 DELAY_MIN = 300    # 5 min
@@ -150,16 +163,10 @@ class AccountStatusPanel(ctk.CTkFrame):
     # ── Construcción UI ───────────────────────────────────────────────────────
 
     def _build_header(self):
-        h = ctk.CTkFrame(self, fg_color="transparent")
-        h.grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 0))
-        ctk.CTkLabel(
-            h, text="📡  Estado de Cuentas",
-            font=ctk.CTkFont(size=22, weight="bold"), text_color=TEXT_H1
-        ).pack(side="left")
-        ctk.CTkLabel(
-            h, text=f"Modo sigiloso · máx {MAX_PER_SESSION} cuentas/sesión · delay 5-10 min",
-            font=ctk.CTkFont(size=12), text_color=TEXT_MUTED
-        ).pack(side="left", padx=(14, 0), anchor="s")
+        PageHeader(
+            self, "LEGACY", "Verify Legacy",
+            f"Verificación HTTP con cookies y proxy · máx {MAX_PER_SESSION} cuentas por sesión."
+        ).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 0))
 
     def _build_config_card(self):
         card = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
@@ -188,10 +195,8 @@ class AccountStatusPanel(ctk.CTkFrame):
         if cfg.get("proxy"):
             self.e_proxy.insert(0, cfg["proxy"])
 
-        ctk.CTkButton(
-            card, text="💾 Guardar", fg_color=NEON_CYAN, text_color=BG_APP,
-            corner_radius=BTN_RADIUS, height=BTN_H, width=110,
-            font=ctk.CTkFont(size=12, weight="bold"), command=self._save_cfg
+        PrimaryButton(
+            card, text="Guardar", width=110, command=self._save_cfg
         ).grid(row=0, column=2, rowspan=2, padx=20, pady=16)
 
     def _build_controls(self):
@@ -199,45 +204,28 @@ class AccountStatusPanel(ctk.CTkFrame):
         ctrl.grid(row=2, column=0, sticky="ew", padx=24, pady=10)
         ctrl.grid_columnconfigure(7, weight=1)
 
-        self.btn_check = ctk.CTkButton(
-            ctrl, text=f"▶  Verificar  (máx {MAX_PER_SESSION})",
-            fg_color=SUCCESS, text_color="#000000",
-            corner_radius=BTN_RADIUS, height=BTN_H,
-            font=ctk.CTkFont(size=12, weight="bold"),
+        self.btn_check = PrimaryButton(
+            ctrl, text=f"Verificar (máx {MAX_PER_SESSION})",
             command=self.start_check
         )
         self.btn_check.grid(row=0, column=0, padx=(0, 8))
 
-        self.btn_stop = ctk.CTkButton(
-            ctrl, text="⏹  Detener",
-            fg_color=DANGER, text_color=TEXT_H1,
-            corner_radius=BTN_RADIUS, height=BTN_H,
-            font=ctk.CTkFont(size=12, weight="bold"),
+        self.btn_stop = DangerButton(
+            ctrl, text="Detener",
             state="disabled", command=self.stop_check
         )
         self.btn_stop.grid(row=0, column=1, padx=(0, 8))
 
-        ctk.CTkButton(
-            ctrl, text="🔄 Reiniciar",
-            fg_color=BG_CARD2, text_color=TEXT_MUTED,
-            border_width=1, border_color=BORDER,
-            corner_radius=BTN_RADIUS, height=BTN_H,
-            font=ctk.CTkFont(size=12), command=self._reset_all_status
+        GhostButton(
+            ctrl, text="Reiniciar", command=self._reset_all_status
         ).grid(row=0, column=2, padx=(0, 8))
 
-        ctk.CTkButton(
-            ctrl, text="↺ Recargar lista",
-            fg_color=BG_CARD2, text_color=TEXT_MUTED,
-            border_width=1, border_color=BORDER,
-            corner_radius=BTN_RADIUS, height=BTN_H,
-            font=ctk.CTkFont(size=12), command=self.load_accounts
+        GhostButton(
+            ctrl, text="Recargar lista", command=self.load_accounts
         ).grid(row=0, column=3, padx=(0, 8))
 
-        self.btn_delete_sel = ctk.CTkButton(
-            ctrl, text="🗑  Eliminar sel.",
-            fg_color=DANGER, text_color=TEXT_H1,
-            corner_radius=BTN_RADIUS, height=BTN_H,
-            font=ctk.CTkFont(size=12, weight="bold"),
+        self.btn_delete_sel = DangerButton(
+            ctrl, text="Eliminar sel.",
             command=self._delete_selected
         )
         self.btn_delete_sel.grid(row=0, column=4, padx=(0, 6))
@@ -819,7 +807,8 @@ class InstagramAutoPro(ctk.CTk):
             if lb is not None:
                 lb.configure(
                     bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
-                    selectbackground=self.themed(NEON_PURPLE),
+                    selectbackground=self.themed(ACCENT),
+                    selectforeground=self.themed(ACCENT_TEXT),
                     highlightbackground=self.themed(BORDER),
                 )
         if getattr(self, "tree", None) is not None:
@@ -836,15 +825,15 @@ class InstagramAutoPro(ctk.CTk):
         style = ttk.Style()
         style.theme_use("default")
         style.configure("Premium.Treeview",
-                        background=self.themed(BG_CARD2), foreground=self.themed(TEXT_BODY),
-                        fieldbackground=self.themed(BG_CARD2), rowheight=28,
-                        font=FONT_BODY, borderwidth=0)
+                        background=self.themed(BG_CARD), foreground=self.themed(TEXT_BODY),
+                        fieldbackground=self.themed(BG_CARD), bordercolor=self.themed(BORDER),
+                        rowheight=30, font=FONT_BODY, borderwidth=0)
         style.configure("Premium.Treeview.Heading",
-                        background=self.themed(BG_CARD), foreground=self.themed(NEON_CYAN),
+                        background=self.themed(BG_CARD2), foreground=self.themed(TEXT_MUTED),
                         font=FONT_H3, borderwidth=0, relief="flat")
         style.map("Premium.Treeview",
-                  background=[("selected", self.themed(NEON_PURPLE))],
-                  foreground=[("selected", self.themed(TEXT_H1))])
+                  background=[("selected", self.themed(ACCENT))],
+                  foreground=[("selected", self.themed(ACCENT_TEXT))])
 
     # ── Sidebar ───────────────────────────────────────────────────────────
     def _build_sidebar(self):
@@ -857,14 +846,18 @@ class InstagramAutoPro(ctk.CTk):
         self.sidebar.grid_propagate(False)
 
         # — Logo —
-        logo_wrap = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        logo_wrap.grid(row=0, column=0, padx=18, pady=(22, 8), sticky="ew")
-        ctk.CTkLabel(logo_wrap, text="⚡ IG AUTO",
-                     font=ctk.CTkFont(family="Arial", size=21, weight="bold"),
-                     text_color=NEON_CYAN).pack(anchor="w")
-        ctk.CTkLabel(logo_wrap, text="PRO  ·  v7.0",
-                     font=ctk.CTkFont(family="Arial", size=10),
-                     text_color=TEXT_MUTED).pack(anchor="w")
+        brand = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        brand.grid(row=0, column=0, padx=16, pady=(20, 10), sticky="ew")
+        tile = ctk.CTkLabel(brand, text="IA", width=40, height=40,
+                            corner_radius=12, fg_color=ACCENT, text_color=ACCENT_TEXT,
+                            font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"))
+        tile.grid(row=0, column=0, rowspan=2, padx=(0, 10))
+        ctk.CTkLabel(brand, text="IG AUTO PRO", anchor="w",
+                     font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
+                     text_color=TEXT_H1).grid(row=0, column=1, sticky="sw")
+        ctk.CTkLabel(brand, text="AUTOMATION SUITE", anchor="w",
+                     font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
+                     text_color=TEXT_MUTED).grid(row=1, column=1, sticky="nw")
 
         # — Separador —
         ctk.CTkFrame(self.sidebar, height=1, fg_color=BORDER).grid(
@@ -876,7 +869,8 @@ class InstagramAutoPro(ctk.CTk):
             ("Distribución", [("🚀   Logística", "Logistica"), ("📡   Cuentas", "Cuentas"),
                               ("📲   Telegram", "Telegram")]),
             ("Control",      [("📊   Dashboard", "Dashboard")]),
-            ("Sistema",      [("⚙️   Admin", "Equipo"), ("⬇   Actualizaciones", "Actualizaciones")]),
+            ("Sistema",      [("⚙️   Admin", "Equipo"), ("🔍   Verify Legacy", "VerifyLegacy"),
+                              ("⬇   Actualizaciones", "Actualizaciones")]),
         ]
         self._nav_btns = {}
         row = 2
@@ -887,14 +881,7 @@ class InstagramAutoPro(ctk.CTk):
                                                      pady=(10, 2), sticky="w")
             row += 1
             for label, key in items:
-                btn = ctk.CTkButton(
-                    self.sidebar, text=label, anchor="w",
-                    height=40, corner_radius=BTN_RADIUS,
-                    font=ctk.CTkFont(family="Segoe UI", size=13),
-                    fg_color="transparent", text_color=TEXT_BODY,
-                    hover_color=BG_CARD2, border_width=0,
-                    command=lambda k=key: self.show_frame(k)
-                )
+                btn = NavItem(self.sidebar, text=label, command=lambda k=key: self.show_frame(k))
                 btn.grid(row=row, column=0, padx=10, pady=2, sticky="ew")
                 self._nav_btns[key] = btn
                 row += 1
@@ -903,7 +890,9 @@ class InstagramAutoPro(ctk.CTk):
         self.theme_seg = ctk.CTkSegmentedButton(
             self.sidebar, values=["Claro", "Oscuro", "Sistema"],
             command=self._on_theme_change,
-            font=ctk.CTkFont(family="Segoe UI", size=11), height=28,
+            fg_color=SURFACE2, selected_color=ACCENT, selected_hover_color=ACCENT_HOVER,
+            unselected_color=SURFACE2, text_color=TEXT_BODY,
+            font=ctk.CTkFont(family="Segoe UI", size=11), height=30, corner_radius=BTN_RADIUS,
         )
         self.theme_seg.set("Sistema")
         self.theme_seg.grid(row=91, column=0, padx=14, pady=(8, 4), sticky="ew")
@@ -932,7 +921,7 @@ class InstagramAutoPro(ctk.CTk):
         container.grid_columnconfigure(0, weight=1)
         self._container = container
 
-        for name in ["Dashboard", "Equipo", "Tandas", "Logistica", "Telegram", "Cuentas", "AIAdvisor", "Forge", "Actualizaciones"]:
+        for name in ["Dashboard", "Equipo", "Tandas", "Logistica", "Telegram", "Cuentas", "VerifyLegacy", "AIAdvisor", "Forge", "Actualizaciones"]:
             f = ctk.CTkFrame(container, fg_color=BG_APP, corner_radius=0)
             f.grid(row=0, column=0, sticky="nsew")
             self._frames[name] = f
@@ -944,6 +933,7 @@ class InstagramAutoPro(ctk.CTk):
         self._build_dist_frame()
         self._build_tg_frame()
         self._build_cuentas_frame()
+        self._build_verify_legacy_frame()
         self._build_ai_frame()
         self._build_forge_frame()
         self._build_updates_frame()
@@ -967,11 +957,9 @@ class InstagramAutoPro(ctk.CTk):
     # ── Navegación ────────────────────────────────────────────────────────
     def show_frame(self, name: str):
         if self._active_nav and self._active_nav in self._nav_btns:
-            self._nav_btns[self._active_nav].configure(
-                fg_color="transparent", text_color=TEXT_BODY)
+            self._nav_btns[self._active_nav].set_active(False)
         if name in self._nav_btns:
-            self._nav_btns[name].configure(
-                fg_color=ACCENT_WEAK, text_color=NEON_CYAN)
+            self._nav_btns[name].set_active(True)
         self._active_nav = name
         # Keep only the visible frame under geometry management; the other eight
         # (each with scrollable content) stay built but unmanaged, so a resize
@@ -982,8 +970,10 @@ class InstagramAutoPro(ctk.CTk):
             elif fr.winfo_manager():
                 fr.grid_remove()
         self._frames[name].tkraise()
-        if name == "Cuentas" and hasattr(self, "_cuentas_panel"):
-            self._cuentas_panel.refresh()
+        if name == "Cuentas" and hasattr(self, "_acc_scroll"):
+            self._admin_load_accounts()
+        if name == "VerifyLegacy" and hasattr(self, "_verify_legacy_panel"):
+            self._verify_legacy_panel.refresh()
         if name == "Tandas" and hasattr(self, "_tandas_list_scroll"):
             self._refresh_tandas_list()
 
@@ -992,49 +982,61 @@ class InstagramAutoPro(ctk.CTk):
         """Configuracion local del canal de actualizaciones privadas."""
         f = self._frames["Actualizaciones"]
         f.grid_columnconfigure(0, weight=1)
-        f.grid_rowconfigure(1, weight=1)
+        f.grid_rowconfigure(0, weight=1)
 
-        header = ctk.CTkFrame(f, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 10))
-        ctk.CTkLabel(
-            header, text="Actualizaciones",
-            font=ctk.CTkFont(size=22, weight="bold"), text_color=TEXT_H1
-        ).pack(anchor="w")
-        ctk.CTkLabel(
-            header, text="Configura el acceso al repositorio privado y comprueba nuevas versiones.",
-            font=ctk.CTkFont(size=12), text_color=TEXT_MUTED
-        ).pack(anchor="w", pady=(4, 0))
+        scroll = ctk.CTkScrollableFrame(f, fg_color="transparent")
+        scroll.grid(row=0, column=0, sticky="nsew")
+        scroll.grid_columnconfigure(0, weight=1)
 
-        card = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
-        card.grid(row=1, column=0, sticky="new", padx=24, pady=(0, 24))
-        card.grid_columnconfigure(1, weight=1)
+        PageHeader(
+            scroll, "APP", "Actualizaciones", "Mantén la app al día."
+        ).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 0))
 
         try:
             config = load_config(UPDATE_APP_DIR)
         except Exception:
             config = {}
 
+        try:
+            version = read_local_version(UPDATE_APP_DIR)
+        except Exception:
+            version = "desconocida"
+
+        status_card = Card(scroll, title="Estado")
+        status_card.grid(row=1, column=0, sticky="ew", padx=24, pady=(16, 10))
+        KeyValueRow(status_card.body, "Versión actual", version).grid(row=0, column=0, sticky="ew")
+        KeyValueRow(status_card.body, "Canal", config.get("channel", "Privado")).grid(row=1, column=0, sticky="ew")
+        self.update_last_check_row = KeyValueRow(
+            status_card.body, "Última comprobación", "Aún no comprobada", divider=False
+        )
+        self.update_last_check_row.grid(row=2, column=0, sticky="ew")
+
+        card = Card(scroll, title="Acceso privado")
+        card.grid(row=2, column=0, sticky="ew", padx=24, pady=(0, 24))
+        card = card.body
+        card.grid_columnconfigure(1, weight=1)
+
         ctk.CTkLabel(
             card, text="Manifiesto remoto:", text_color=TEXT_MUTED,
             font=ctk.CTkFont(size=11)
-        ).grid(row=0, column=0, padx=(20, 10), pady=(20, 8), sticky="e")
+        ).grid(row=0, column=0, padx=(0, 10), pady=(0, 8), sticky="e")
         self.e_update_manifest = ctk.CTkEntry(
             card, fg_color=BG_INPUT, border_color=BORDER,
             placeholder_text="https://raw.githubusercontent.com/.../release-manifest.json"
         )
-        self.e_update_manifest.grid(row=0, column=1, columnspan=2, padx=(0, 20), pady=(20, 8), sticky="ew")
+        self.e_update_manifest.grid(row=0, column=1, columnspan=2, pady=(0, 8), sticky="ew")
         if config.get("manifest_url"):
             self.e_update_manifest.insert(0, str(config["manifest_url"]))
 
         ctk.CTkLabel(
             card, text="Token GitHub:", text_color=TEXT_MUTED,
             font=ctk.CTkFont(size=11)
-        ).grid(row=1, column=0, padx=(20, 10), pady=8, sticky="e")
+        ).grid(row=1, column=0, padx=(0, 10), pady=8, sticky="e")
         self.e_update_token = ctk.CTkEntry(
             card, fg_color=BG_INPUT, border_color=BORDER, show="*",
             placeholder_text="github_pat_... (Contents: Read-only)"
         )
-        self.e_update_token.grid(row=1, column=1, columnspan=2, padx=(0, 20), pady=8, sticky="ew")
+        self.e_update_token.grid(row=1, column=1, columnspan=2, pady=8, sticky="ew")
         if config.get("access_token"):
             self.e_update_token.insert(0, str(config["access_token"]))
 
@@ -1042,23 +1044,19 @@ class InstagramAutoPro(ctk.CTk):
             card, text="", text_color=TEXT_MUTED,
             font=ctk.CTkFont(size=11), anchor="w"
         )
-        self.lbl_update_state.grid(row=2, column=0, columnspan=3, padx=20, pady=(8, 12), sticky="ew")
+        self.lbl_update_state.grid(row=2, column=0, columnspan=3, pady=(8, 12), sticky="ew")
 
         buttons = ctk.CTkFrame(card, fg_color="transparent")
-        buttons.grid(row=3, column=0, columnspan=3, padx=20, pady=(0, 20), sticky="ew")
+        buttons.grid(row=3, column=0, columnspan=3, pady=(0, 0), sticky="ew")
         buttons.grid_columnconfigure(3, weight=1)
-        ctk.CTkButton(
-            buttons, text="Guardar configuracion", fg_color=SUCCESS, text_color=BG_APP,
-            height=BTN_H, corner_radius=BTN_RADIUS, command=self._save_update_config
+        GhostButton(
+            buttons, text="Guardar configuración", command=self._save_update_config
         ).grid(row=0, column=0, padx=(0, 8))
-        ctk.CTkButton(
-            buttons, text="Borrar token", fg_color=BG_CARD2, text_color=TEXT_BODY,
-            border_width=1, border_color=BORDER, height=BTN_H, corner_radius=BTN_RADIUS,
-            command=self._clear_update_token
+        DangerButton(
+            buttons, text="Borrar token", command=self._clear_update_token
         ).grid(row=0, column=1, padx=(0, 8))
-        self.btn_check_update = ctk.CTkButton(
-            buttons, text="Comprobar y actualizar", fg_color=NEON_CYAN, text_color=BG_APP,
-            height=BTN_H, corner_radius=BTN_RADIUS, command=self._check_updates_from_gui
+        self.btn_check_update = PrimaryButton(
+            buttons, text="Buscar actualizaciones", command=self._check_updates_from_gui
         )
         self.btn_check_update.grid(row=0, column=2, padx=(0, 8))
 
@@ -1074,6 +1072,10 @@ class InstagramAutoPro(ctk.CTk):
         if message:
             state += f"  |  {message}"
         self.lbl_update_state.configure(text=state, text_color=color)
+        if hasattr(self, "update_last_check_row"):
+            self.update_last_check_row.value_lbl.configure(
+                text=message or "Comprobación pendiente"
+            )
 
     def _write_update_config(self):
         config_path = os.path.join(UPDATE_APP_DIR, "update_config.json")
@@ -1135,7 +1137,7 @@ class InstagramAutoPro(ctk.CTk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _finish_gui_update(self, before, after, updated, detail):
-        self.btn_check_update.configure(state="normal", text="Comprobar y actualizar")
+        self.btn_check_update.configure(state="normal", text="Buscar actualizaciones")
         if updated and after != before:
             self._refresh_update_state(f"actualizada de {before} a {after}; reinicia la GUI", SUCCESS)
             messagebox.showinfo(
@@ -1160,24 +1162,18 @@ class InstagramAutoPro(ctk.CTk):
     def _build_dashboard_frame(self):
         """TAREA 2 — Dashboard: header, KPI cards, tabla de cuentas, botones."""
         f = self._frames["Dashboard"]
-        f.grid_rowconfigure(1, weight=1)
+        f.grid_rowconfigure(2, weight=1)
         f.grid_columnconfigure(0, weight=1)
 
         # ── Header ──────────────────────────────────────────────────────
-        header = ctk.CTkFrame(f, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 0))
-        header.grid_columnconfigure(3, weight=1)
-
-        ctk.CTkLabel(header, text="📊  Dashboard",
-                     font=ctk.CTkFont(size=22, weight="bold"),
-                     text_color=TEXT_H1).grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(header, text="Vista en tiempo real de todas las cuentas",
-                     font=ctk.CTkFont(size=12), text_color=TEXT_MUTED
-                     ).grid(row=1, column=0, sticky="w")
+        PageHeader(
+            f, "CONTROL", "Dashboard",
+            "Estado del sistema y actividad reciente."
+        ).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 0))
 
         # ── KPI Cards ───────────────────────────────────────────────────
         kpi_row = ctk.CTkFrame(f, fg_color="transparent")
-        kpi_row.grid(row=0, column=0, sticky="ew", padx=24, pady=(60, 0))
+        kpi_row.grid(row=1, column=0, sticky="ew", padx=24, pady=(18, 0))
 
         self.kpi_cuentas = self._make_kpi_card(kpi_row, "📱", "Cuentas", "0", NEON_CYAN, 0)
         self.kpi_videos  = self._make_kpi_card(kpi_row, "🎬", "Videos Enviados", "0", NEON_PURPLE, 1)
@@ -1185,12 +1181,14 @@ class InstagramAutoPro(ctk.CTk):
 
         # ── Área Central (Tabla) ─────────────────────────────────────────
         center_row = ctk.CTkFrame(f, fg_color="transparent")
-        center_row.grid(row=1, column=0, sticky="nsew", padx=24, pady=(14, 0))
+        center_row.grid(row=2, column=0, sticky="nsew", padx=24, pady=(14, 0))
         center_row.grid_rowconfigure(0, weight=1)
         center_row.grid_columnconfigure(0, weight=1)
 
         # ── Tabla ───────────────────────────────────────────────────────
-        table_frame = ctk.CTkFrame(center_row, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        table_card = Card(center_row, title="Cuentas registradas")
+        table_card.grid(row=0, column=0, sticky="nsew")
+        table_frame = table_card.body
         table_frame.grid(row=0, column=0, sticky="nsew")
         table_frame.grid_rowconfigure(1, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
@@ -1199,9 +1197,6 @@ class InstagramAutoPro(ctk.CTk):
         th = ctk.CTkFrame(table_frame, fg_color="transparent")
         th.grid(row=0, column=0, sticky="ew", padx=14, pady=(12, 6))
         th.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(th, text="Cuentas registradas",
-                     font=ctk.CTkFont(size=13, weight="bold"),
-                     text_color=TEXT_BODY).grid(row=0, column=0, sticky="w")
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", lambda *_: self._filter_tree())
         srch = ctk.CTkEntry(th, textvariable=self.search_var, width=200,
@@ -1233,33 +1228,27 @@ class InstagramAutoPro(ctk.CTk):
 
         # ── Botones de acción ────────────────────────────────────────────
         btn_bar = ctk.CTkFrame(f, fg_color="transparent")
-        btn_bar.grid(row=2, column=0, sticky="ew", padx=24, pady=(10, 16))
+        btn_bar.grid(row=3, column=0, sticky="ew", padx=24, pady=(10, 16))
 
-        btn_cfg = [
-            ("📁  Cambiar Categoría", IG_PINK,    self.change_account_category),
-            ("👤  Reasignar VA",      INFO,        self.reassign_va),
-            ("🗑️  Eliminar",          DANGER,      self.delete_account),
-            ("🔄  Actualizar",        NEON_CYAN,   self.refresh_dashboard),
-        ]
-        for label, color, cmd in btn_cfg:
-            ctk.CTkButton(btn_bar, text=label, fg_color=color,
-                          hover_color=self._darken(color),
-                          text_color=BG_APP if color == NEON_CYAN else TEXT_H1,
-                          height=BTN_H, corner_radius=BTN_RADIUS,
-                          font=ctk.CTkFont(size=12, weight="bold"),
-                          command=cmd).pack(side="left", padx=(0, 8))
+        GhostButton(btn_bar, text="Cambiar Categoría",
+                    command=self.change_account_category).pack(side="left", padx=(0, 8))
+        GhostButton(btn_bar, text="Reasignar VA",
+                    command=self.reassign_va).pack(side="left", padx=(0, 8))
+        DangerButton(btn_bar, text="Eliminar",
+                     command=self.delete_account).pack(side="left", padx=(0, 8))
+        PrimaryButton(btn_bar, text="Actualizar",
+                      command=self.refresh_dashboard).pack(side="left")
 
         self.refresh_dashboard()
 
     # ── KPI Card helper ───────────────────────────────────────────────────────
     def _make_kpi_card(self, parent, icon, label, value, accent, col):
-        card = ctk.CTkFrame(parent, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
-                            border_width=1, border_color=BORDER)
+        card = Card(parent)
         card.grid(row=0, column=col, padx=(0, 12), sticky="ew")
         parent.grid_columnconfigure(col, weight=1)
 
-        inner = ctk.CTkFrame(card, fg_color="transparent")
-        inner.pack(fill="both", expand=True, padx=18, pady=14)
+        inner = card.body
+        inner.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(inner, text=f"{icon}  {label}",
                      font=ctk.CTkFont(size=11), text_color=TEXT_MUTED).pack(anchor="w")
@@ -1396,24 +1385,23 @@ class InstagramAutoPro(ctk.CTk):
         tv.heading(col, command=lambda: self._sort_tree(tv, col, not reverse))
 
     def _build_team_frame(self):
-        """Panel Admin — fila superior: VAs / Categorías / Tandas  |  fila inferior: Cuentas (ancho completo)."""
+        """Panel Admin para VAs y categorías; las tandas se gestionan en su pestaña."""
         f = self._frames["Equipo"]
         f.grid_rowconfigure(1, weight=1)   # fila superior
-        f.grid_rowconfigure(2, weight=2)   # fila inferior (Cuentas) — más espacio vertical
-        f.grid_columnconfigure((0, 1, 2), weight=1)
+        f.grid_columnconfigure((0, 1), weight=1)
 
         # ── Header ──────────────────────────────────────────────────────
-        header = ctk.CTkFrame(f, fg_color="transparent")
-        header.grid(row=0, column=0, columnspan=3, sticky="ew", padx=24, pady=(20, 10))
-        ctk.CTkLabel(header, text="⚙️  Admin — VAs · Cuentas · Categorías · Tandas",
-                     font=ctk.CTkFont(size=22, weight="bold"),
-                     text_color=TEXT_H1).grid(row=0, column=0, sticky="w")
+        PageHeader(
+            f, "SISTEMA", "Admin",
+            "Gestión de equipo y configuración."
+        ).grid(row=0, column=0, columnspan=2, sticky="ew", padx=24, pady=(20, 10))
 
         # ══ FILA SUPERIOR ═══════════════════════════════════════════════
 
         # ── Columna 0: VAs ───────────────────────────────────────────────
-        col0 = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
-        col0.grid(row=1, column=0, sticky="nsew", padx=(24, 8), pady=(0, 8))
+        col0_card = Card(f)
+        col0_card.grid(row=1, column=0, sticky="nsew", padx=(24, 8), pady=(0, 8))
+        col0 = col0_card.body
         col0.grid_rowconfigure(1, weight=1)
         col0.grid_columnconfigure(0, weight=1)
 
@@ -1436,15 +1424,13 @@ class InstagramAutoPro(ctk.CTk):
                      font=ctk.CTkFont(size=11)).grid(row=2, column=0, sticky="w")
         self.e_va_tg = ctk.CTkEntry(va_form, fg_color=BG_INPUT, border_color=BORDER)
         self.e_va_tg.grid(row=3, column=0, sticky="ew", pady=(2, 8))
-        ctk.CTkButton(va_form, text="➕ Guardar VA", fg_color=SUCCESS,
-                      hover_color=self._darken(SUCCESS), text_color=BG_APP,
-                      corner_radius=BTN_RADIUS, height=BTN_H,
-                      font=ctk.CTkFont(weight="bold"),
+        PrimaryButton(va_form, text="Guardar VA",
                       command=self.add_va_ui).grid(row=4, column=0, sticky="ew")
 
         # ── Columna 1: Categorías ────────────────────────────────────────
-        col1 = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
-        col1.grid(row=1, column=1, sticky="nsew", padx=8, pady=(0, 8))
+        col1_card = Card(f)
+        col1_card.grid(row=1, column=1, sticky="nsew", padx=(8, 24), pady=(0, 8))
+        col1 = col1_card.body
         col1.grid_rowconfigure(1, weight=1)
         col1.grid_columnconfigure(0, weight=1)
 
@@ -1463,15 +1449,16 @@ class InstagramAutoPro(ctk.CTk):
                      font=ctk.CTkFont(size=11)).grid(row=0, column=0, sticky="w")
         self.e_cat_new = ctk.CTkEntry(cat_form, fg_color=BG_INPUT, border_color=BORDER)
         self.e_cat_new.grid(row=1, column=0, sticky="ew", pady=(2, 8))
-        ctk.CTkButton(cat_form, text="➕ Agregar", fg_color=WARNING,
-                      hover_color=self._darken(WARNING), text_color=BG_APP,
-                      corner_radius=BTN_RADIUS, height=BTN_H,
-                      font=ctk.CTkFont(weight="bold"),
+        PrimaryButton(cat_form, text="Agregar",
                       command=self.add_category_ui).grid(row=2, column=0, sticky="ew")
 
+        self._admin_refresh()
+        return
+
         # ── Columna 2: Tandas ────────────────────────────────────────────
-        col2 = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
-        col2.grid(row=1, column=2, sticky="nsew", padx=(8, 24), pady=(0, 8))
+        col2_card = Card(f)
+        col2_card.grid(row=1, column=2, sticky="nsew", padx=(8, 24), pady=(0, 8))
+        col2 = col2_card.body
         col2.grid_rowconfigure(1, weight=1)
         col2.grid_columnconfigure(0, weight=1)
 
@@ -1507,34 +1494,30 @@ class InstagramAutoPro(ctk.CTk):
                                           font=ctk.CTkFont(size=10), anchor="w")
         self.lbl_tanda_p2.grid(row=2, column=2, sticky="w")
 
-        ctk.CTkButton(tanda_form, text="📂 P1 (Inicio)", fg_color=NEON_PURPLE,
-                      hover_color=self._darken(NEON_PURPLE), text_color=TEXT_H1,
-                      corner_radius=BTN_RADIUS, height=BTN_H, font=ctk.CTkFont(size=11),
-                      command=self._tanda_admin_pick_p1).grid(row=3, column=0, sticky="ew", pady=(2, 6))
+        GhostButton(tanda_form, text="P1 (Inicio)",
+                    command=self._tanda_admin_pick_p1).grid(row=3, column=0, sticky="ew", pady=(2, 6))
         ctk.CTkFrame(tanda_form, width=8, fg_color="transparent").grid(row=3, column=1)
-        ctk.CTkButton(tanda_form, text="📂 P2 (Cierre)", fg_color=NEON_CYAN,
-                      hover_color=self._darken(NEON_CYAN), text_color=BG_APP,
-                      corner_radius=BTN_RADIUS, height=BTN_H, font=ctk.CTkFont(size=11),
+        PrimaryButton(tanda_form, text="P2 (Cierre)",
                       command=self._tanda_admin_pick_p2).grid(row=3, column=2, sticky="ew", pady=(2, 6))
 
         self.lbl_tanda_cap = ctk.CTkLabel(tanda_form, text="Captions: —", text_color=TEXT_MUTED,
                                            font=ctk.CTkFont(size=10), anchor="w")
         self.lbl_tanda_cap.grid(row=4, column=0, columnspan=3, sticky="w")
-        ctk.CTkButton(tanda_form, text="📄 Captions (.txt)", fg_color=WARNING,
-                      hover_color=self._darken(WARNING), text_color=BG_APP,
-                      corner_radius=BTN_RADIUS, height=BTN_H, font=ctk.CTkFont(size=11),
-                      command=self._tanda_admin_pick_cap).grid(row=5, column=0, columnspan=3, sticky="ew", pady=(2, 8))
+        GhostButton(tanda_form, text="Captions (.txt)",
+                    command=self._tanda_admin_pick_cap).grid(row=5, column=0, columnspan=3, sticky="ew", pady=(2, 8))
 
-        ctk.CTkButton(tanda_form, text="➕ Guardar Tanda", fg_color=IG_PINK,
-                      hover_color=self._darken(IG_PINK), text_color=TEXT_H1,
-                      corner_radius=BTN_RADIUS, height=BTN_H,
-                      font=ctk.CTkFont(weight="bold"),
+        PrimaryButton(tanda_form, text="Guardar Tanda",
                       command=self._tanda_admin_save).grid(row=6, column=0, columnspan=3, sticky="ew")
+
+        # La gestión de cuentas destino vive exclusivamente en la pestaña Cuentas.
+        self._admin_refresh()
+        return
 
         # ══ FILA INFERIOR: Cuentas (ancho completo) ══════════════════════
 
-        col_acc = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
-        col_acc.grid(row=2, column=0, columnspan=3, sticky="nsew", padx=24, pady=(0, 24))
+        col_acc_card = Card(f)
+        col_acc_card.grid(row=2, column=0, columnspan=3, sticky="nsew", padx=24, pady=(0, 24))
+        col_acc = col_acc_card.body
         col_acc.grid_rowconfigure(1, weight=1)
         col_acc.grid_columnconfigure(0, weight=1)
 
@@ -1567,10 +1550,7 @@ class InstagramAutoPro(ctk.CTk):
                      font=ctk.CTkFont(size=11)).grid(row=0, column=2, padx=(0, 4))
         self.c_bulk_va = ctk.CTkComboBox(bulk_right, values=[], fg_color=BG_INPUT, border_color=BORDER, width=130)
         self.c_bulk_va.grid(row=0, column=3, padx=(0, 10), sticky="ew")
-        ctk.CTkButton(bulk_right, text="🚀 Cargar", fg_color=IG_PINK,
-                      hover_color=self._darken(IG_PINK), text_color=TEXT_H1,
-                      corner_radius=BTN_RADIUS, height=BTN_H,
-                      font=ctk.CTkFont(weight="bold"),
+        PrimaryButton(bulk_right, text="Cargar",
                       command=self.add_bulk_accounts).grid(row=0, column=4)
 
         self._acc_scroll = ctk.CTkScrollableFrame(col_acc, fg_color="transparent")
@@ -1680,14 +1660,10 @@ class InstagramAutoPro(ctk.CTk):
             )
             tz_menu.grid(row=0, column=2, padx=(4, 4))
 
-            ctk.CTkButton(r, text="TG", width=36, height=26, corner_radius=4,
-                          fg_color=BG_CARD2, text_color=TEXT_MUTED,
-                          hover_color=BORDER,
+            GhostButton(r, text="TG", width=36, height=26,
                           command=lambda n=name, t=tg: self._admin_edit_va_tg(n, t)
                           ).grid(row=0, column=3, padx=(2, 2))
-            ctk.CTkButton(r, text="×", width=28, height=26, corner_radius=4,
-                          fg_color=DANGER, text_color=TEXT_H1,
-                          hover_color=self._darken(DANGER),
+            DangerButton(r, text="×", width=28, height=26,
                           command=lambda n=name: self._admin_delete_va(n)
                           ).grid(row=0, column=4, padx=(2, 0))
 
@@ -1697,37 +1673,143 @@ class InstagramAutoPro(ctk.CTk):
         accounts  = self.db.get_all_accounts()
         vas_list  = ["Sin Asignar"] + self.db.get_vas()
         cats_list = self.db.get_categories() or ["GENERAL"]
-        self._acc_header_lbl.configure(text=f"📱  Cuentas ({len(accounts)})")
+        self._acc_header_lbl.configure(text=f"{len(accounts)} cuenta(s) destino")
         for acc in accounts:
             username = acc["username"]
             acc_type = acc.get("account_type", "GENERAL")
             assigned = acc.get("assigned_va") or "Sin Asignar"
-            r = ctk.CTkFrame(self._acc_scroll, fg_color="transparent")
-            r.pack(fill="x", pady=2, padx=4)
+            label = acc.get("ig_label", "nuevo")
+            if label not in LABEL_OPTIONS:
+                label = "nuevo"
+            r = ctk.CTkFrame(self._acc_scroll, fg_color=BG_CARD2, corner_radius=BTN_RADIUS)
+            r.pack(fill="x", pady=3, padx=2)
             r.grid_columnconfigure(0, weight=1)
             ctk.CTkLabel(r, text=f"@{username}", text_color=TEXT_BODY,
-                         font=ctk.CTkFont(size=11), anchor="w").grid(row=0, column=0, sticky="w")
-            c_type = ctk.CTkOptionMenu(
-                r, values=cats_list, width=110, height=26,
+                         font=ctk.CTkFont(size=12), anchor="w").grid(
+                             row=0, column=0, sticky="w", padx=(12, 8), pady=8)
+            c_label = ctk.CTkOptionMenu(
+                r, values=LABEL_OPTIONS, width=105, height=30,
+                fg_color=LABEL_COLORS.get(label, TEXT_MUTED), button_color=LABEL_COLORS.get(label, TEXT_MUTED),
+                text_color=TEXT_ON_DANGER, font=ctk.CTkFont(size=11),
+                command=lambda v, u=username: self._set_account_label(u, v),
+            )
+            c_label.set(label)
+            c_label.grid(row=0, column=1, padx=(4, 2), pady=6)
+            followers_var = tk.StringVar(value=str(acc.get("followers") or 0))
+            followers = ctk.CTkEntry(
+                r, textvariable=followers_var, width=78, height=30, justify="center",
+                fg_color=BG_INPUT, border_color=BORDER,
+            )
+            followers.bind("<FocusOut>", lambda _e, u=username, v=followers_var: self._set_account_followers(u, v.get()))
+            followers.bind("<Return>", lambda _e, u=username, v=followers_var: self._set_account_followers(u, v.get()))
+            followers.grid(row=0, column=2, padx=(2, 2), pady=6)
+            status = acc.get("ig_status", "unknown")
+            if status not in ACCOUNT_STATUS_OPTIONS:
+                status = "unknown"
+            c_status = ctk.CTkOptionMenu(
+                r, values=ACCOUNT_STATUS_OPTIONS, width=98, height=30,
                 fg_color=BG_INPUT, button_color=BG_CARD2, button_hover_color=BORDER,
                 text_color=TEXT_BODY, font=ctk.CTkFont(size=11),
-                command=lambda v, u=username: self.db.update_account(u, account_type=v)
+                command=lambda v, u=username: self._set_account_status(u, v),
+            )
+            c_status.set(status)
+            c_status.grid(row=0, column=3, padx=(2, 2), pady=6)
+            c_type = ctk.CTkOptionMenu(
+                r, values=cats_list, width=120, height=30,
+                fg_color=BG_INPUT, button_color=BG_CARD2, button_hover_color=BORDER,
+                text_color=TEXT_BODY, font=ctk.CTkFont(size=11),
+                command=lambda v, u=username: self._set_account_category(u, v)
             )
             c_type.set(acc_type if acc_type in cats_list else cats_list[0])
-            c_type.grid(row=0, column=1, padx=(4, 2))
+            c_type.grid(row=0, column=4, padx=(2, 2), pady=6)
             c_va = ctk.CTkOptionMenu(
-                r, values=vas_list, width=110, height=26,
+                r, values=vas_list, width=150, height=30,
                 fg_color=BG_INPUT, button_color=BG_CARD2, button_hover_color=BORDER,
                 text_color=TEXT_BODY, font=ctk.CTkFont(size=11),
-                command=lambda v, u=username: self.db.update_account(u, assigned_va=v)
+                command=lambda v, u=username: self._set_account_va(u, v)
             )
             c_va.set(assigned if assigned in vas_list else vas_list[0])
-            c_va.grid(row=0, column=2, padx=(2, 2))
-            ctk.CTkButton(r, text="×", width=28, height=26, corner_radius=4,
-                          fg_color=DANGER, text_color=TEXT_H1,
-                          hover_color=self._darken(DANGER),
+            c_va.grid(row=0, column=5, padx=(2, 4), pady=6)
+            notes_var = tk.StringVar(value=acc.get("notes") or "")
+            notes = ctk.CTkEntry(
+                r, textvariable=notes_var, width=150, height=30,
+                fg_color=BG_INPUT, border_color=BORDER, placeholder_text="Notas",
+            )
+            notes.bind("<FocusOut>", lambda _e, u=username, v=notes_var: self._set_account_notes(u, v.get()))
+            notes.bind("<Return>", lambda _e, u=username, v=notes_var: self._set_account_notes(u, v.get()))
+            notes.grid(row=0, column=6, padx=(2, 4), pady=6)
+            limitations = self._parse_account_limitations(acc.get("limitations"))
+            GhostButton(
+                r, text=f"Checks ({len(limitations)})", width=108, height=30,
+                command=lambda u=username, values=limitations: self._edit_account_limitations(u, values),
+            ).grid(row=0, column=7, padx=(2, 4), pady=6)
+            DangerButton(r, text="×", width=28, height=30,
                           command=lambda u=username: self._admin_delete_account(u)
-                          ).grid(row=0, column=3, padx=(2, 0))
+                          ).grid(row=0, column=8, padx=(2, 8), pady=6)
+
+    def _set_account_label(self, username: str, value: str):
+        self.db.update_account(username, ig_label=value)
+        self._admin_load_accounts()
+
+    def _set_account_category(self, username: str, value: str):
+        self.db.update_account(username, account_type=value)
+        self.refresh_dashboard()
+
+    def _set_account_va(self, username: str, value: str):
+        self.db.update_account(username, assigned_va=value)
+        self.refresh_dashboard()
+
+    def _set_account_followers(self, username: str, value: str):
+        try:
+            followers = max(0, int(value.strip() or 0))
+        except ValueError:
+            return
+        self.db.update_account(username, followers=followers)
+
+    def _set_account_status(self, username: str, value: str):
+        self.db.update_account(username, ig_status=value)
+
+    def _set_account_notes(self, username: str, value: str):
+        self.db.update_account(username, notes=value.strip())
+
+    @staticmethod
+    def _parse_account_limitations(raw) -> list[str]:
+        if not raw:
+            return []
+        try:
+            values = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            return []
+        return [value for value in values if value in LIMITATION_OPTIONS]
+
+    def _edit_account_limitations(self, username: str, selected: list[str]):
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(f"Limitaciones — @{username}")
+        dialog.geometry("380x330")
+        dialog.configure(fg_color=BG_CARD)
+        dialog.transient(self)
+        dialog.grab_set()
+        ctk.CTkLabel(dialog, text=f"Limitaciones de @{username}", text_color=TEXT_H1,
+                     font=ctk.CTkFont(size=15, weight="bold")).pack(anchor="w", padx=20, pady=(20, 8))
+        ctk.CTkLabel(dialog, text="Marca todas las que correspondan.", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11)).pack(anchor="w", padx=20, pady=(0, 8))
+        vars_by_option = {}
+        for option in LIMITATION_OPTIONS:
+            var = tk.BooleanVar(value=option in selected)
+            vars_by_option[option] = var
+            ctk.CTkCheckBox(dialog, text=option, variable=var, text_color=TEXT_BODY,
+                             fg_color=ACCENT, hover_color=ACCENT_HOVER).pack(anchor="w", padx=20, pady=4)
+
+        def save():
+            values = [option for option, var in vars_by_option.items() if var.get()]
+            self.db.update_account(username, limitations=json.dumps(values, ensure_ascii=False))
+            dialog.destroy()
+            self._admin_load_accounts()
+
+        buttons = ctk.CTkFrame(dialog, fg_color="transparent")
+        buttons.pack(fill="x", padx=20, pady=(14, 20))
+        GhostButton(buttons, text="Cancelar", command=dialog.destroy).pack(side="right")
+        PrimaryButton(buttons, text="Guardar", command=save).pack(side="right", padx=(0, 8))
 
     def _admin_load_cats(self):
         for w in self._cat_scroll.winfo_children():
@@ -1738,9 +1820,7 @@ class InstagramAutoPro(ctk.CTk):
             r.grid_columnconfigure(0, weight=1)
             ctk.CTkLabel(r, text=cat, text_color=TEXT_BODY,
                          font=ctk.CTkFont(size=12), anchor="w").grid(row=0, column=0, sticky="w")
-            ctk.CTkButton(r, text="×", width=28, height=26, corner_radius=4,
-                          fg_color=DANGER, text_color=TEXT_H1,
-                          hover_color=self._darken(DANGER),
+            DangerButton(r, text="×", width=28, height=26,
                           command=lambda c=cat: self._admin_delete_cat(c)
                           ).grid(row=0, column=1, padx=(4, 0))
 
@@ -1828,14 +1908,10 @@ class InstagramAutoPro(ctk.CTk):
                          font=ctk.CTkFont(size=10), anchor="w"
                          ).grid(row=3, column=0, sticky="w", padx=8, pady=(0, 4))
 
-            ctk.CTkButton(r, text="✏️", width=30, height=26, corner_radius=4,
-                          fg_color=NEON_CYAN, text_color=BG_APP,
-                          hover_color=self._darken(NEON_CYAN),
+            GhostButton(r, text="✏️", width=30, height=26,
                           command=lambda t=tanda: self._admin_edit_tanda(t)
                           ).grid(row=0, column=1, padx=(4, 2), pady=(4, 0), sticky="ne")
-            ctk.CTkButton(r, text="×", width=28, height=26, corner_radius=4,
-                          fg_color=DANGER, text_color=TEXT_H1,
-                          hover_color=self._darken(DANGER),
+            DangerButton(r, text="×", width=28, height=26,
                           command=lambda n=name: self._admin_delete_tanda(n)
                           ).grid(row=0, column=2, padx=(2, 6), pady=(4, 0), sticky="ne")
 
@@ -1980,69 +2056,68 @@ class InstagramAutoPro(ctk.CTk):
         f.grid_columnconfigure((0, 1), weight=1)
 
         # ── Header ──────────────────────────────────────────────────────
-        header = ctk.CTkFrame(f, fg_color="transparent")
-        header.grid(row=0, column=0, columnspan=2, sticky="ew", padx=24, pady=(20, 10))
-        ctk.CTkLabel(header, text="🎬  Creador de Tandas",
-                     font=ctk.CTkFont(size=22, weight="bold"),
-                     text_color=TEXT_H1).grid(row=0, column=0, sticky="w")
+        PageHeader(
+            f, "CONTENIDO", "Tandas",
+            "Lotes de videos forjados listos para distribuir."
+        ).grid(row=0, column=0, columnspan=2, sticky="ew", padx=24, pady=(20, 10))
 
         # ── Configuración Tanda ─────────────────────────────────────────
-        top_card = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        top_card = Card(f, title="Configuración de tanda")
         top_card.grid(row=1, column=0, columnspan=2, sticky="ew", padx=24, pady=10)
+        top_body = top_card.body
         
-        ctk.CTkLabel(top_card, text="Nombre/ID de la Tanda:", text_color=TEXT_MUTED,
-                     font=ctk.CTkFont(weight="bold")).pack(side="left", padx=20, pady=20)
-        self.e_tanda_name = ctk.CTkEntry(top_card, fg_color=BG_INPUT, border_color=BORDER, width=300)
-        self.e_tanda_name.pack(side="left", padx=10, pady=20)
+        ctk.CTkLabel(top_body, text="Nombre/ID de la Tanda:", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(weight="bold")).pack(side="left")
+        self.e_tanda_name = ctk.CTkEntry(top_body, fg_color=BG_INPUT, border_color=BORDER, width=300)
+        self.e_tanda_name.pack(side="left", padx=10)
 
         # ── P1 y P2 (Paneles scrollables) ───────────────────────────────
-        self.f_p1 = ctk.CTkScrollableFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
-        self.f_p1.grid(row=2, column=0, sticky="nsew", padx=(24, 12), pady=10)
+        p1_card = Card(f, title="P1 · Inicio")
+        p1_card.grid(row=2, column=0, sticky="nsew", padx=(24, 12), pady=10)
+        self.f_p1 = ctk.CTkScrollableFrame(p1_card.body, fg_color="transparent")
+        self.f_p1.grid(row=0, column=0, sticky="nsew")
+        p1_card.body.grid_rowconfigure(0, weight=1)
         
-        ctk.CTkButton(self.f_p1, text="📂 Buscar Carpeta P1 (Inicio)", fg_color=NEON_PURPLE,
-                      hover_color=self._darken(NEON_PURPLE), font=ctk.CTkFont(weight="bold"),
-                      command=lambda: self.pick_folder(1)).pack(pady=10, padx=10, fill="x")
+        GhostButton(self.f_p1, text="Buscar Carpeta P1 (Inicio)",
+                    command=lambda: self.pick_folder(1)).pack(pady=10, padx=10, fill="x")
         self.lbl_p1_count = ctk.CTkLabel(self.f_p1, text="0 videos", text_color=TEXT_MUTED)
         self.lbl_p1_count.pack()
         
-        self.f_p2 = ctk.CTkScrollableFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
-        self.f_p2.grid(row=2, column=1, sticky="nsew", padx=(12, 24), pady=10)
+        p2_card = Card(f, title="P2 · Cierre")
+        p2_card.grid(row=2, column=1, sticky="nsew", padx=(12, 24), pady=10)
+        self.f_p2 = ctk.CTkScrollableFrame(p2_card.body, fg_color="transparent")
+        self.f_p2.grid(row=0, column=0, sticky="nsew")
+        p2_card.body.grid_rowconfigure(0, weight=1)
         
-        ctk.CTkButton(self.f_p2, text="📂 Buscar Carpeta P2 (Cierre)", fg_color=NEON_CYAN,
-                      text_color=BG_APP, hover_color=self._darken(NEON_CYAN), font=ctk.CTkFont(weight="bold"),
+        PrimaryButton(self.f_p2, text="Buscar Carpeta P2 (Cierre)",
                       command=lambda: self.pick_folder(2)).pack(pady=10, padx=10, fill="x")
         self.lbl_p2_count = ctk.CTkLabel(self.f_p2, text="0 videos", text_color=TEXT_MUTED)
         self.lbl_p2_count.pack()
 
         # ── Controles Inferiores ────────────────────────────────────────
-        bot_card = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        bot_card = Card(f, title="Renderizado")
         bot_card.grid(row=3, column=0, columnspan=2, sticky="ew", padx=24, pady=(10, 24))
+        bot_body = bot_card.body
         
-        ctk.CTkButton(bot_card, text="📄 Archivo Captions (.txt)", fg_color=WARNING, text_color=BG_APP,
-                      hover_color=self._darken(WARNING), font=ctk.CTkFont(weight="bold"),
-                      command=self.pick_captions).pack(side="left", padx=20, pady=20)
+        GhostButton(bot_body, text="Archivo Captions (.txt)",
+                    command=self.pick_captions).pack(side="left")
         
-        self.lbl_cap = ctk.CTkLabel(bot_card, text="Ningún archivo seleccionado", text_color=TEXT_MUTED)
+        self.lbl_cap = ctk.CTkLabel(bot_body, text="Ningún archivo seleccionado", text_color=TEXT_MUTED)
         self.lbl_cap.pack(side="left", padx=10)
         
-        self.btn_render = ctk.CTkButton(bot_card, text="⚙️ INICIAR RENDER", fg_color=SUCCESS,
-                                        text_color=BG_APP, hover_color=self._darken(SUCCESS),
-                                        font=ctk.CTkFont(size=14, weight="bold"), height=BTN_H_LG,
+        self.btn_render = PrimaryButton(bot_body, text="INICIAR RENDER", height=BTN_H_LG,
                                         command=self.process_tanda)
-        self.btn_render.pack(side="right", padx=20, pady=20)
+        self.btn_render.pack(side="right")
 
         # ── Lista de Tandas registradas ─────────────────────────────────
-        tandas_card = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        tandas_card = Card(f, title="Tandas registradas")
         tandas_card.grid(row=4, column=0, columnspan=2, sticky="ew", padx=24, pady=(0, 24))
-        tandas_card.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(tandas_card, text="📋  Tandas registradas",
-                     font=ctk.CTkFont(size=13, weight="bold"),
-                     text_color=TEXT_MUTED).grid(row=0, column=0, sticky="w", padx=16, pady=(12, 6))
+        tandas_body = tandas_card.body
+        tandas_body.grid_columnconfigure(0, weight=1)
 
         self._tandas_list_scroll = ctk.CTkScrollableFrame(
-            tandas_card, fg_color="transparent", height=140)
-        self._tandas_list_scroll.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 12))
+            tandas_body, fg_color="transparent", height=140)
+        self._tandas_list_scroll.grid(row=0, column=0, sticky="ew")
         self._tandas_list_scroll.grid_columnconfigure(0, weight=1)
 
         self._refresh_tandas_list()
@@ -2103,10 +2178,8 @@ class InstagramAutoPro(ctk.CTk):
                 r, text=f"🎬  {name}   ·   {p1} → {p2}",
                 anchor="w", text_color=TEXT_BODY, font=ctk.CTkFont(size=11)
             ).grid(row=0, column=0, sticky="w")
-            ctk.CTkButton(
-                r, text="×", width=28, height=26, corner_radius=4,
-                fg_color=DANGER, text_color=TEXT_H1,
-                hover_color=self._darken(DANGER),
+            DangerButton(
+                r, text="×", width=28, height=26,
                 command=lambda n=name: self._delete_tanda_ui(n)
             ).grid(row=0, column=1, padx=(8, 0))
 
@@ -2146,12 +2219,10 @@ class InstagramAutoPro(ctk.CTk):
         f.grid_columnconfigure(0, weight=1)
 
         # ── Header ──────────────────────────────────────────────────────
-        header = ctk.CTkFrame(f, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 10))
-        header.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(header, text="🚀  Logística y Distribución",
-                     font=ctk.CTkFont(size=22, weight="bold"),
-                     text_color=TEXT_H1).grid(row=0, column=0, sticky="w")
+        PageHeader(
+            f, "DISTRIBUCIÓN", "Logística",
+            "Reparto anti-colisión de tandas entre cuentas y días."
+        ).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 10))
 
         # ── TabView: Por Tandas / Por Cuentas ───────────────────────────
         tabs = ctk.CTkTabview(
@@ -2192,8 +2263,7 @@ class InstagramAutoPro(ctk.CTk):
 
         # Fila 2: Cuota y Días
         ctk.CTkLabel(parent, text="Videos/día por cuenta:", text_color=TEXT_MUTED).grid(row=2, column=0, padx=20, pady=10, sticky="e")
-        self.e_quota = ctk.CTkEntry(parent, fg_color=BG_INPUT, border_color=BORDER, width=80)
-        self.e_quota.insert(0, "4")
+        self.e_quota = Stepper(parent, value=4, min=1, max=50)
         self.e_quota.grid(row=2, column=1, padx=10, pady=10, sticky="w")
 
         ctk.CTkLabel(parent, text="Días (o 'MAX'):", text_color=TEXT_MUTED).grid(row=2, column=2, padx=20, pady=10, sticky="e")
@@ -2203,15 +2273,15 @@ class InstagramAutoPro(ctk.CTk):
 
         # Fila 3: Fill-up
         self.fillup_var = tk.BooleanVar(value=False)
-        ctk.CTkCheckBox(parent, text="Habilitar 'Fill-up' (Rellenar con historial si faltan)",
-                        variable=self.fillup_var, text_color=NEON_CYAN).grid(row=3, column=0, columnspan=4, padx=20, pady=(10, 10), sticky="w")
+        ToggleRow(parent, "Habilitar 'Fill-up' (Rellenar con historial si faltan)",
+                  variable=self.fillup_var).grid(row=3, column=0, columnspan=4,
+                                                  padx=20, pady=(10, 10), sticky="ew")
 
         # Fila 4: Archivo Captions
         cap_row = ctk.CTkFrame(parent, fg_color=BG_CARD2, corner_radius=CARD_RADIUS)
         cap_row.grid(row=4, column=0, columnspan=4, sticky="ew", padx=20, pady=(0, 10))
-        ctk.CTkButton(cap_row, text="📄 Archivo Captions (.txt)", fg_color=WARNING, text_color=BG_APP,
-                      hover_color=self._darken(WARNING), font=ctk.CTkFont(weight="bold"),
-                      command=self.pick_captions_tandas).pack(side="left", padx=16, pady=12)
+        GhostButton(cap_row, text="Archivo Captions (.txt)",
+                    command=self.pick_captions_tandas).pack(side="left", padx=16, pady=12)
         self.tandas_lbl_cap = ctk.CTkLabel(cap_row, text="Ningún archivo seleccionado", text_color=TEXT_MUTED)
         self.tandas_lbl_cap.pack(side="left", padx=10)
 
@@ -2219,21 +2289,11 @@ class InstagramAutoPro(ctk.CTk):
         btn_box = ctk.CTkFrame(parent, fg_color="transparent")
         btn_box.grid(row=5, column=0, columnspan=4, pady=20)
 
-        ctk.CTkButton(btn_box, text="🔄 Resetear todo",
-                      fg_color=BG_CARD2, text_color=TEXT_MUTED,
-                      hover_color=BG_CARD, height=BTN_H_LG,
-                      border_width=1, border_color=BORDER,
-                      font=ctk.CTkFont(size=13),
-                      command=self._tandas_dist_reset).pack(side="left", padx=(0, 20))
-
-        ctk.CTkButton(btn_box, text="👁️ VISTA PREVIA", fg_color=NEON_CYAN, text_color=BG_APP,
-                      hover_color=self._darken(NEON_CYAN), height=BTN_H_LG,
-                      font=ctk.CTkFont(size=14, weight="bold"),
-                      command=self.preview_distribution).pack(side="left", padx=10)
-
-        ctk.CTkButton(btn_box, text="🚀 DISTRIBUIR REAL AHORA", fg_color=IG_PINK, text_color=TEXT_H1,
-                      hover_color=self._darken(IG_PINK), height=BTN_H_LG,
-                      font=ctk.CTkFont(size=14, weight="bold"),
+        GhostButton(btn_box, text="Resetear todo", height=BTN_H_LG,
+                    command=self._tandas_dist_reset).pack(side="left", padx=(0, 20))
+        GhostButton(btn_box, text="VISTA PREVIA", height=BTN_H_LG,
+                    command=self.preview_distribution).pack(side="left", padx=10)
+        PrimaryButton(btn_box, text="DISTRIBUIR REAL AHORA", height=BTN_H_LG,
                       command=self.start_distribution).pack(side="left", padx=10)
 
     PERIOD_DAYS = {
@@ -2249,14 +2309,11 @@ class InstagramAutoPro(ctk.CTk):
         parent.grid_columnconfigure(0, weight=1)
 
         # ── Diagrama visual ──────────────────────────────────────────────
-        diag = ctk.CTkFrame(parent, fg_color=BG_CARD2, corner_radius=CARD_RADIUS)
+        diag = Card(parent, title="Flujo de distribución por cuentas")
         diag.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 6))
-        ctk.CTkLabel(diag, text="📊  Flujo de Distribución por Cuentas",
-                     font=ctk.CTkFont(size=12, weight="bold"),
-                     text_color=NEON_CYAN).pack(anchor="w", padx=16, pady=(10, 2))
-        diag_txt = ctk.CTkTextbox(diag, height=85, font=FONT_MONO,
+        diag_txt = ctk.CTkTextbox(diag.body, height=85, font=FONT_MONO,
                                   fg_color="transparent", text_color=NEON_CYAN)
-        diag_txt.pack(fill="x", padx=16, pady=(0, 10))
+        diag_txt.pack(fill="x")
         diag_txt.insert("end",
             "  POOL DE VIDEOS  [vid_001 ... vid_N]  →  bloques secuenciales\n"
             "  ┌──────────────┬──────────────┬──────────────┬─────────────┐\n"
@@ -2269,8 +2326,9 @@ class InstagramAutoPro(ctk.CTk):
         diag_txt.configure(state="disabled")
 
         # ── Config ──────────────────────────────────────────────────────
-        cfg = ctk.CTkFrame(parent, fg_color=BG_CARD2, corner_radius=CARD_RADIUS)
+        cfg = Card(parent, title="Configuración")
         cfg.grid(row=1, column=0, sticky="ew", padx=16, pady=6)
+        cfg = cfg.body
         cfg.grid_columnconfigure((1, 3, 5), weight=1)
 
         # Fila 0: Tanda fuente
@@ -2283,10 +2341,11 @@ class InstagramAutoPro(ctk.CTk):
         # Fila 1: Videos al día + Período + total calculado
         ctk.CTkLabel(cfg, text="Videos al día:", text_color=TEXT_MUTED).grid(
             row=1, column=0, padx=(16, 8), pady=(4, 16), sticky="e")
-        self.acct_dist_vpd = ctk.CTkEntry(cfg, fg_color=BG_INPUT, border_color=BORDER, width=60)
-        self.acct_dist_vpd.insert(0, "3")
+        self.acct_dist_vpd = Stepper(
+            cfg, value=3, min=1, max=50,
+            command=lambda _: self._acct_dist_update_total()
+        )
         self.acct_dist_vpd.grid(row=1, column=1, padx=(0, 16), pady=(4, 16), sticky="w")
-        self.acct_dist_vpd.bind("<KeyRelease>", lambda e: self._acct_dist_update_total())
 
         ctk.CTkLabel(cfg, text="Período:", text_color=TEXT_MUTED).grid(
             row=1, column=2, padx=(8, 8), pady=(4, 16), sticky="e")
@@ -2304,23 +2363,18 @@ class InstagramAutoPro(ctk.CTk):
         self._acct_dist_update_total()
 
         # ── Cuentas ──────────────────────────────────────────────────────
-        acc = ctk.CTkFrame(parent, fg_color=BG_CARD2, corner_radius=CARD_RADIUS)
-        acc.grid(row=2, column=0, sticky="ew", padx=16, pady=6)
+        acc_card = Card(parent, title="Cuentas destino")
+        acc_card.grid(row=2, column=0, sticky="ew", padx=16, pady=6)
+        acc = acc_card.body
         acc.grid_columnconfigure(0, weight=1)
 
         acc_hdr = ctk.CTkFrame(acc, fg_color="transparent")
         acc_hdr.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 4))
-        ctk.CTkLabel(acc_hdr, text="👥  Cuentas destino",
-                     font=ctk.CTkFont(size=13, weight="bold"),
-                     text_color=TEXT_H1).pack(side="left")
-        ctk.CTkButton(acc_hdr, text="Limpiar", fg_color=BG_CARD, text_color=TEXT_MUTED,
-                      height=BTN_H, width=70, corner_radius=BTN_RADIUS,
-                      command=self._acct_dist_clear).pack(side="right", padx=4)
-        ctk.CTkButton(acc_hdr, text="+ Suicide", fg_color=IG_PINK, text_color=TEXT_H1,
-                      height=BTN_H, width=80, corner_radius=BTN_RADIUS,
-                      command=lambda: self._acct_dist_load_file("suicide")).pack(side="right", padx=4)
-        ctk.CTkButton(acc_hdr, text="+ Promo", fg_color=NEON_CYAN, text_color=BG_APP,
-                      height=BTN_H, width=80, corner_radius=BTN_RADIUS,
+        GhostButton(acc_hdr, text="Limpiar", width=70,
+                    command=self._acct_dist_clear).pack(side="right", padx=4)
+        GhostButton(acc_hdr, text="+ Suicide", width=80,
+                    command=lambda: self._acct_dist_load_file("suicide")).pack(side="right", padx=4)
+        PrimaryButton(acc_hdr, text="+ Promo", width=80,
                       command=lambda: self._acct_dist_load_file("promo")).pack(side="right", padx=4)
 
         # ── Selector de categoría ─────────────────────────────────────────
@@ -2333,10 +2387,8 @@ class InstagramAutoPro(ctk.CTk):
                                               button_color=BORDER, text_color=TEXT_BODY,
                                               dropdown_fg_color=BG_CARD2)
         self.acct_dist_cat.pack(side="left", padx=(0, 8))
-        ctk.CTkButton(cat_row, text="+ Cargar categoría", fg_color=BG_CARD,
-                      text_color=NEON_CYAN, height=BTN_H, corner_radius=BTN_RADIUS,
-                      border_width=1, border_color=NEON_CYAN,
-                      command=self._acct_dist_load_category).pack(side="left")
+        GhostButton(cat_row, text="+ Cargar categoría",
+                    command=self._acct_dist_load_category).pack(side="left")
 
         self.acct_dist_list = ctk.CTkTextbox(acc, height=90, fg_color=BG_INPUT,
                                               text_color=TEXT_BODY, font=FONT_MONO)
@@ -2347,40 +2399,27 @@ class InstagramAutoPro(ctk.CTk):
         self.acct_dist_entry = ctk.CTkEntry(add_row, fg_color=BG_INPUT, border_color=BORDER,
                                              placeholder_text="@cuenta_nueva", width=200)
         self.acct_dist_entry.pack(side="left", padx=(0, 8))
-        ctk.CTkButton(add_row, text="➕ Agregar", fg_color=SUCCESS, text_color=BG_APP,
-                      height=BTN_H, corner_radius=BTN_RADIUS,
+        PrimaryButton(add_row, text="Agregar",
                       command=self._acct_dist_add).pack(side="left", padx=(0, 4))
-        ctk.CTkButton(add_row, text="➖ Última", fg_color=DANGER, text_color=TEXT_H1,
-                      height=BTN_H, corner_radius=BTN_RADIUS,
-                      command=self._acct_dist_remove_last).pack(side="left")
+        DangerButton(add_row, text="Última",
+                     command=self._acct_dist_remove_last).pack(side="left")
 
         # ── Archivo Captions ─────────────────────────────────────────────
         cap_row = ctk.CTkFrame(parent, fg_color=BG_CARD2, corner_radius=CARD_RADIUS)
         cap_row.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 6))
-        ctk.CTkButton(cap_row, text="📄 Archivo Captions (.txt)", fg_color=WARNING, text_color=BG_APP,
-                      hover_color=self._darken(WARNING), font=ctk.CTkFont(weight="bold"),
-                      command=self.pick_captions_acct).pack(side="left", padx=16, pady=12)
+        GhostButton(cap_row, text="Archivo Captions (.txt)",
+                    command=self.pick_captions_acct).pack(side="left", padx=16, pady=12)
         self.acct_lbl_cap = ctk.CTkLabel(cap_row, text="Ningún archivo seleccionado", text_color=TEXT_MUTED)
         self.acct_lbl_cap.pack(side="left", padx=10)
 
         # ── Botones principales ──────────────────────────────────────────
         btn_row = ctk.CTkFrame(parent, fg_color="transparent")
         btn_row.grid(row=4, column=0, pady=16)
-        ctk.CTkButton(btn_row, text="🔄 Resetear todo",
-                      fg_color=BG_CARD2, text_color=TEXT_MUTED,
-                      hover_color=BG_CARD, height=BTN_H_LG,
-                      border_width=1, border_color=BORDER,
-                      font=ctk.CTkFont(size=13),
-                      command=self._acct_dist_reset).pack(side="left", padx=(0, 20))
-        ctk.CTkButton(btn_row, text="👁️ PREVISUALIZAR",
-                      fg_color=NEON_CYAN, text_color=BG_APP,
-                      hover_color=self._darken(NEON_CYAN), height=BTN_H_LG,
-                      font=ctk.CTkFont(size=14, weight="bold"),
-                      command=lambda: self._acct_dist_run(preview_only=True)).pack(side="left", padx=10)
-        ctk.CTkButton(btn_row, text="🚀 EJECUTAR POR CUENTAS",
-                      fg_color=IG_PINK, text_color=TEXT_H1,
-                      hover_color=self._darken(IG_PINK), height=BTN_H_LG,
-                      font=ctk.CTkFont(size=14, weight="bold"),
+        GhostButton(btn_row, text="Resetear todo", height=BTN_H_LG,
+                    command=self._acct_dist_reset).pack(side="left", padx=(0, 20))
+        GhostButton(btn_row, text="PREVISUALIZAR", height=BTN_H_LG,
+                    command=lambda: self._acct_dist_run(preview_only=True)).pack(side="left", padx=10)
+        PrimaryButton(btn_row, text="EJECUTAR POR CUENTAS", height=BTN_H_LG,
                       command=lambda: self._acct_dist_run(preview_only=False)).pack(side="left", padx=10)
 
         # ── Resultados ───────────────────────────────────────────────────
@@ -2391,9 +2430,11 @@ class InstagramAutoPro(ctk.CTk):
     # ── Lógica Logística ─────────────────────────────────────────────────────
     def reload_dist_lists(self, event=None):
         try:
-            tandas_raw = self.db.get_all_tandas()
-            tandas = [t["tanda_name"] if isinstance(t, dict) else t.get("tanda_name") for t in tandas_raw]
-            tandas = [t for t in tandas if t]
+            # La lista de logística se sincroniza con el disco: registra en la DB
+            # cualquier carpeta nueva de videos_finales/ y oculta tandas Forge
+            # huérfanas (carpeta renombrada/borrada). Ver DatabaseManager.list_and_sync_tandas.
+            vf_root = os.path.join(_BASE_DIR, "videos_finales")
+            tandas = self.db.list_and_sync_tandas(vf_root)
 
             if hasattr(self, "c_tandas"):
                 self.c_tandas.configure(values=tandas)
@@ -2767,118 +2808,109 @@ class InstagramAutoPro(ctk.CTk):
         f.grid_columnconfigure((0, 1), weight=1)
 
         # ── Header ──────────────────────────────────────────────────────
-        header = ctk.CTkFrame(f, fg_color="transparent")
-        header.grid(row=0, column=0, columnspan=2, sticky="ew", padx=24, pady=(20, 10))
-        header.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(header, text="📲  Telegram Bot Control",
-                     font=ctk.CTkFont(size=22, weight="bold"),
-                     text_color=TEXT_H1).grid(row=0, column=0, sticky="w")
+        PageHeader(
+            f, "DISTRIBUCIÓN", "Telegram",
+            "Envío programado vía Telegram."
+        ).grid(row=0, column=0, columnspan=2, sticky="ew", padx=24, pady=(20, 10))
 
         # ── Panel Izquierdo: Cuentas y Controles ────────────────────────
-        ctrl_card = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        ctrl_card = Card(f, title="Cuentas programadas")
         ctrl_card.grid(row=1, column=0, sticky="nsew", padx=(24, 12), pady=10)
-        ctrl_card.grid_rowconfigure(4, weight=1)
-        ctrl_card.grid_columnconfigure(0, weight=1)
+        ctrl = ctrl_card.body
+        ctrl.grid_rowconfigure(4, weight=1)
+        ctrl.grid_columnconfigure(0, weight=1)
 
         # Fila 0: título + botón cargar
-        hdr_row = ctk.CTkFrame(ctrl_card, fg_color="transparent")
-        hdr_row.grid(row=0, column=0, sticky="ew", padx=20, pady=(20, 5))
+        hdr_row = ctk.CTkFrame(ctrl, fg_color="transparent")
+        hdr_row.grid(row=0, column=0, sticky="ew", pady=(0, 5))
         hdr_row.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(hdr_row, text="Cuentas Programadas", text_color=NEON_CYAN,
-                     font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, sticky="w")
-        self.btn_load_tg = ctk.CTkButton(hdr_row, text="🔄 Cargar", fg_color=BG_CARD2, text_color=TEXT_BODY,
-                                         border_width=1, border_color=BORDER, hover_color=BORDER,
-                                         command=self.load_organized_accounts)
+        self.btn_load_tg = GhostButton(hdr_row, text="Cargar",
+                                       command=self.load_organized_accounts)
         self.btn_load_tg.grid(row=0, column=1, sticky="e")
 
         # Fila 1: filtro + seleccionar todos/ninguno
-        filter_row = ctk.CTkFrame(ctrl_card, fg_color="transparent")
-        filter_row.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 4))
+        filter_row = ctk.CTkFrame(ctrl, fg_color="transparent")
+        filter_row.grid(row=1, column=0, sticky="ew", pady=(0, 4))
         filter_row.grid_columnconfigure(0, weight=1)
         self._tg_only_with_videos = tk.BooleanVar(value=True)
-        ctk.CTkCheckBox(filter_row, text="Solo con videos", variable=self._tg_only_with_videos,
-                        text_color=TEXT_MUTED, checkbox_width=16, checkbox_height=16,
-                        command=self.load_organized_accounts).grid(row=0, column=0, sticky="w")
+        tg_filter_toggle = ToggleRow(
+            filter_row, "Solo con videos", variable=self._tg_only_with_videos
+        )
+        tg_filter_toggle.switch.configure(command=self.load_organized_accounts)
+        tg_filter_toggle.grid(row=0, column=0, sticky="w")
         sel_frame = ctk.CTkFrame(filter_row, fg_color="transparent")
         sel_frame.grid(row=0, column=1, sticky="e")
-        ctk.CTkButton(sel_frame, text="✓ Todos", width=72, fg_color=BG_CARD2, text_color=TEXT_MUTED,
-                      border_width=1, border_color=BORDER, hover_color=BORDER,
-                      command=lambda: self.list_tg.select_set(0, "end")).pack(side="left", padx=(0, 4))
-        ctk.CTkButton(sel_frame, text="✗ Ninguno", width=78, fg_color=BG_CARD2, text_color=TEXT_MUTED,
-                      border_width=1, border_color=BORDER, hover_color=BORDER,
-                      command=lambda: self.list_tg.selection_clear(0, "end")).pack(side="left")
+        GhostButton(sel_frame, text="Todos", width=72,
+                    command=lambda: self.list_tg.select_set(0, "end")).pack(side="left", padx=(0, 4))
+        GhostButton(sel_frame, text="Ninguno", width=78,
+                    command=lambda: self.list_tg.selection_clear(0, "end")).pack(side="left")
 
         # Fila 2: toggle "Configurar Horarios"
         self._schedule_panel_expanded = False
-        sched_header = ctk.CTkFrame(ctrl_card, fg_color="transparent")
-        sched_header.grid(row=2, column=0, sticky="ew", padx=20, pady=(4, 0))
+        sched_header = ctk.CTkFrame(ctrl, fg_color="transparent")
+        sched_header.grid(row=2, column=0, sticky="ew", pady=(4, 0))
         sched_header.grid_columnconfigure(0, weight=1)
-        self.btn_toggle_sched = ctk.CTkButton(
+        self.btn_toggle_sched = GhostButton(
             sched_header, text="▶ Configurar Horarios", anchor="w",
-            fg_color=BG_CARD2, text_color=TEXT_BODY, hover_color=BORDER,
             command=self._toggle_schedule_panel,
         )
         self.btn_toggle_sched.grid(row=0, column=0, sticky="ew")
 
         # Fila 3: panel de horarios (oculto inicialmente)
-        self.sched_panel = ctk.CTkScrollableFrame(ctrl_card, fg_color=BG_INPUT, height=160)
+        self.sched_panel = ctk.CTkScrollableFrame(ctrl, fg_color=BG_INPUT, height=160)
         # NO se ejecuta .grid() aquí — se invoca en _toggle_schedule_panel al expandir
 
         # Fila 4: listbox con selección múltiple
-        self.list_tg = tk.Listbox(ctrl_card, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
-                                  selectbackground=self.themed(NEON_PURPLE),
+        self.list_tg = tk.Listbox(ctrl, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
+                                  selectbackground=self.themed(ACCENT),
+                                  selectforeground=self.themed(ACCENT_TEXT),
                                   selectmode=tk.EXTENDED,
                                   borderwidth=0, highlightthickness=1,
                                   highlightbackground=self.themed(BORDER), font=FONT_BODY)
-        self.list_tg.grid(row=4, column=0, sticky="nsew", padx=20, pady=(0, 10))
+        self.list_tg.grid(row=4, column=0, sticky="nsew", pady=(0, 10))
 
         # Controles inferiores
-        bot_ctrl = ctk.CTkFrame(ctrl_card, fg_color="transparent")
-        bot_ctrl.grid(row=5, column=0, sticky="ew", padx=20, pady=(10, 20))
+        bot_ctrl = ctk.CTkFrame(ctrl, fg_color="transparent")
+        bot_ctrl.grid(row=5, column=0, sticky="ew", pady=(10, 20))
         
         ctk.CTkLabel(bot_ctrl, text="Fecha Inicio (YYYY-MM-DD):", text_color=TEXT_MUTED).pack(side="left")
         self.e_date_tg = ctk.CTkEntry(bot_ctrl, fg_color=BG_INPUT, border_color=BORDER, width=120)
         self.e_date_tg.pack(side="left", padx=10)
         self.e_date_tg.insert(0, datetime.now().strftime("%Y-%m-%d"))
 
-        btn_row = ctk.CTkFrame(ctrl_card, fg_color="transparent")
-        btn_row.grid(row=6, column=0, sticky="ew", padx=20, pady=(0, 20))
+        btn_row = ctk.CTkFrame(ctrl, fg_color="transparent")
+        btn_row.grid(row=6, column=0, sticky="ew", pady=(0, 0))
         
-        self.btn_start_tg = ctk.CTkButton(btn_row, text="▶ INICIAR", fg_color=SUCCESS, text_color=BG_APP,
-                                          hover_color=self._darken(SUCCESS), font=ctk.CTkFont(weight="bold"),
-                                          command=self.start_tg_bot)
+        self.btn_start_tg = PrimaryButton(btn_row, text="▶ INICIAR", fg_color=TELEGRAM,
+                                          text_color=TEXT_ON_DANGER, command=self.start_tg_bot)
         self.btn_start_tg.pack(side="left", expand=True, padx=(0, 5))
         
-        self.btn_pause_tg = ctk.CTkButton(btn_row, text="⏸ PAUSAR", fg_color=WARNING, text_color=BG_APP,
-                                          hover_color=self._darken(WARNING), font=ctk.CTkFont(weight="bold"),
+        self.btn_pause_tg = GhostButton(btn_row, text="⏸ PAUSAR",
                                           state="disabled", command=self.pause_tg_bot)
         self.btn_pause_tg.pack(side="left", expand=True, padx=5)
         
-        self.btn_stop_tg = ctk.CTkButton(btn_row, text="⏹ DETENER", fg_color=DANGER, text_color=TEXT_H1,
-                                         hover_color=self._darken(DANGER), font=ctk.CTkFont(weight="bold"),
+        self.btn_stop_tg = DangerButton(btn_row, text="⏹ DETENER",
                                          state="disabled", command=self.stop_tg_bot)
         self.btn_stop_tg.pack(side="left", expand=True, padx=(5, 0))
 
         # ── Panel Derecho: Live Log ─────────────────────────────────────
-        log_card = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        log_card = Card(f, title="Registro de actividad")
         log_card.grid(row=1, column=1, sticky="nsew", padx=(12, 24), pady=10)
-        log_card.grid_rowconfigure(1, weight=1)
-        log_card.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(log_card, text="Registro de Actividad", text_color=NEON_PURPLE,
-                     font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, sticky="w", padx=20, pady=(20, 10))
+        log = log_card.body
+        log.grid_rowconfigure(0, weight=1)
+        log.grid_columnconfigure(0, weight=1)
         
-        self.tg_log = ctk.CTkTextbox(log_card, fg_color=BG_INPUT, text_color=TEXT_BODY, font=FONT_MONO,
+        self.tg_log = ctk.CTkTextbox(log, fg_color=BG_INPUT, text_color=TEXT_BODY, font=FONT_MONO,
                                      border_width=1, border_color=BORDER)
-        self.tg_log.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 20))
+        self.tg_log.grid(row=0, column=0, sticky="nsew")
         
         self.tg_log.tag_config("INFO", foreground=self.themed(INFO))
         self.tg_log.tag_config("SUCCESS", foreground=self.themed(SUCCESS))
         self.tg_log.tag_config("WARNING", foreground=self.themed(WARNING))
         self.tg_log.tag_config("ERROR", foreground=self.themed(DANGER))
         
-        self.pb_tg = ctk.CTkProgressBar(log_card, fg_color=BG_INPUT, progress_color=NEON_CYAN)
-        self.pb_tg.grid(row=2, column=0, sticky="ew", padx=20, pady=(0, 20))
+        self.pb_tg = ctk.CTkProgressBar(log, fg_color=BG_INPUT, progress_color=NEON_CYAN)
+        self.pb_tg.grid(row=1, column=0, sticky="ew", pady=(12, 0))
         self.pb_tg.set(0)
 
     # ── Horarios: toggle / editor de grilla ─────────────────────────────────
@@ -3146,11 +3178,81 @@ class InstagramAutoPro(ctk.CTk):
     # ── Panel Estado de Cuentas ───────────────────────────────────────────────
     def _build_cuentas_frame(self):
         f = self._frames["Cuentas"]
-        f.grid_rowconfigure(0, weight=1)
+        f.grid_rowconfigure(2, weight=1)
         f.grid_columnconfigure(0, weight=1)
 
-        self._cuentas_panel = AccountStatusPanel(f, self.db)
-        self._cuentas_panel.grid(row=0, column=0, sticky="nsew")
+        PageHeader(
+            f, "DISTRIBUCIÓN", "Cuentas",
+            "Gestiona las cuentas destino, sus marcas, VAs y categorías."
+        ).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 0))
+
+        add_card = Card(f, title="Añadir cuentas destino")
+        add_card.grid(row=1, column=0, sticky="ew", padx=24, pady=(14, 10))
+        add_body = add_card.body
+        add_body.grid_columnconfigure(0, weight=1)
+        add_body.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(add_body, text="Una cuenta por línea", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11)).grid(row=0, column=0, sticky="w")
+        self.txt_accounts = ctk.CTkTextbox(add_body, fg_color=BG_INPUT, border_color=BORDER,
+                                            border_width=1, height=74)
+        self.txt_accounts.grid(row=1, column=0, rowspan=3, sticky="nsew", padx=(0, 16), pady=(4, 0))
+
+        ctk.CTkLabel(add_body, text="Categoría", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11)).grid(row=0, column=1, sticky="w")
+        self.c_bulk_cat = ctk.CTkComboBox(add_body, values=[], fg_color=BG_INPUT,
+                                           border_color=BORDER)
+        self.c_bulk_cat.grid(row=1, column=1, sticky="ew", pady=(4, 8))
+        ctk.CTkLabel(add_body, text="VA asignado", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11)).grid(row=2, column=1, sticky="w")
+        self.c_bulk_va = ctk.CTkComboBox(add_body, values=[], fg_color=BG_INPUT,
+                                          border_color=BORDER)
+        self.c_bulk_va.grid(row=3, column=1, sticky="ew", pady=(4, 10))
+        PrimaryButton(add_body, text="Añadir cuentas",
+                      command=self.add_bulk_accounts).grid(row=4, column=1, sticky="e")
+
+        accounts_card = Card(f, title="Cuentas destino")
+        accounts_card.grid(row=2, column=0, sticky="nsew", padx=24, pady=(0, 20))
+        accounts_body = accounts_card.body
+        accounts_body.grid_rowconfigure(2, weight=1)
+        accounts_body.grid_columnconfigure(0, weight=1)
+
+        accounts_header = ctk.CTkFrame(accounts_body, fg_color="transparent")
+        accounts_header.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        accounts_header.grid_columnconfigure(0, weight=1)
+        self._acc_header_lbl = ctk.CTkLabel(
+            accounts_header, text="0 cuentas", font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=TEXT_BODY,
+        )
+        self._acc_header_lbl.grid(row=0, column=0, sticky="w")
+        GhostButton(accounts_header, text="Actualizar", width=110,
+                    command=self._admin_load_accounts).grid(row=0, column=1, sticky="e")
+
+        columns = ctk.CTkFrame(accounts_body, fg_color=BG_CARD2, corner_radius=BTN_RADIUS)
+        columns.grid(row=1, column=0, sticky="ew", pady=(0, 6))
+        columns.grid_columnconfigure(0, weight=1)
+        for index, (title, width) in enumerate([
+            ("Cuenta", 0), ("Etiqueta", 105), ("Seguidores", 78), ("Estado", 98),
+            ("Categoría", 120), ("VA", 150), ("Notas", 150), ("Limitaciones", 108), ("", 28),
+        ]):
+            ctk.CTkLabel(columns, text=title, text_color=TEXT_MUTED,
+                         font=ctk.CTkFont(size=10, weight="bold"), width=width,
+                         anchor="w" if index == 0 else "center").grid(
+                             row=0, column=index, padx=(12, 4) if index == 0 else (2, 2), pady=6,
+                             sticky="ew" if index == 0 else "")
+
+        self._acc_scroll = ctk.CTkScrollableFrame(accounts_body, fg_color="transparent", height=380)
+        self._acc_scroll.grid(row=2, column=0, sticky="nsew")
+        self._acc_scroll.grid_columnconfigure(0, weight=1)
+        self._admin_refresh()
+
+    def _build_verify_legacy_frame(self):
+        """Aísla el verificador HTTP heredado de la gestión operativa de cuentas."""
+        f = self._frames["VerifyLegacy"]
+        f.grid_rowconfigure(0, weight=1)
+        f.grid_columnconfigure(0, weight=1)
+        self._verify_legacy_panel = AccountStatusPanel(f, self.db)
+        self._verify_legacy_panel.grid(row=0, column=0, sticky="nsew")
 
     # ── AI Advisor (Gemini Integration) ──────────────────────────────────────
     def _build_ai_frame(self):
@@ -3254,22 +3356,21 @@ class InstagramAutoPro(ctk.CTk):
         self.forge_meta_assignments = []
 
         f = self._frames["Forge"]
-        f.grid_rowconfigure(2, weight=1)
+        f.grid_rowconfigure(0, weight=1)
         f.grid_columnconfigure(0, weight=1)
 
+        scroll = ctk.CTkScrollableFrame(f, fg_color="transparent")
+        scroll.grid(row=0, column=0, sticky="nsew")
+        scroll.grid_columnconfigure(0, weight=1)
+
         # ── Header ──────────────────────────────────────────────────────
-        header = ctk.CTkFrame(f, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 0))
-        header.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(header, text="🔮  Forge de Metadata",
-                     font=ctk.CTkFont(size=22, weight="bold"),
-                     text_color=TEXT_H1).grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(header, text="Inyecta fingerprints iPhone únicos · 276,000 combinaciones disponibles",
-                     font=ctk.CTkFont(size=12), text_color=TEXT_MUTED
-                     ).grid(row=1, column=0, sticky="w")
+        PageHeader(scroll, kicker="CONTENIDO", title="Forge de Metadata",
+                   description="Inyecta fingerprints iPhone únicos · 276,000 combinaciones disponibles",
+                   action=("Tanda", self.forge_preview_metadata)
+                   ).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 0))
 
         # ── Top: dos tarjetas (Videos | Config) ─────────────────────────
-        top = ctk.CTkFrame(f, fg_color="transparent")
+        top = ctk.CTkFrame(scroll, fg_color="transparent")
         top.grid(row=1, column=0, sticky="ew", padx=24, pady=(14, 0))
         top.grid_columnconfigure(0, weight=1)
         top.grid_columnconfigure(1, weight=1)
@@ -3292,7 +3393,8 @@ class InstagramAutoPro(ctk.CTk):
 
         self.forge_lst = tk.Listbox(
             card_vids, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
-            selectbackground=self.themed(NEON_PURPLE), selectmode=tk.EXTENDED,
+            selectbackground=self.themed(ACCENT), selectforeground=self.themed(ACCENT_TEXT),
+            selectmode=tk.EXTENDED,
             borderwidth=0, highlightthickness=1, highlightbackground=self.themed(BORDER),
             font=FONT_BODY, height=9
         )
@@ -3300,16 +3402,10 @@ class InstagramAutoPro(ctk.CTk):
 
         btn_v = ctk.CTkFrame(card_vids, fg_color="transparent")
         btn_v.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 16))
-        ctk.CTkButton(btn_v, text="＋  Agregar Videos", fg_color=NEON_CYAN,
-                      text_color=BG_APP, hover_color=self._darken(NEON_CYAN),
-                      corner_radius=BTN_RADIUS, height=BTN_H,
-                      font=ctk.CTkFont(size=12, weight="bold"),
+        PrimaryButton(btn_v, text="＋  Agregar Videos",
                       command=self.forge_add_videos).pack(side="left", padx=(0, 8))
-        ctk.CTkButton(btn_v, text="−  Quitar", fg_color=DANGER,
-                      text_color=TEXT_H1, hover_color=self._darken(DANGER),
-                      corner_radius=BTN_RADIUS, height=BTN_H,
-                      font=ctk.CTkFont(size=12, weight="bold"),
-                      command=self.forge_remove_video).pack(side="left")
+        GhostButton(btn_v, text="−  Quitar",
+                    command=self.forge_remove_video).pack(side="left")
 
         # — Tarjeta Paso 2: Config —
         card_cfg = ctk.CTkFrame(top, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
@@ -3321,17 +3417,27 @@ class InstagramAutoPro(ctk.CTk):
                      text_color=NEON_PURPLE).grid(row=0, column=0, columnspan=2,
                                                   sticky="w", padx=18, pady=(16, 8))
 
+        # NOTE: "Copias por vídeo" is read via int(self.e_forge_copies.get())
+        # in both forge_preview_metadata and forge_process, so a Stepper
+        # (whose .get() already returns an int) is a safe drop-in.
+        # "Días a distribuir" is read via self.e_forge_days.get().strip()
+        # or "MAX" in forge_process — a Stepper.get() returns an int, which
+        # has no .strip(), so this field MUST stay a CTkEntry.
         cfg_rows = [
-            ("Nombre de tanda:",   "e_forge_tanda",   None),
-            ("Categoría destino:", "c_forge_cat",      "combo"),
-            ("Copias por vídeo:",   "e_forge_copies",   "4"),
-            ("Días a distribuir:", "e_forge_days",     "MAX"),
+            ("Nombre de tanda:",   "e_forge_tanda",   None,    None),
+            ("Categoría destino:", "c_forge_cat",      "combo", None),
+            ("Copias por vídeo:",   "e_forge_copies",  None,    "stepper"),
+            ("Días a distribuir:", "e_forge_days",     "MAX",   None),
         ]
-        for row_i, (lbl, attr, default) in enumerate(cfg_rows, start=1):
+        for row_i, (lbl, attr, default, kind) in enumerate(cfg_rows, start=1):
             ctk.CTkLabel(card_cfg, text=lbl, text_color=TEXT_MUTED,
                          font=ctk.CTkFont(size=11), anchor="e"
                          ).grid(row=row_i, column=0, padx=(18, 8), pady=7, sticky="e")
-            if default == "combo":
+            if kind == "stepper":
+                widget = Stepper(card_cfg, value=4, min=1, max=50)
+                widget.grid(row=row_i, column=1, padx=(0, 18), pady=7, sticky="w")
+                setattr(self, attr, widget)
+            elif default == "combo":
                 widget = ctk.CTkComboBox(card_cfg, values=[], fg_color=BG_INPUT,
                                          border_color=BORDER,
                                          button_color=NEON_CYAN,
@@ -3349,12 +3455,9 @@ class InstagramAutoPro(ctk.CTk):
                 setattr(self, attr, widget)
 
         self.forge_dist_var = tk.BooleanVar(value=True)
-        ctk.CTkCheckBox(card_cfg, text="Distribuir automáticamente al procesar",
-                        variable=self.forge_dist_var,
-                        text_color=NEON_CYAN,
-                        checkbox_width=18, checkbox_height=18
-                        ).grid(row=5, column=0, columnspan=2,
-                               sticky="w", padx=18, pady=(6, 4))
+        ToggleRow(card_cfg, "Distribuir automáticamente al procesar",
+                  variable=self.forge_dist_var).grid(row=5, column=0, columnspan=2,
+                                                     sticky="ew", padx=18, pady=(6, 4))
 
         # — Micro-ediciones por copia (variant engine) —
         self.FORGE_FX_DEFS = [
@@ -3370,23 +3473,21 @@ class InstagramAutoPro(ctk.CTk):
         fx_frame = ctk.CTkFrame(card_cfg, fg_color="transparent")
         fx_frame.grid(row=6, column=0, columnspan=2, sticky="ew",
                       padx=18, pady=(4, 16))
+        fx_frame.grid_columnconfigure(0, weight=1)
+        fx_frame.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(fx_frame, text="Micro-ediciones por copia:",
                      font=ctk.CTkFont(size=11, weight="bold"),
-                     text_color=NEON_PURPLE).grid(row=0, column=0, columnspan=2,
+                     text_color=NEON_PURPLE).grid(row=0, column=0,
                                                   sticky="w", pady=(0, 4))
         self.forge_fx_vars = {}
         for i, (key, lbl) in enumerate(self.FORGE_FX_DEFS):
             var = tk.BooleanVar(value=True)
             self.forge_fx_vars[key] = var
-            ctk.CTkCheckBox(fx_frame, text=lbl, variable=var,
-                            font=ctk.CTkFont(size=11),
-                            text_color=TEXT_BODY,
-                            checkbox_width=16, checkbox_height=16
-                            ).grid(row=1 + i // 2, column=i % 2,
-                                   sticky="w", pady=2, padx=(0, 14))
+            ToggleRow(fx_frame, lbl, variable=var).grid(
+                row=1 + i // 2, column=i % 2, sticky="ew", padx=(0, 8), pady=3)
 
         # ── Tabla Preview ────────────────────────────────────────────────
-        preview_card = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        preview_card = ctk.CTkFrame(scroll, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
         preview_card.grid(row=2, column=0, sticky="nsew", padx=24, pady=(14, 0))
         preview_card.grid_rowconfigure(1, weight=1)
         preview_card.grid_columnconfigure(0, weight=1)
@@ -3406,7 +3507,7 @@ class InstagramAutoPro(ctk.CTk):
 
         cols = ("Video", "Modelo iPhone", "Ciudad", "Carrier", "iOS")
         self.forge_tree = ttk.Treeview(tree_wrap, columns=cols, show="headings",
-                                       style="Premium.Treeview", height=7)
+                                       style="Premium.Treeview", height=10)
         col_w = {"Video": 200, "Modelo iPhone": 190, "Ciudad": 140, "Carrier": 170, "iOS": 70}
         for col in cols:
             self.forge_tree.heading(col, text=col)
@@ -3417,36 +3518,19 @@ class InstagramAutoPro(ctk.CTk):
         scr.grid(row=0, column=1, sticky="ns", padx=(2, 0))
 
         # ── Botonera + Progreso ──────────────────────────────────────────
-        bot = ctk.CTkFrame(f, fg_color="transparent")
+        bot = ctk.CTkFrame(scroll, fg_color="transparent")
         bot.grid(row=3, column=0, sticky="ew", padx=24, pady=(14, 20))
         bot.grid_columnconfigure(3, weight=1)
 
-        ctk.CTkButton(bot, text="👁️  Preview Metadata",
-                      fg_color=INFO, text_color=TEXT_H1,
-                      hover_color=self._darken(INFO),
-                      corner_radius=BTN_RADIUS, height=BTN_H_LG,
-                      font=ctk.CTkFont(size=13, weight="bold"),
-                      command=self.forge_preview_metadata
-                      ).grid(row=0, column=0, padx=(0, 8))
+        GhostButton(bot, text="👁  Preview Metadata", height=BTN_H_LG,
+                    command=self.forge_preview_metadata).grid(row=0, column=0, padx=(0, 8))
 
-        self.btn_forge_reshuffle = ctk.CTkButton(
-            bot, text="🔀  Regenerar Shuffle",
-            fg_color=WARNING, text_color=BG_APP,
-            hover_color=self._darken(WARNING),
-            corner_radius=BTN_RADIUS, height=BTN_H_LG,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            state="disabled", command=self.forge_reshuffle
-        )
+        self.btn_forge_reshuffle = GhostButton(bot, text="🔀  Regenerar Shuffle",
+                    height=BTN_H_LG, state="disabled", command=self.forge_reshuffle)
         self.btn_forge_reshuffle.grid(row=0, column=1, padx=(0, 8))
 
-        self.btn_forge_process = ctk.CTkButton(
-            bot, text="⚡  Procesar Ahora",
-            fg_color=IG_PINK, text_color=TEXT_H1,
-            hover_color=self._darken(IG_PINK),
-            corner_radius=BTN_RADIUS, height=BTN_H_LG,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            state="disabled", command=self.forge_process
-        )
+        self.btn_forge_process = PrimaryButton(bot, text="⚡  Procesar Ahora",
+                    height=BTN_H_LG, state="disabled", command=self.forge_process)
         self.btn_forge_process.grid(row=0, column=2, padx=(0, 20))
 
         prog_wrap = ctk.CTkFrame(bot, fg_color="transparent")
@@ -3462,8 +3546,6 @@ class InstagramAutoPro(ctk.CTk):
                                           font=ctk.CTkFont(size=11),
                                           text_color=TEXT_MUTED)
         self.forge_pb_lbl.grid(row=1, column=0, sticky="w")
-
-        f.grid_rowconfigure(3, weight=0)
 
     def _forge_reload_cats(self):
         cats = self.db.get_categories()

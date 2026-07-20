@@ -10,11 +10,54 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 APP_DIR = Path(__file__).resolve().parent
 GUI = APP_DIR / "gui_premium_v7.py"
 STATUS_FILE = APP_DIR / ".update_status.json"
+
+
+def _ensure_timezone_data() -> str:
+    """Install tzdata once when Windows/Python lacks IANA timezone data.
+
+    Fresh installations receive it through requirements.txt. This fallback also
+    repairs existing installations after an automatic code-only update, without
+    asking the partner to open a terminal or know about pip.
+    """
+    try:
+        ZoneInfo("America/New_York")
+        return ""
+    except ZoneInfoNotFoundError:
+        pass
+
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--disable-pip-version-check",
+                "tzdata",
+            ],
+            cwd=str(APP_DIR),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=90,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"No se pudo instalar el soporte horario requerido: {exc}"
+
+    if result.returncode:
+        return "No se pudo instalar el soporte horario requerido (tzdata)."
+
+    try:
+        ZoneInfo("America/New_York")
+    except ZoneInfoNotFoundError:
+        return "El soporte horario requerido (tzdata) no quedó disponible."
+    return ""
 
 
 def _run_update_check() -> None:
@@ -49,6 +92,14 @@ def _windowless_python() -> str:
 
 
 def main() -> int:
+    timezone_error = _ensure_timezone_data()
+    if timezone_error:
+        try:
+            STATUS_FILE.write_text(json.dumps({"error": timezone_error}), encoding="utf-8")
+        except OSError:
+            pass
+        return 1
+
     _run_update_check()
     try:
         subprocess.Popen([_windowless_python(), str(GUI)], cwd=str(APP_DIR))
