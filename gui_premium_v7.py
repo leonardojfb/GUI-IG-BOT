@@ -27,10 +27,14 @@ _ACCT_HIST_FILE = os.path.join(_BASE_DIR, "dist_accounts_history.json")
 from styles.colors import (
     BG_APP, BG_SIDEBAR, BG_CARD, BG_CARD2, BG_INPUT, BORDER,
     NEON_CYAN, NEON_PURPLE, IG_PINK, SUCCESS, WARNING, DANGER, INFO,
-    ACCENT_WEAK, ACCENT, ACCENT_TEXT, resolve, darken,
+    ACCENT_WEAK, ACCENT, ACCENT_TEXT, ACCENT_HOVER, SURFACE2, resolve, darken,
     TEXT_H1, TEXT_BODY, TEXT_MUTED,
     FONT_TITLE, FONT_H2, FONT_H3, FONT_BODY, FONT_SMALL, FONT_MONO,
     SIDEBAR_W, STATUS_H, CARD_RADIUS, BTN_RADIUS, BTN_H, BTN_H_LG,
+)
+from styles.components import (
+    NavItem, GhostButton, PrimaryButton, DangerButton, Card, PageHeader,
+    SegmentedControl, Stepper, ToggleRow, KeyValueRow, Dropzone, PhonePreview,
 )
 
 # ── Configuración global de CustomTkinter ──────────────────────────────────
@@ -858,14 +862,18 @@ class InstagramAutoPro(ctk.CTk):
         self.sidebar.grid_propagate(False)
 
         # — Logo —
-        logo_wrap = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        logo_wrap.grid(row=0, column=0, padx=18, pady=(22, 8), sticky="ew")
-        ctk.CTkLabel(logo_wrap, text="⚡ IG AUTO",
-                     font=ctk.CTkFont(family="Arial", size=21, weight="bold"),
-                     text_color=NEON_CYAN).pack(anchor="w")
-        ctk.CTkLabel(logo_wrap, text="PRO  ·  v7.0",
-                     font=ctk.CTkFont(family="Arial", size=10),
-                     text_color=TEXT_MUTED).pack(anchor="w")
+        brand = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        brand.grid(row=0, column=0, padx=16, pady=(20, 10), sticky="ew")
+        tile = ctk.CTkLabel(brand, text="IA", width=40, height=40,
+                            corner_radius=12, fg_color=ACCENT, text_color=ACCENT_TEXT,
+                            font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"))
+        tile.grid(row=0, column=0, rowspan=2, padx=(0, 10))
+        ctk.CTkLabel(brand, text="IG AUTO PRO", anchor="w",
+                     font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
+                     text_color=TEXT_H1).grid(row=0, column=1, sticky="sw")
+        ctk.CTkLabel(brand, text="AUTOMATION SUITE", anchor="w",
+                     font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
+                     text_color=TEXT_MUTED).grid(row=1, column=1, sticky="nw")
 
         # — Separador —
         ctk.CTkFrame(self.sidebar, height=1, fg_color=BORDER).grid(
@@ -888,14 +896,7 @@ class InstagramAutoPro(ctk.CTk):
                                                      pady=(10, 2), sticky="w")
             row += 1
             for label, key in items:
-                btn = ctk.CTkButton(
-                    self.sidebar, text=label, anchor="w",
-                    height=40, corner_radius=BTN_RADIUS,
-                    font=ctk.CTkFont(family="Segoe UI", size=13),
-                    fg_color="transparent", text_color=TEXT_BODY,
-                    hover_color=BG_CARD2, border_width=0,
-                    command=lambda k=key: self.show_frame(k)
-                )
+                btn = NavItem(self.sidebar, text=label, command=lambda k=key: self.show_frame(k))
                 btn.grid(row=row, column=0, padx=10, pady=2, sticky="ew")
                 self._nav_btns[key] = btn
                 row += 1
@@ -904,7 +905,9 @@ class InstagramAutoPro(ctk.CTk):
         self.theme_seg = ctk.CTkSegmentedButton(
             self.sidebar, values=["Claro", "Oscuro", "Sistema"],
             command=self._on_theme_change,
-            font=ctk.CTkFont(family="Segoe UI", size=11), height=28,
+            fg_color=SURFACE2, selected_color=ACCENT, selected_hover_color=ACCENT_HOVER,
+            unselected_color=SURFACE2, text_color=TEXT_BODY,
+            font=ctk.CTkFont(family="Segoe UI", size=11), height=30, corner_radius=BTN_RADIUS,
         )
         self.theme_seg.set("Sistema")
         self.theme_seg.grid(row=91, column=0, padx=14, pady=(8, 4), sticky="ew")
@@ -968,11 +971,9 @@ class InstagramAutoPro(ctk.CTk):
     # ── Navegación ────────────────────────────────────────────────────────
     def show_frame(self, name: str):
         if self._active_nav and self._active_nav in self._nav_btns:
-            self._nav_btns[self._active_nav].configure(
-                fg_color="transparent", text_color=TEXT_BODY)
+            self._nav_btns[self._active_nav].set_active(False)
         if name in self._nav_btns:
-            self._nav_btns[name].configure(
-                fg_color=ACCENT_WEAK, text_color=NEON_CYAN)
+            self._nav_btns[name].set_active(True)
         self._active_nav = name
         # Keep only the visible frame under geometry management; the other eight
         # (each with scrollable content) stay built but unmanaged, so a resize
