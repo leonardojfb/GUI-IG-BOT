@@ -27,7 +27,7 @@ _ACCT_HIST_FILE = os.path.join(_BASE_DIR, "dist_accounts_history.json")
 from styles.colors import (
     BG_APP, BG_SIDEBAR, BG_CARD, BG_CARD2, BG_INPUT, BORDER,
     NEON_CYAN, NEON_PURPLE, IG_PINK, SUCCESS, WARNING, DANGER, INFO,
-    ACCENT_WEAK, resolve, darken,
+    ACCENT_WEAK, ACCENT, ACCENT_TEXT, resolve, darken,
     TEXT_H1, TEXT_BODY, TEXT_MUTED,
     FONT_TITLE, FONT_H2, FONT_H3, FONT_BODY, FONT_SMALL, FONT_MONO,
     SIDEBAR_W, STATUS_H, CARD_RADIUS, BTN_RADIUS, BTN_H, BTN_H_LG,
@@ -819,7 +819,8 @@ class InstagramAutoPro(ctk.CTk):
             if lb is not None:
                 lb.configure(
                     bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
-                    selectbackground=self.themed(NEON_PURPLE),
+                    selectbackground=self.themed(ACCENT),
+                    selectforeground=self.themed(ACCENT_TEXT),
                     highlightbackground=self.themed(BORDER),
                 )
         if getattr(self, "tree", None) is not None:
@@ -836,15 +837,15 @@ class InstagramAutoPro(ctk.CTk):
         style = ttk.Style()
         style.theme_use("default")
         style.configure("Premium.Treeview",
-                        background=self.themed(BG_CARD2), foreground=self.themed(TEXT_BODY),
-                        fieldbackground=self.themed(BG_CARD2), rowheight=28,
-                        font=FONT_BODY, borderwidth=0)
+                        background=self.themed(BG_CARD), foreground=self.themed(TEXT_BODY),
+                        fieldbackground=self.themed(BG_CARD), bordercolor=self.themed(BORDER),
+                        rowheight=30, font=FONT_BODY, borderwidth=0)
         style.configure("Premium.Treeview.Heading",
-                        background=self.themed(BG_CARD), foreground=self.themed(NEON_CYAN),
+                        background=self.themed(BG_CARD2), foreground=self.themed(TEXT_MUTED),
                         font=FONT_H3, borderwidth=0, relief="flat")
         style.map("Premium.Treeview",
-                  background=[("selected", self.themed(NEON_PURPLE))],
-                  foreground=[("selected", self.themed(TEXT_H1))])
+                  background=[("selected", self.themed(ACCENT))],
+                  foreground=[("selected", self.themed(ACCENT_TEXT))])
 
     # ── Sidebar ───────────────────────────────────────────────────────────
     def _build_sidebar(self):
@@ -2826,7 +2827,8 @@ class InstagramAutoPro(ctk.CTk):
 
         # Fila 4: listbox con selección múltiple
         self.list_tg = tk.Listbox(ctrl_card, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
-                                  selectbackground=self.themed(NEON_PURPLE),
+                                  selectbackground=self.themed(ACCENT),
+                                  selectforeground=self.themed(ACCENT_TEXT),
                                   selectmode=tk.EXTENDED,
                                   borderwidth=0, highlightthickness=1,
                                   highlightbackground=self.themed(BORDER), font=FONT_BODY)
@@ -3292,7 +3294,8 @@ class InstagramAutoPro(ctk.CTk):
 
         self.forge_lst = tk.Listbox(
             card_vids, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
-            selectbackground=self.themed(NEON_PURPLE), selectmode=tk.EXTENDED,
+            selectbackground=self.themed(ACCENT), selectforeground=self.themed(ACCENT_TEXT),
+            selectmode=tk.EXTENDED,
             borderwidth=0, highlightthickness=1, highlightbackground=self.themed(BORDER),
             font=FONT_BODY, height=9
         )
