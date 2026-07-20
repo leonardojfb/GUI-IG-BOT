@@ -975,49 +975,61 @@ class InstagramAutoPro(ctk.CTk):
         """Configuracion local del canal de actualizaciones privadas."""
         f = self._frames["Actualizaciones"]
         f.grid_columnconfigure(0, weight=1)
-        f.grid_rowconfigure(1, weight=1)
+        f.grid_rowconfigure(0, weight=1)
 
-        header = ctk.CTkFrame(f, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 10))
-        ctk.CTkLabel(
-            header, text="Actualizaciones",
-            font=ctk.CTkFont(size=22, weight="bold"), text_color=TEXT_H1
-        ).pack(anchor="w")
-        ctk.CTkLabel(
-            header, text="Configura el acceso al repositorio privado y comprueba nuevas versiones.",
-            font=ctk.CTkFont(size=12), text_color=TEXT_MUTED
-        ).pack(anchor="w", pady=(4, 0))
+        scroll = ctk.CTkScrollableFrame(f, fg_color="transparent")
+        scroll.grid(row=0, column=0, sticky="nsew")
+        scroll.grid_columnconfigure(0, weight=1)
 
-        card = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
-        card.grid(row=1, column=0, sticky="new", padx=24, pady=(0, 24))
-        card.grid_columnconfigure(1, weight=1)
+        PageHeader(
+            scroll, "APP", "Actualizaciones", "Mantén la app al día."
+        ).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 0))
 
         try:
             config = load_config(UPDATE_APP_DIR)
         except Exception:
             config = {}
 
+        try:
+            version = read_local_version(UPDATE_APP_DIR)
+        except Exception:
+            version = "desconocida"
+
+        status_card = Card(scroll, title="Estado")
+        status_card.grid(row=1, column=0, sticky="ew", padx=24, pady=(16, 10))
+        KeyValueRow(status_card.body, "Versión actual", version).grid(row=0, column=0, sticky="ew")
+        KeyValueRow(status_card.body, "Canal", config.get("channel", "Privado")).grid(row=1, column=0, sticky="ew")
+        self.update_last_check_row = KeyValueRow(
+            status_card.body, "Última comprobación", "Aún no comprobada", divider=False
+        )
+        self.update_last_check_row.grid(row=2, column=0, sticky="ew")
+
+        card = Card(scroll, title="Acceso privado")
+        card.grid(row=2, column=0, sticky="ew", padx=24, pady=(0, 24))
+        card = card.body
+        card.grid_columnconfigure(1, weight=1)
+
         ctk.CTkLabel(
             card, text="Manifiesto remoto:", text_color=TEXT_MUTED,
             font=ctk.CTkFont(size=11)
-        ).grid(row=0, column=0, padx=(20, 10), pady=(20, 8), sticky="e")
+        ).grid(row=0, column=0, padx=(0, 10), pady=(0, 8), sticky="e")
         self.e_update_manifest = ctk.CTkEntry(
             card, fg_color=BG_INPUT, border_color=BORDER,
             placeholder_text="https://raw.githubusercontent.com/.../release-manifest.json"
         )
-        self.e_update_manifest.grid(row=0, column=1, columnspan=2, padx=(0, 20), pady=(20, 8), sticky="ew")
+        self.e_update_manifest.grid(row=0, column=1, columnspan=2, pady=(0, 8), sticky="ew")
         if config.get("manifest_url"):
             self.e_update_manifest.insert(0, str(config["manifest_url"]))
 
         ctk.CTkLabel(
             card, text="Token GitHub:", text_color=TEXT_MUTED,
             font=ctk.CTkFont(size=11)
-        ).grid(row=1, column=0, padx=(20, 10), pady=8, sticky="e")
+        ).grid(row=1, column=0, padx=(0, 10), pady=8, sticky="e")
         self.e_update_token = ctk.CTkEntry(
             card, fg_color=BG_INPUT, border_color=BORDER, show="*",
             placeholder_text="github_pat_... (Contents: Read-only)"
         )
-        self.e_update_token.grid(row=1, column=1, columnspan=2, padx=(0, 20), pady=8, sticky="ew")
+        self.e_update_token.grid(row=1, column=1, columnspan=2, pady=8, sticky="ew")
         if config.get("access_token"):
             self.e_update_token.insert(0, str(config["access_token"]))
 
@@ -1025,23 +1037,19 @@ class InstagramAutoPro(ctk.CTk):
             card, text="", text_color=TEXT_MUTED,
             font=ctk.CTkFont(size=11), anchor="w"
         )
-        self.lbl_update_state.grid(row=2, column=0, columnspan=3, padx=20, pady=(8, 12), sticky="ew")
+        self.lbl_update_state.grid(row=2, column=0, columnspan=3, pady=(8, 12), sticky="ew")
 
         buttons = ctk.CTkFrame(card, fg_color="transparent")
-        buttons.grid(row=3, column=0, columnspan=3, padx=20, pady=(0, 20), sticky="ew")
+        buttons.grid(row=3, column=0, columnspan=3, pady=(0, 0), sticky="ew")
         buttons.grid_columnconfigure(3, weight=1)
-        ctk.CTkButton(
-            buttons, text="Guardar configuracion", fg_color=SUCCESS, text_color=BG_APP,
-            height=BTN_H, corner_radius=BTN_RADIUS, command=self._save_update_config
+        GhostButton(
+            buttons, text="Guardar configuración", command=self._save_update_config
         ).grid(row=0, column=0, padx=(0, 8))
-        ctk.CTkButton(
-            buttons, text="Borrar token", fg_color=BG_CARD2, text_color=TEXT_BODY,
-            border_width=1, border_color=BORDER, height=BTN_H, corner_radius=BTN_RADIUS,
-            command=self._clear_update_token
+        DangerButton(
+            buttons, text="Borrar token", command=self._clear_update_token
         ).grid(row=0, column=1, padx=(0, 8))
-        self.btn_check_update = ctk.CTkButton(
-            buttons, text="Comprobar y actualizar", fg_color=NEON_CYAN, text_color=BG_APP,
-            height=BTN_H, corner_radius=BTN_RADIUS, command=self._check_updates_from_gui
+        self.btn_check_update = PrimaryButton(
+            buttons, text="Buscar actualizaciones", command=self._check_updates_from_gui
         )
         self.btn_check_update.grid(row=0, column=2, padx=(0, 8))
 
@@ -1057,6 +1065,10 @@ class InstagramAutoPro(ctk.CTk):
         if message:
             state += f"  |  {message}"
         self.lbl_update_state.configure(text=state, text_color=color)
+        if hasattr(self, "update_last_check_row"):
+            self.update_last_check_row.value_lbl.configure(
+                text=message or "Comprobación pendiente"
+            )
 
     def _write_update_config(self):
         config_path = os.path.join(UPDATE_APP_DIR, "update_config.json")
@@ -1118,7 +1130,7 @@ class InstagramAutoPro(ctk.CTk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _finish_gui_update(self, before, after, updated, detail):
-        self.btn_check_update.configure(state="normal", text="Comprobar y actualizar")
+        self.btn_check_update.configure(state="normal", text="Buscar actualizaciones")
         if updated and after != before:
             self._refresh_update_state(f"actualizada de {before} a {after}; reinicia la GUI", SUCCESS)
             messagebox.showinfo(
