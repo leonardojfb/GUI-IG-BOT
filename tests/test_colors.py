@@ -6,9 +6,11 @@ HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 PAIR_TOKENS = [
     "BG_APP", "BG_SIDEBAR", "BG_CARD", "BG_CARD2", "BG_INPUT", "BORDER",
     "NEON_CYAN", "NEON_PURPLE", "IG_PINK", "IG_ORANGE",
-    "SUCCESS", "WARNING", "DANGER", "INFO",
+    "SUCCESS", "WARNING", "DANGER", "INFO", "TELEGRAM",
     "TEXT_H1", "TEXT_BODY", "TEXT_MUTED",
+    "ACCENT_TEXT", "ACCENT_HOVER",
     "ACCENT", "ACCENT_WEAK", "SURFACE", "SURFACE2", "RAIL", "GROUND", "LINE",
+    "BRAND_REDDIT", "BRAND_X", "BRAND_IG",
 ]
 
 def test_tokens_are_light_dark_hex_pairs():
@@ -43,6 +45,30 @@ def test_darken_string():
 def test_darken_tuple_returns_tuple():
     out = colors.darken(("#ffffff", "#000000"))
     assert out == ("#bfbfbf", "#000000")
+
+def test_accent_is_peach_in_dark():
+    assert colors.resolve(colors.ACCENT, "Dark") == "#e9c7a3"
+    assert colors.resolve(colors.BG_APP, "Dark") == "#0c0c0e"
+
+def test_accent_text_and_hover_exist():
+    assert colors.resolve(colors.ACCENT_TEXT, "Dark") == "#1c1710"
+    assert isinstance(colors.ACCENT_HOVER, tuple)
+
+def test_new_sizes_and_fonts():
+    assert colors.SIDEBAR_W == 240
+    assert colors.CARD_RADIUS == 16
+    assert colors.BTN_RADIUS == 10
+    assert colors.FONT_TITLE[1] == 28
+    assert colors.FONT_KICKER[2] == "bold"
+
+def test_platform_brand_tokens_present():
+    for t in (colors.BRAND_REDDIT, colors.BRAND_X, colors.BRAND_IG):
+        assert isinstance(t, tuple) and len(t) == 2
+
+def test_all_color_tokens_are_light_dark_tuples():
+    for name in ("BG_APP","BG_CARD","ACCENT","TEXT_H1","DANGER","SUCCESS"):
+        val = getattr(colors, name)
+        assert isinstance(val, tuple) and len(val) == 2
 
 if __name__ == "__main__":
     for _name, _fn in sorted(globals().items()):
