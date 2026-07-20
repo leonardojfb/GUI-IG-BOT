@@ -3263,15 +3263,10 @@ class InstagramAutoPro(ctk.CTk):
         f.grid_columnconfigure(0, weight=1)
 
         # ── Header ──────────────────────────────────────────────────────
-        header = ctk.CTkFrame(f, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 0))
-        header.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(header, text="🔮  Forge de Metadata",
-                     font=ctk.CTkFont(size=22, weight="bold"),
-                     text_color=TEXT_H1).grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(header, text="Inyecta fingerprints iPhone únicos · 276,000 combinaciones disponibles",
-                     font=ctk.CTkFont(size=12), text_color=TEXT_MUTED
-                     ).grid(row=1, column=0, sticky="w")
+        PageHeader(f, kicker="CONTENIDO", title="Forge de Metadata",
+                   description="Inyecta fingerprints iPhone únicos · 276,000 combinaciones disponibles",
+                   action=("Tanda", self.forge_preview_metadata)
+                   ).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 0))
 
         # ── Top: dos tarjetas (Videos | Config) ─────────────────────────
         top = ctk.CTkFrame(f, fg_color="transparent")
@@ -3306,16 +3301,10 @@ class InstagramAutoPro(ctk.CTk):
 
         btn_v = ctk.CTkFrame(card_vids, fg_color="transparent")
         btn_v.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 16))
-        ctk.CTkButton(btn_v, text="＋  Agregar Videos", fg_color=NEON_CYAN,
-                      text_color=BG_APP, hover_color=self._darken(NEON_CYAN),
-                      corner_radius=BTN_RADIUS, height=BTN_H,
-                      font=ctk.CTkFont(size=12, weight="bold"),
+        PrimaryButton(btn_v, text="＋  Agregar Videos",
                       command=self.forge_add_videos).pack(side="left", padx=(0, 8))
-        ctk.CTkButton(btn_v, text="−  Quitar", fg_color=DANGER,
-                      text_color=TEXT_H1, hover_color=self._darken(DANGER),
-                      corner_radius=BTN_RADIUS, height=BTN_H,
-                      font=ctk.CTkFont(size=12, weight="bold"),
-                      command=self.forge_remove_video).pack(side="left")
+        GhostButton(btn_v, text="−  Quitar",
+                    command=self.forge_remove_video).pack(side="left")
 
         # — Tarjeta Paso 2: Config —
         card_cfg = ctk.CTkFrame(top, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
@@ -3327,17 +3316,27 @@ class InstagramAutoPro(ctk.CTk):
                      text_color=NEON_PURPLE).grid(row=0, column=0, columnspan=2,
                                                   sticky="w", padx=18, pady=(16, 8))
 
+        # NOTE: "Copias por vídeo" is read via int(self.e_forge_copies.get())
+        # in both forge_preview_metadata and forge_process, so a Stepper
+        # (whose .get() already returns an int) is a safe drop-in.
+        # "Días a distribuir" is read via self.e_forge_days.get().strip()
+        # or "MAX" in forge_process — a Stepper.get() returns an int, which
+        # has no .strip(), so this field MUST stay a CTkEntry.
         cfg_rows = [
-            ("Nombre de tanda:",   "e_forge_tanda",   None),
-            ("Categoría destino:", "c_forge_cat",      "combo"),
-            ("Copias por vídeo:",   "e_forge_copies",   "4"),
-            ("Días a distribuir:", "e_forge_days",     "MAX"),
+            ("Nombre de tanda:",   "e_forge_tanda",   None,    None),
+            ("Categoría destino:", "c_forge_cat",      "combo", None),
+            ("Copias por vídeo:",   "e_forge_copies",  None,    "stepper"),
+            ("Días a distribuir:", "e_forge_days",     "MAX",   None),
         ]
-        for row_i, (lbl, attr, default) in enumerate(cfg_rows, start=1):
+        for row_i, (lbl, attr, default, kind) in enumerate(cfg_rows, start=1):
             ctk.CTkLabel(card_cfg, text=lbl, text_color=TEXT_MUTED,
                          font=ctk.CTkFont(size=11), anchor="e"
                          ).grid(row=row_i, column=0, padx=(18, 8), pady=7, sticky="e")
-            if default == "combo":
+            if kind == "stepper":
+                widget = Stepper(card_cfg, value=4, min=1, max=50)
+                widget.grid(row=row_i, column=1, padx=(0, 18), pady=7, sticky="w")
+                setattr(self, attr, widget)
+            elif default == "combo":
                 widget = ctk.CTkComboBox(card_cfg, values=[], fg_color=BG_INPUT,
                                          border_color=BORDER,
                                          button_color=NEON_CYAN,
@@ -3355,12 +3354,9 @@ class InstagramAutoPro(ctk.CTk):
                 setattr(self, attr, widget)
 
         self.forge_dist_var = tk.BooleanVar(value=True)
-        ctk.CTkCheckBox(card_cfg, text="Distribuir automáticamente al procesar",
-                        variable=self.forge_dist_var,
-                        text_color=NEON_CYAN,
-                        checkbox_width=18, checkbox_height=18
-                        ).grid(row=5, column=0, columnspan=2,
-                               sticky="w", padx=18, pady=(6, 4))
+        ToggleRow(card_cfg, "Distribuir automáticamente al procesar",
+                  variable=self.forge_dist_var).grid(row=5, column=0, columnspan=2,
+                                                     sticky="ew", padx=18, pady=(6, 4))
 
         # — Micro-ediciones por copia (variant engine) —
         self.FORGE_FX_DEFS = [
@@ -3376,20 +3372,17 @@ class InstagramAutoPro(ctk.CTk):
         fx_frame = ctk.CTkFrame(card_cfg, fg_color="transparent")
         fx_frame.grid(row=6, column=0, columnspan=2, sticky="ew",
                       padx=18, pady=(4, 16))
+        fx_frame.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(fx_frame, text="Micro-ediciones por copia:",
                      font=ctk.CTkFont(size=11, weight="bold"),
-                     text_color=NEON_PURPLE).grid(row=0, column=0, columnspan=2,
+                     text_color=NEON_PURPLE).grid(row=0, column=0,
                                                   sticky="w", pady=(0, 4))
         self.forge_fx_vars = {}
         for i, (key, lbl) in enumerate(self.FORGE_FX_DEFS):
             var = tk.BooleanVar(value=True)
             self.forge_fx_vars[key] = var
-            ctk.CTkCheckBox(fx_frame, text=lbl, variable=var,
-                            font=ctk.CTkFont(size=11),
-                            text_color=TEXT_BODY,
-                            checkbox_width=16, checkbox_height=16
-                            ).grid(row=1 + i // 2, column=i % 2,
-                                   sticky="w", pady=2, padx=(0, 14))
+            ToggleRow(fx_frame, lbl, variable=var).grid(
+                row=1 + i, column=0, sticky="ew", pady=3)
 
         # ── Tabla Preview ────────────────────────────────────────────────
         preview_card = ctk.CTkFrame(f, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
@@ -3427,32 +3420,15 @@ class InstagramAutoPro(ctk.CTk):
         bot.grid(row=3, column=0, sticky="ew", padx=24, pady=(14, 20))
         bot.grid_columnconfigure(3, weight=1)
 
-        ctk.CTkButton(bot, text="👁️  Preview Metadata",
-                      fg_color=INFO, text_color=TEXT_H1,
-                      hover_color=self._darken(INFO),
-                      corner_radius=BTN_RADIUS, height=BTN_H_LG,
-                      font=ctk.CTkFont(size=13, weight="bold"),
-                      command=self.forge_preview_metadata
-                      ).grid(row=0, column=0, padx=(0, 8))
+        GhostButton(bot, text="👁  Preview Metadata", height=BTN_H_LG,
+                    command=self.forge_preview_metadata).grid(row=0, column=0, padx=(0, 8))
 
-        self.btn_forge_reshuffle = ctk.CTkButton(
-            bot, text="🔀  Regenerar Shuffle",
-            fg_color=WARNING, text_color=BG_APP,
-            hover_color=self._darken(WARNING),
-            corner_radius=BTN_RADIUS, height=BTN_H_LG,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            state="disabled", command=self.forge_reshuffle
-        )
+        self.btn_forge_reshuffle = GhostButton(bot, text="🔀  Regenerar Shuffle",
+                    height=BTN_H_LG, state="disabled", command=self.forge_reshuffle)
         self.btn_forge_reshuffle.grid(row=0, column=1, padx=(0, 8))
 
-        self.btn_forge_process = ctk.CTkButton(
-            bot, text="⚡  Procesar Ahora",
-            fg_color=IG_PINK, text_color=TEXT_H1,
-            hover_color=self._darken(IG_PINK),
-            corner_radius=BTN_RADIUS, height=BTN_H_LG,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            state="disabled", command=self.forge_process
-        )
+        self.btn_forge_process = PrimaryButton(bot, text="⚡  Procesar Ahora",
+                    height=BTN_H_LG, state="disabled", command=self.forge_process)
         self.btn_forge_process.grid(row=0, column=2, padx=(0, 20))
 
         prog_wrap = ctk.CTkFrame(bot, fg_color="transparent")
