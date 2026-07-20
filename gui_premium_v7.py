@@ -965,8 +965,8 @@ class InstagramAutoPro(ctk.CTk):
             elif fr.winfo_manager():
                 fr.grid_remove()
         self._frames[name].tkraise()
-        if name == "Cuentas" and hasattr(self, "_cuentas_panel"):
-            self._cuentas_panel.refresh()
+        if name == "Cuentas" and hasattr(self, "_acc_scroll"):
+            self._admin_load_accounts()
         if name == "Tandas" and hasattr(self, "_tandas_list_scroll"):
             self._refresh_tandas_list()
 
@@ -1500,6 +1500,10 @@ class InstagramAutoPro(ctk.CTk):
         PrimaryButton(tanda_form, text="Guardar Tanda",
                       command=self._tanda_admin_save).grid(row=6, column=0, columnspan=3, sticky="ew")
 
+        # La gestión de cuentas destino vive exclusivamente en la pestaña Cuentas.
+        self._admin_refresh()
+        return
+
         # ══ FILA INFERIOR: Cuentas (ancho completo) ══════════════════════
 
         col_acc_card = Card(f)
@@ -1660,35 +1664,59 @@ class InstagramAutoPro(ctk.CTk):
         accounts  = self.db.get_all_accounts()
         vas_list  = ["Sin Asignar"] + self.db.get_vas()
         cats_list = self.db.get_categories() or ["GENERAL"]
-        self._acc_header_lbl.configure(text=f"📱  Cuentas ({len(accounts)})")
+        self._acc_header_lbl.configure(text=f"{len(accounts)} cuenta(s) destino")
         for acc in accounts:
             username = acc["username"]
             acc_type = acc.get("account_type", "GENERAL")
             assigned = acc.get("assigned_va") or "Sin Asignar"
-            r = ctk.CTkFrame(self._acc_scroll, fg_color="transparent")
-            r.pack(fill="x", pady=2, padx=4)
+            label = acc.get("ig_label", "nuevo")
+            if label not in LABEL_OPTIONS:
+                label = "nuevo"
+            r = ctk.CTkFrame(self._acc_scroll, fg_color=BG_CARD2, corner_radius=BTN_RADIUS)
+            r.pack(fill="x", pady=3, padx=2)
             r.grid_columnconfigure(0, weight=1)
             ctk.CTkLabel(r, text=f"@{username}", text_color=TEXT_BODY,
-                         font=ctk.CTkFont(size=11), anchor="w").grid(row=0, column=0, sticky="w")
+                         font=ctk.CTkFont(size=12), anchor="w").grid(
+                             row=0, column=0, sticky="w", padx=(12, 8), pady=8)
+            c_label = ctk.CTkOptionMenu(
+                r, values=LABEL_OPTIONS, width=105, height=30,
+                fg_color=LABEL_COLORS.get(label, TEXT_MUTED), button_color=LABEL_COLORS.get(label, TEXT_MUTED),
+                text_color=TEXT_ON_DANGER, font=ctk.CTkFont(size=11),
+                command=lambda v, u=username: self._set_account_label(u, v),
+            )
+            c_label.set(label)
+            c_label.grid(row=0, column=1, padx=(4, 2), pady=6)
             c_type = ctk.CTkOptionMenu(
-                r, values=cats_list, width=110, height=26,
+                r, values=cats_list, width=120, height=30,
                 fg_color=BG_INPUT, button_color=BG_CARD2, button_hover_color=BORDER,
                 text_color=TEXT_BODY, font=ctk.CTkFont(size=11),
-                command=lambda v, u=username: self.db.update_account(u, account_type=v)
+                command=lambda v, u=username: self._set_account_category(u, v)
             )
             c_type.set(acc_type if acc_type in cats_list else cats_list[0])
-            c_type.grid(row=0, column=1, padx=(4, 2))
+            c_type.grid(row=0, column=2, padx=(2, 2), pady=6)
             c_va = ctk.CTkOptionMenu(
-                r, values=vas_list, width=110, height=26,
+                r, values=vas_list, width=150, height=30,
                 fg_color=BG_INPUT, button_color=BG_CARD2, button_hover_color=BORDER,
                 text_color=TEXT_BODY, font=ctk.CTkFont(size=11),
-                command=lambda v, u=username: self.db.update_account(u, assigned_va=v)
+                command=lambda v, u=username: self._set_account_va(u, v)
             )
             c_va.set(assigned if assigned in vas_list else vas_list[0])
-            c_va.grid(row=0, column=2, padx=(2, 2))
-            DangerButton(r, text="×", width=28, height=26,
+            c_va.grid(row=0, column=3, padx=(2, 4), pady=6)
+            DangerButton(r, text="×", width=28, height=30,
                           command=lambda u=username: self._admin_delete_account(u)
-                          ).grid(row=0, column=3, padx=(2, 0))
+                          ).grid(row=0, column=4, padx=(2, 8), pady=6)
+
+    def _set_account_label(self, username: str, value: str):
+        self.db.update_account(username, ig_label=value)
+        self._admin_load_accounts()
+
+    def _set_account_category(self, username: str, value: str):
+        self.db.update_account(username, account_type=value)
+        self.refresh_dashboard()
+
+    def _set_account_va(self, username: str, value: str):
+        self.db.update_account(username, assigned_va=value)
+        self.refresh_dashboard()
 
     def _admin_load_cats(self):
         for w in self._cat_scroll.winfo_children():
@@ -3057,18 +3085,60 @@ class InstagramAutoPro(ctk.CTk):
     # ── Panel Estado de Cuentas ───────────────────────────────────────────────
     def _build_cuentas_frame(self):
         f = self._frames["Cuentas"]
-        f.grid_rowconfigure(1, weight=1)
+        f.grid_rowconfigure(2, weight=1)
         f.grid_columnconfigure(0, weight=1)
 
         PageHeader(
             f, "DISTRIBUCIÓN", "Cuentas",
-            "Cuentas de Instagram y su estado."
+            "Gestiona las cuentas destino, sus marcas, VAs y categorías."
         ).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 0))
-        panel_card = Card(f, title="Estado de cuentas")
-        panel_card.grid(row=1, column=0, sticky="nsew", padx=24, pady=(14, 20))
-        self._cuentas_panel = AccountStatusPanel(panel_card.body, self.db)
-        self._cuentas_panel.grid(row=0, column=0, sticky="nsew")
-        panel_card.body.grid_rowconfigure(0, weight=1)
+
+        add_card = Card(f, title="Añadir cuentas destino")
+        add_card.grid(row=1, column=0, sticky="ew", padx=24, pady=(14, 10))
+        add_body = add_card.body
+        add_body.grid_columnconfigure(0, weight=1)
+        add_body.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(add_body, text="Una cuenta por línea", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11)).grid(row=0, column=0, sticky="w")
+        self.txt_accounts = ctk.CTkTextbox(add_body, fg_color=BG_INPUT, border_color=BORDER,
+                                            border_width=1, height=74)
+        self.txt_accounts.grid(row=1, column=0, rowspan=3, sticky="nsew", padx=(0, 16), pady=(4, 0))
+
+        ctk.CTkLabel(add_body, text="Categoría", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11)).grid(row=0, column=1, sticky="w")
+        self.c_bulk_cat = ctk.CTkComboBox(add_body, values=[], fg_color=BG_INPUT,
+                                           border_color=BORDER)
+        self.c_bulk_cat.grid(row=1, column=1, sticky="ew", pady=(4, 8))
+        ctk.CTkLabel(add_body, text="VA asignado", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11)).grid(row=2, column=1, sticky="w")
+        self.c_bulk_va = ctk.CTkComboBox(add_body, values=[], fg_color=BG_INPUT,
+                                          border_color=BORDER)
+        self.c_bulk_va.grid(row=3, column=1, sticky="ew", pady=(4, 10))
+        PrimaryButton(add_body, text="Añadir cuentas",
+                      command=self.add_bulk_accounts).grid(row=4, column=1, sticky="e")
+
+        accounts_card = Card(f, title="Cuentas destino")
+        accounts_card.grid(row=2, column=0, sticky="nsew", padx=24, pady=(0, 20))
+        accounts_body = accounts_card.body
+        accounts_body.grid_rowconfigure(1, weight=1)
+        accounts_body.grid_columnconfigure(0, weight=1)
+
+        accounts_header = ctk.CTkFrame(accounts_body, fg_color="transparent")
+        accounts_header.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        accounts_header.grid_columnconfigure(0, weight=1)
+        self._acc_header_lbl = ctk.CTkLabel(
+            accounts_header, text="0 cuentas", font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=TEXT_BODY,
+        )
+        self._acc_header_lbl.grid(row=0, column=0, sticky="w")
+        GhostButton(accounts_header, text="Actualizar", width=110,
+                    command=self._admin_load_accounts).grid(row=0, column=1, sticky="e")
+
+        self._acc_scroll = ctk.CTkScrollableFrame(accounts_body, fg_color="transparent", height=380)
+        self._acc_scroll.grid(row=1, column=0, sticky="nsew")
+        self._acc_scroll.grid_columnconfigure(0, weight=1)
+        self._admin_refresh()
 
     # ── AI Advisor (Gemini Integration) ──────────────────────────────────────
     def _build_ai_frame(self):
