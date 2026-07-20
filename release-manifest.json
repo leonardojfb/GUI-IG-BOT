@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.7",
+    "version":  "1.0.8",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.7",
-    "asset_name":  "MetodoIG-v1.0.7.zip",
-    "sha256":  "86f115422556337b55a05a10d3beb4c9a9ba116a31c52188ae33061a1d358f5b",
-    "notes":  "Hotfix: incluye styles/components.py, requerido para abrir la GUI.",
+    "github_release_tag":  "v1.0.8",
+    "asset_name":  "MetodoIG-v1.0.8.zip",
+    "sha256":  "8a12959ee4f8c297ca8d2eea5809808d186191ceb6bd86fc0573058f2d99dfb6",
+    "notes":  "Instalacion segura: los clientes nuevos reciben una base de datos limpia desde plantilla; NUNCA se pisa la base de un cliente existente al reinstalar/descomprimir. Limpieza interna de codigo muerto.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",
