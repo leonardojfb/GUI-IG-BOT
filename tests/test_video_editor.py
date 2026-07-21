@@ -10,6 +10,13 @@ from video_editor import _ratio_size, _xy, build_photo_video_pairs, render_video
 from gui_premium_v7 import InstagramAutoPro
 
 
+DURATION_LABEL = "Duraci\u00f3n ms"
+SIZE_LABEL = "Tama\u00f1o %"
+X_LABEL = "X %"
+Y_LABEL = "Y %"
+OPACITY_LABEL = "Transparencia %"
+
+
 class _FakeEntry:
     def __init__(self, value):
         self.value = str(value)
@@ -38,7 +45,44 @@ class _FakeSlider:
         self.value = value
 
 
-def _editor_fake(video_paths, timeline_fps=60, timeline_frame=299):
+class _FakeCombo(_FakeSlider):
+    def __init__(self, value, values=()):
+        super().__init__(value)
+        self.values = list(values)
+
+    def configure(self, **kwargs):
+        if "values" in kwargs:
+            self.values = list(kwargs["values"])
+
+
+class _FakeGuiWidget(_FakeEntry):
+    def __init__(self, *_args, text="", **_kwargs):
+        super().__init__("")
+        self.text = text
+        self.grid_calls = []
+        self.destroyed = False
+
+    def configure(self, **kwargs):
+        if "text" in kwargs:
+            self.text = kwargs["text"]
+
+    def grid(self, **kwargs):
+        self.grid_calls.append(kwargs)
+
+    def grid_columnconfigure(self, *_args, **_kwargs):
+        pass
+
+    def pack(self, **_kwargs):
+        pass
+
+    def destroy(self):
+        self.destroyed = True
+
+    def set(self, value):
+        self.value = str(value)
+
+
+def _editor_fake(video_paths, timeline_fps=60, timeline_frame=299, photo_paths=("a.png", "b.png")):
     def value_entry(value):
         return _FakeEntry(value)
 
@@ -47,16 +91,23 @@ def _editor_fake(video_paths, timeline_fps=60, timeline_frame=299):
             "photo": value_entry(photo),
             "manual_var": SimpleNamespace(get=lambda: False),
             "Frame": value_entry(0),
+            DURATION_LABEL: value_entry(500),
+            SIZE_LABEL: value_entry(25),
+            X_LABEL: value_entry(50),
+            Y_LABEL: value_entry(50),
+            OPACITY_LABEL: value_entry(100),
+            "ratio": SimpleNamespace(get=lambda: "9:16"),
+            "position": SimpleNamespace(get=lambda: "Manual X/Y"),
         }
 
     fake = SimpleNamespace(
         editor_video_paths=video_paths,
-        editor_rows=[photo_row("a.png"), photo_row("b.png")],
+        editor_rows=[photo_row(photo) for photo in photo_paths],
         editor_global_enabled=SimpleNamespace(get=lambda: True),
         editor_global_entries={
-            "Duración ms": value_entry(500), "Tamaño %": value_entry(25),
-            "X %": value_entry(50), "Y %": value_entry(50),
-            "Transparencia %": value_entry(100),
+            DURATION_LABEL: value_entry(500), SIZE_LABEL: value_entry(25),
+            X_LABEL: value_entry(50), Y_LABEL: value_entry(50),
+            OPACITY_LABEL: value_entry(100),
         },
         editor_global_ratio=SimpleNamespace(get=lambda: "9:16"),
         editor_global_position=SimpleNamespace(get=lambda: "Manual X/Y"),
@@ -64,9 +115,11 @@ def _editor_fake(video_paths, timeline_fps=60, timeline_frame=299):
         editor_timeline_slider=_FakeSlider(timeline_frame),
         editor_timeline_changed=lambda _frame: None,
         editor_video_info={
-            video_paths[0]: {"duration": 10, "fps": 24},
-            video_paths[1]: {"duration": 10, "fps": 60},
+            path: {"duration": 10, "fps": 24 if index == 0 else 60}
+            for index, path in enumerate(video_paths)
         },
+        editor_timeline_map={"Timeline": video_paths[0]},
+        editor_timeline_video=_FakeCombo("Timeline"),
         editor_status=SimpleNamespace(configure=lambda **_kwargs: None),
     )
     fake._editor_photo_video_batch_enabled = MethodType(
@@ -134,9 +187,9 @@ def test_editor_render_converts_shared_timestamp_for_every_source_fps(tmp_path):
 def test_editor_accepts_zero_size_as_an_invisible_overlay_and_keeps_100_percent():
     def config(size):
         entries = {
-            "Duración ms": _FakeEntry(500), "Tamaño %": _FakeEntry(size),
-            "X %": _FakeEntry(50), "Y %": _FakeEntry(50),
-            "Transparencia %": _FakeEntry(100),
+            DURATION_LABEL: _FakeEntry(500), SIZE_LABEL: _FakeEntry(size),
+            X_LABEL: _FakeEntry(50), Y_LABEL: _FakeEntry(50),
+            OPACITY_LABEL: _FakeEntry(100),
         }
         return InstagramAutoPro._editor_read_overlay_config(
             None, entries, SimpleNamespace(get=lambda: "9:16"),
@@ -194,9 +247,9 @@ def test_editor_collect_clamps_typed_multi_photo_video_timeline_to_five_seconds(
         editor_rows=[photo_row("a.png"), photo_row("b.png")],
         editor_global_enabled=SimpleNamespace(get=lambda: True),
         editor_global_entries={
-            "Duración ms": value_entry(500), "Tamaño %": value_entry(25),
-            "X %": value_entry(50), "Y %": value_entry(50),
-            "Transparencia %": value_entry(100),
+            DURATION_LABEL: value_entry(500), SIZE_LABEL: value_entry(25),
+            X_LABEL: value_entry(50), Y_LABEL: value_entry(50),
+            OPACITY_LABEL: value_entry(100),
         },
         editor_global_ratio=SimpleNamespace(get=lambda: "9:16"),
         editor_global_position=SimpleNamespace(get=lambda: "Manual X/Y"),
@@ -223,6 +276,181 @@ def test_editor_treats_any_multi_pair_selection_as_a_batch():
     assert method(None, ["v.mp4"], [{"photo": "a.png"}, {"photo": "b.png"}])
     assert method(None, ["v1.mp4", "v2.mp4"], [{"photo": "a.png"}])
     assert not method(None, ["v.mp4"], [{"photo": "a.png"}])
+
+
+def test_manual_timeline_target_overrides_global_frame_for_target_apply_and_preview():
+    fake = _editor_fake(["v.mp4"], timeline_frame=11)
+    fake.editor_rows[0]["Frame"] = _FakeEntry(12)
+    fake.editor_rows[1]["Frame"] = _FakeEntry(73)
+    fake.editor_rows[1]["manual_var"] = SimpleNamespace(get=lambda: True)
+    fake.editor_timeline_target = _FakeCombo("Foto 2", ["Foto 1", "Foto 2"])
+    fake.editor_timeline_target_changed = MethodType(
+        InstagramAutoPro.editor_timeline_target_changed, fake)
+    fake._editor_timeline_item = MethodType(InstagramAutoPro._editor_timeline_item, fake)
+    fake.editor_apply_timeline_frame = MethodType(
+        InstagramAutoPro.editor_apply_timeline_frame, fake)
+    workers = []
+
+    class CapturingWorker:
+        def __init__(self, _app, _done, task):
+            workers.append(task)
+
+        def start(self):
+            pass
+
+    InstagramAutoPro.editor_timeline_target_changed(fake, "Foto 2")
+    assert fake.editor_timeline_slider.get() == 73
+
+    fake.editor_timeline_slider.set(91)
+    InstagramAutoPro.editor_apply_timeline_frame(fake)
+
+    with patch("gui_premium_v7.os.path.isfile", return_value=True), patch(
+        "gui_premium_v7.WorkerThread", CapturingWorker
+    ), patch("video_editor.render_preview", return_value=("preview.png", 91 / 60)) as preview:
+        InstagramAutoPro.editor_preview_timeline(fake)
+        workers[0]()
+
+    assert fake.editor_rows[0]["Frame"].get() == "12"
+    assert fake.editor_rows[1]["Frame"].get() == "91"
+    assert preview.call_args.args[1][0]["photo"] == "b.png"
+    assert preview.call_args.kwargs["timestamp"] == 91 / 60
+
+
+def test_multi_video_multi_photo_timeline_stays_shared_for_all_rows():
+    fake = _editor_fake(["v1.mp4", "v2.mp4"], timeline_frame=91)
+    fake.editor_rows[1]["manual_var"] = SimpleNamespace(get=lambda: True)
+    fake.editor_rows[1]["Frame"] = _FakeEntry(73)
+    fake.editor_timeline_target = _FakeCombo("Foto 2", ["Foto 1", "Foto 2"])
+    fake._editor_timeline_item = MethodType(InstagramAutoPro._editor_timeline_item, fake)
+
+    InstagramAutoPro.editor_timeline_target_changed(fake, "Foto 2")
+    InstagramAutoPro.editor_apply_timeline_frame(fake)
+
+    assert fake.editor_timeline_slider.get() == 91
+    assert [row["Frame"].get() for row in fake.editor_rows] == ["91", "91"]
+
+
+def test_editor_rows_reindex_labels_and_grid_rows_after_middle_remove_then_add():
+    labels = []
+
+    def label_factory(*args, **kwargs):
+        label = _FakeGuiWidget(*args, **kwargs)
+        labels.append(label)
+        return label
+
+    first, middle, third = (_FakeGuiWidget() for _ in range(3))
+    first_label = _FakeGuiWidget(text="Foto 1")
+    middle_label = _FakeGuiWidget(text="Foto 2")
+    third_label = _FakeGuiWidget(text="Foto 3")
+    for row, grid_row in zip((first, middle, third), (2, 3, 4)):
+        row.grid(row=grid_row)
+    fake = SimpleNamespace(
+        editor_rows_frame=_FakeGuiWidget(),
+        editor_rows=[
+            {"frame": first, "label": first_label},
+            {"frame": middle, "label": middle_label},
+            {"frame": third, "label": third_label},
+        ],
+        _editor_refresh_timeline_targets=lambda: None,
+        _editor_refresh_config_modes=lambda: None,
+        _editor_update_timeline_range=lambda: None,
+    )
+    fake._editor_reindex_rows = MethodType(InstagramAutoPro._editor_reindex_rows, fake)
+    fake_ctk = SimpleNamespace(
+        CTkFrame=_FakeGuiWidget,
+        CTkLabel=label_factory,
+        CTkEntry=_FakeGuiWidget,
+        CTkButton=_FakeGuiWidget,
+        CTkSwitch=_FakeGuiWidget,
+        CTkComboBox=_FakeGuiWidget,
+        CTkSlider=_FakeGuiWidget,
+        CTkFont=lambda **_kwargs: None,
+    )
+
+    with patch("gui_premium_v7.ctk", fake_ctk), patch(
+        "gui_premium_v7.tk.BooleanVar", return_value=SimpleNamespace(get=lambda: False)
+    ):
+        InstagramAutoPro.editor_remove_row(fake, middle)
+        InstagramAutoPro.editor_add_row(fake)
+
+    photo_labels = [first_label, third_label, *[label for label in labels if label.text.startswith("Foto ")]]
+    assert [label.text for label in photo_labels] == ["Foto 1", "Foto 2", "Foto 3"]
+    assert [item["frame"].grid_calls[-1]["row"] for item in fake.editor_rows] == [2, 3, 4]
+
+
+def test_render_video_error_names_render_paths_and_bounded_stderr():
+    stderr = "discard-this-prefix-" + "x" * 1900 + "render-tail"
+    result = SimpleNamespace(returncode=1, stderr=stderr)
+
+    with patch("video_editor.probe_video", return_value={"width": 100, "height": 100, "fps": 30, "duration": 1}), patch(
+        "video_editor._run", return_value=result
+    ):
+        with pytest.raises(RuntimeError) as error:
+            render_video("source.mp4", "rendered.mp4", [{"photo": "photo.png", "frame": 0, "duration_ms": 100,
+                                                             "size": 25, "ratio": "1:1", "position": "Centro",
+                                                             "x": 50, "y": 50, "opacity": 100}])
+
+    text = str(error.value)
+    assert "render" in text.lower()
+    assert "source.mp4" in text and "rendered.mp4" in text
+    assert "render-tail" in text and "discard-this-prefix-" not in text
+
+
+def test_render_preview_error_names_preview_input_and_bounded_stderr():
+    stderr = "discard-this-prefix-" + "x" * 1900 + "preview-tail"
+    result = SimpleNamespace(returncode=1, stderr=stderr)
+
+    with patch("video_editor.probe_video", return_value={"width": 100, "height": 100, "fps": 30, "duration": 1}), patch(
+        "video_editor._run", return_value=result
+    ):
+        with pytest.raises(RuntimeError) as error:
+            video_editor.render_preview("source.mp4", [], output_path="preview.png", timestamp=0)
+
+    text = str(error.value)
+    assert "preview" in text.lower()
+    assert "source.mp4" in text
+    assert "preview-tail" in text and "discard-this-prefix-" not in text
+
+
+@pytest.mark.parametrize(
+    ("video_paths", "photo_paths", "expected_frame"),
+    [
+        (["v1.mp4", "v2.mp4"], ("a.png", "b.png"), 149),
+        (["v1.mp4"], ("a.png", "b.png"), 400),
+        (["v1.mp4", "v2.mp4"], ("a.png",), 400),
+        (["v1.mp4"], ("a.png",), 400),
+    ],
+)
+def test_editor_collect_only_clamps_typed_frames_for_multi_video_multi_photo(
+    video_paths, photo_paths, expected_frame,
+):
+    fake = _editor_fake(
+        video_paths, timeline_fps=30, timeline_frame=200, photo_paths=photo_paths,
+    )
+    for row in fake.editor_rows:
+        row["Frame"] = _FakeEntry(400)
+        row["manual_var"] = SimpleNamespace(get=lambda: True)
+
+    with patch("gui_premium_v7.os.path.isfile", return_value=True):
+        _videos, overlays = InstagramAutoPro._editor_collect(fake)
+
+    assert [overlay["frame"] for overlay in overlays] == [expected_frame] * len(photo_paths)
+    assert [row["Frame"].get() for row in fake.editor_rows] == [str(expected_frame)] * len(photo_paths)
+
+
+@pytest.mark.parametrize(("field", "value"), [(X_LABEL, 101), (Y_LABEL, -1)])
+def test_editor_rejects_typed_xy_values_outside_slider_range(field, value):
+    entries = {
+        DURATION_LABEL: _FakeEntry(500), SIZE_LABEL: _FakeEntry(25),
+        X_LABEL: _FakeEntry(50), Y_LABEL: _FakeEntry(50), OPACITY_LABEL: _FakeEntry(100),
+    }
+    entries[field] = _FakeEntry(value)
+
+    with pytest.raises(ValueError):
+        InstagramAutoPro._editor_read_overlay_config(
+            None, entries, SimpleNamespace(get=lambda: "9:16"),
+            SimpleNamespace(get=lambda: "Manual X/Y"), 0, "la Foto 1",
+        )
 
 
 def test_pairs_one_video_many_photos():

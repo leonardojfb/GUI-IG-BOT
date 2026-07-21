@@ -141,7 +141,11 @@ def render_video(input_path: str, output_path: str, overlays: list[dict]) -> str
             "-c:a", "aac", "-b:a", "192k", "-t", f"{info['duration']:.6f}", output_path]
     result = _run(cmd)
     if result.returncode:
-        raise RuntimeError(result.stderr[-1800:] or "FFmpeg no pudo renderizar el video.")
+        stderr = (result.stderr or "")[-1800:]
+        raise RuntimeError(
+            f"FFmpeg no pudo renderizar '{input_path}' en '{output_path}': "
+            f"{stderr or 'sin detalle de stderr.'}"
+        )
     return output_path
 
 
@@ -173,7 +177,11 @@ def render_preview(
         os.close(handle)
     result = _run(["ffmpeg", "-y", "-ss", str(timestamp), "-i", input_path, "-frames:v", "1", output_path])
     if result.returncode:
-        raise RuntimeError("No se pudo extraer un frame de preview.")
+        stderr = (result.stderr or "")[-1800:]
+        raise RuntimeError(
+            f"FFmpeg no pudo generar el preview de '{input_path}': "
+            f"{stderr or 'sin detalle de stderr.'}"
+        )
     canvas = Image.open(output_path).convert("RGBA")
     for item in overlays:
         if float(item["size"]) <= 0:

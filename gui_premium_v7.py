@@ -3415,11 +3415,17 @@ class InstagramAutoPro(ctk.CTk):
         self.editor_timeline_target.configure(values=choices)
         self.editor_timeline_target.set(current if current in choices else choices[0])
 
+    def _editor_reindex_rows(self):
+        for index, item in enumerate(self.editor_rows, start=1):
+            item["frame"].grid(row=index + 1, column=0, sticky="ew", padx=18, pady=6)
+            item["label"].configure(text=f"Foto {index}")
+
     def editor_timeline_target_changed(self, _choice):
-        if self.editor_global_enabled.get() or self._editor_photo_video_batch_enabled():
-            return
         item = self._editor_timeline_item()
-        if not item or not self.editor_timeline_info:
+        if (not item or self._editor_photo_video_batch_enabled()
+                or (self.editor_global_enabled.get() and not item["manual_var"].get())):
+            return
+        if not self.editor_timeline_info:
             return
         try:
             frame = max(0, float(item["Frame"].get()))
@@ -3433,7 +3439,8 @@ class InstagramAutoPro(ctk.CTk):
         if not item or not self.editor_timeline_info:
             return messagebox.showwarning("Timeline", "Elegí un video y una foto antes de aplicar el frame.")
         frame = str(round(float(self.editor_timeline_slider.get())))
-        apply_to_all = self.editor_global_enabled.get() or self._editor_photo_video_batch_enabled()
+        apply_to_all = (self._editor_photo_video_batch_enabled()
+                        or (self.editor_global_enabled.get() and not item["manual_var"].get()))
         targets = self.editor_rows if apply_to_all else [item]
         for target in targets:
             target["Frame"].delete(0, "end")
@@ -3564,8 +3571,9 @@ class InstagramAutoPro(ctk.CTk):
         row.grid(row=len(self.editor_rows) + 2, column=0, sticky="ew", padx=18, pady=6)
         row.grid_columnconfigure(1, weight=1)
         idx = len(self.editor_rows) + 1
-        ctk.CTkLabel(row, text=f"Foto {idx}", text_color=NEON_CYAN,
-                     font=ctk.CTkFont(size=12, weight="bold"), width=60).grid(row=0, column=0, rowspan=2, padx=12, pady=10)
+        photo_label = ctk.CTkLabel(row, text=f"Foto {idx}", text_color=NEON_CYAN,
+                                   font=ctk.CTkFont(size=12, weight="bold"), width=60)
+        photo_label.grid(row=0, column=0, rowspan=2, padx=12, pady=10)
         photo = ctk.CTkEntry(row, fg_color=BG_INPUT, border_color=BORDER, placeholder_text="Archivo de imagen")
         photo.grid(row=0, column=1, padx=6, pady=(10, 4), sticky="ew")
         ctk.CTkButton(row, text="Elegir fotos", width=90, command=lambda e=photo: self.editor_choose_photo(e)).grid(row=0, column=2, padx=6, pady=(10, 4))
@@ -3576,12 +3584,12 @@ class InstagramAutoPro(ctk.CTk):
         fields.grid(row=1, column=1, columnspan=2, sticky="ew", padx=6, pady=(0, 10))
         specs = [("Frame", "0"), ("Duración ms", "500"), ("Tamaño %", "25"), ("X %", "50"), ("Y %", "50"), ("Transparencia %", "100")]
         entries = {}
-        for col, (label, default) in enumerate(specs):
-            ctk.CTkLabel(fields, text=label, text_color=TEXT_MUTED, font=ctk.CTkFont(size=10)).grid(row=0, column=col, padx=3)
+        for col, (field_label, default) in enumerate(specs):
+            ctk.CTkLabel(fields, text=field_label, text_color=TEXT_MUTED, font=ctk.CTkFont(size=10)).grid(row=0, column=col, padx=3)
             ent = ctk.CTkEntry(fields, width=74, fg_color=BG_INPUT, border_color=BORDER)
             ent.insert(0, default)
             ent.grid(row=1, column=col, padx=3)
-            entries[label] = ent
+            entries[field_label] = ent
         ratio = ctk.CTkComboBox(fields, values=["Original", "9:16", "1:1", "4:5", "16:9", "6:19"], width=100,
                                 fg_color=BG_INPUT, border_color=BORDER)
         ratio.set("9:16")
@@ -3614,8 +3622,9 @@ class InstagramAutoPro(ctk.CTk):
         ctk.CTkLabel(fields, text="Posición", text_color=TEXT_MUTED, font=ctk.CTkFont(size=10)).grid(row=0, column=7, padx=3)
         ctk.CTkButton(row, text="✕", width=28, fg_color=DANGER, command=lambda r=row: self.editor_remove_row(r)).grid(row=0, column=4, rowspan=2, padx=10)
         config_controls = [*entries.values(), ratio, position, x_slider, y_slider]
-        self.editor_rows.append({"frame": row, "photo": photo, "ratio": ratio, "position": position,
+        self.editor_rows.append({"frame": row, "label": photo_label, "photo": photo, "ratio": ratio, "position": position,
                                  "manual_var": manual_var, "config_controls": config_controls, **entries})
+        self._editor_reindex_rows()
         self._editor_refresh_timeline_targets()
         self._editor_refresh_config_modes()
         self._editor_update_timeline_range()
@@ -3639,6 +3648,7 @@ class InstagramAutoPro(ctk.CTk):
         if item:
             self.editor_rows.remove(item)
             row.destroy()
+            self._editor_reindex_rows()
             self._editor_refresh_timeline_targets()
             self._editor_update_timeline_range()
 
@@ -3647,7 +3657,11 @@ class InstagramAutoPro(ctk.CTk):
             values = {key: float(entries[key].get()) for key in ["Duración ms", "Tamaño %", "X %", "Y %", "Transparencia %"]}
         except ValueError:
             raise ValueError(f"Los valores numéricos de {label} no son válidos.")
-        if frame < 0 or values["Duración ms"] <= 0 or not 0 <= values["Tamaño %"] <= 100 or not 0 <= values["Transparencia %"] <= 100:
+        if (frame < 0 or values["Duración ms"] <= 0
+                or not 0 <= values["Tamaño %"] <= 100
+                or not 0 <= values["X %"] <= 100
+                or not 0 <= values["Y %"] <= 100
+                or not 0 <= values["Transparencia %"] <= 100):
             raise ValueError(f"Revisá frame, duración, tamaño y transparencia de {label}.")
         return {"frame": int(frame), "duration_ms": values["Duración ms"], "size": values["Tamaño %"],
                 "x": values["X %"], "y": values["Y %"], "opacity": values["Transparencia %"],
