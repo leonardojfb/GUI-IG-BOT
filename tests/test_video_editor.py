@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
+import video_editor
 from video_editor import _ratio_size, _xy, build_photo_video_pairs, render_video
 from gui_premium_v7 import InstagramAutoPro
 
@@ -106,6 +107,18 @@ def test_pairs_are_photo_major():
     ]
 
 
+def test_run_bounds_timeout_and_reports_external_process_timeout():
+    command = ["ffmpeg", "-version"]
+    with patch(
+        "video_editor.subprocess.run",
+        side_effect=subprocess.TimeoutExpired(command, 60),
+    ) as run:
+        with pytest.raises(RuntimeError, match="super[oó] el tiempo"):
+            video_editor._run(command)
+
+    assert run.call_args.kwargs["timeout"] > 0
+
+
 @pytest.mark.parametrize("video_count,photo_count,expected", [(1, 3, 3), (3, 1, 3), (2, 2, 4)])
 def test_pair_count_equals_photo_times_video(video_count, photo_count, expected):
     videos = [f"v{index}.mp4" for index in range(video_count)]
@@ -122,12 +135,14 @@ def test_cartesian_smoke_renders_one_file_per_pair(tmp_path):
             ["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c={color}:s=160x240:r=10", "-t", "1", str(video)],
             check=True,
             capture_output=True,
+            timeout=15,
         )
     for color, photo in zip(("red", "blue"), photos):
         subprocess.run(
             ["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c={color}:s=60x100", "-frames:v", "1", str(photo)],
             check=True,
             capture_output=True,
+            timeout=15,
         )
     overlays = [
         {

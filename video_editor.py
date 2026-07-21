@@ -13,6 +13,7 @@ import tempfile
 from pathlib import Path
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+EXTERNAL_PROCESS_TIMEOUT_SECONDS = 300
 
 
 def build_photo_video_pairs(videos: list[str], overlays: list[dict]) -> list[tuple[str, dict, int]]:
@@ -24,7 +25,19 @@ def build_photo_video_pairs(videos: list[str], overlays: list[dict]) -> list[tup
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, capture_output=True, text=True, creationflags=_NO_WINDOW)
+    try:
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            creationflags=_NO_WINDOW,
+            timeout=EXTERNAL_PROCESS_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError(
+            "El proceso de FFmpeg/FFprobe superó el tiempo límite de "
+            f"{EXTERNAL_PROCESS_TIMEOUT_SECONDS} segundos. Revisá el archivo e intentá nuevamente."
+        ) from error
 
 
 def probe_video(path: str) -> dict:
