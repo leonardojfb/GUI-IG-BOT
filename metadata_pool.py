@@ -366,6 +366,7 @@ def generate_variant_params(
         "contrast":      r.uniform(co_lo, co_hi) if en["color"] else 1.0,
         "saturation":    r.uniform(sa_lo, sa_hi) if en["color"] else 1.0,
         "gamma":         r.uniform(ga_lo, ga_hi) if en["color"] else 1.0,
+        # Piso 4: niveles 2-3 quedan casi borrados por la compresión CRF 20.
         "noise":         max(4, r.randint(round(no_lo), round(no_hi))) if (en["noise"] and fires(0.4)) else 0,
         "speed":         r.uniform(sp_lo, sp_hi) if (en["speed"] and fires(0.5)) else 1.0,
         "trim_start_ms": r.randint(round(tr_lo), round(tr_hi)) if en["trim"] else 0,
