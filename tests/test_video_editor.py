@@ -1,7 +1,11 @@
+from pathlib import Path
+import subprocess
 from types import MethodType, SimpleNamespace
 from unittest.mock import patch
 
-from video_editor import _ratio_size, _xy, build_photo_video_pairs
+import pytest
+
+from video_editor import _ratio_size, _xy, build_photo_video_pairs, render_video
 from gui_premium_v7 import InstagramAutoPro
 
 
@@ -100,6 +104,46 @@ def test_pairs_are_photo_major():
         ("v1.mp4", "a.png", 1), ("v2.mp4", "a.png", 1),
         ("v1.mp4", "b.png", 2), ("v2.mp4", "b.png", 2),
     ]
+
+
+@pytest.mark.parametrize("video_count,photo_count,expected", [(1, 3, 3), (3, 1, 3), (2, 2, 4)])
+def test_pair_count_equals_photo_times_video(video_count, photo_count, expected):
+    videos = [f"v{index}.mp4" for index in range(video_count)]
+    overlays = [{"photo": f"p{index}.png"} for index in range(photo_count)]
+
+    assert len(build_photo_video_pairs(videos, overlays)) == expected
+
+
+def test_cartesian_smoke_renders_one_file_per_pair(tmp_path):
+    videos = [tmp_path / "a.mp4", tmp_path / "b.mp4"]
+    photos = [tmp_path / "a.png", tmp_path / "b.png"]
+    for color, video in zip(("black", "white"), videos):
+        subprocess.run(
+            ["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c={color}:s=160x240:r=10", "-t", "1", str(video)],
+            check=True,
+            capture_output=True,
+        )
+    for color, photo in zip(("red", "blue"), photos):
+        subprocess.run(
+            ["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c={color}:s=60x100", "-frames:v", "1", str(photo)],
+            check=True,
+            capture_output=True,
+        )
+    overlays = [
+        {
+            "photo": str(photo), "frame": 0, "duration_ms": 250, "size": 25,
+            "x": 50, "y": 50, "opacity": 100, "ratio": "9:16",
+            "position": "Manual X/Y",
+        }
+        for photo in photos
+    ]
+    outputs = []
+    for source, overlay, index in build_photo_video_pairs([str(video) for video in videos], overlays):
+        output = tmp_path / f"{Path(source).stem}_foto{index:02d}.mp4"
+        render_video(source, str(output), [overlay])
+        outputs.append(output)
+
+    assert len(outputs) == 4 and all(output.stat().st_size > 0 for output in outputs)
 
 
 def test_full_size_covers_the_complete_video_frame():
