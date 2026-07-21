@@ -273,6 +273,35 @@ DEFAULT_VARIANT_EFFECTS = {
 }
 
 
+# ── Presets de los dos ejes de Forge ─────────────────────────────────────────
+EFECTOS_PRESETS = {
+    "Default": {"crop", "zoom", "rotate", "color", "noise", "speed", "trim"},   # 7, sin mirror
+    "Light":   {"color", "trim"},
+    "Medio":   {"crop", "color", "noise", "speed", "trim"},
+    "Alto":    {"crop", "mirror", "zoom", "rotate", "color", "noise", "speed", "trim"},
+}
+FUERZA_PRESETS = {"Default": 1.0, "Light": 0.5, "Medio": 1.0, "Alto": 2.4}
+
+
+def efectos_to_enabled(level: str, fx_vars: "dict | None" = None) -> dict:
+    """Traduce un nivel del eje 'Efectos' (o 'Custom') al dict `enabled` de 8 claves.
+    'Custom' lee los 8 on/off de `fx_vars` (clave->bool). Nivel desconocido -> Default."""
+    if level == "Custom":
+        vals = fx_vars or {}
+        return {k: bool(vals.get(k, DEFAULT_VARIANT_EFFECTS[k])) for k in DEFAULT_VARIANT_EFFECTS}
+    on = EFECTOS_PRESETS.get(level, EFECTOS_PRESETS["Default"])
+    return {k: (k in on) for k in DEFAULT_VARIANT_EFFECTS}
+
+
+def fuerza_to_strength(level: str, slider_pct: float = 50.0) -> float:
+    """Traduce un nivel del eje 'Fuerza' (o 'Custom') a un float strength.
+    'Custom' mapea slider_pct∈[0,100] a [0.3, 2.5] lineal. Nivel desconocido -> 1.0."""
+    if level == "Custom":
+        pct = max(0.0, min(100.0, float(slider_pct)))
+        return round(0.3 + 0.022 * pct, 3)
+    return FUERZA_PRESETS.get(level, 1.0)
+
+
 def generate_variant_params(
     rng: "random.Random | None" = None,
     enabled: "dict | None" = None,
