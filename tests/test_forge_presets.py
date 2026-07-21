@@ -34,11 +34,36 @@ def test_fuerza_levels():
     assert fuerza_to_strength("Alto") == 2.4
 
 
-def test_fuerza_custom_slider_maps_0_to_100():
-    assert fuerza_to_strength("Custom", 0) == 0.3
-    assert fuerza_to_strength("Custom", 100) == 2.5
-    mid = fuerza_to_strength("Custom", 50)
-    assert 0.3 < mid < 2.5
+def test_fuerza_custom_slider_maps_around_neutral():
+    from metadata_pool import fuerza_to_strength
+    assert fuerza_to_strength("Custom", 0) == 0.0
+    assert fuerza_to_strength("Custom", 50) == 1.0
+    assert fuerza_to_strength("Custom", 100) == 2.0
+
+
+def test_parse_custom_ranges_valid():
+    from metadata_pool import parse_custom_ranges
+    r = parse_custom_ranges({"crop": ("2", "10"), "zoom": ("1.0", "1.05")})
+    assert r["crop"] == (2.0, 10.0)
+    assert r["zoom"] == (1.0, 1.05)
+
+
+def test_parse_custom_ranges_swaps_min_max():
+    from metadata_pool import parse_custom_ranges
+    assert parse_custom_ranges({"rotate": ("1.5", "-1.5")})["rotate"] == (-1.5, 1.5)
+
+
+def test_parse_custom_ranges_omits_blank_or_invalid():
+    from metadata_pool import parse_custom_ranges
+    r = parse_custom_ranges({"crop": ("", "10"), "noise": ("x", "8"), "trim": ("0", "150")})
+    assert "crop" not in r and "noise" not in r
+    assert r["trim"] == (0.0, 150.0)
+
+
+def test_parse_custom_ranges_empty():
+    from metadata_pool import parse_custom_ranges
+    assert parse_custom_ranges({}) == {}
+    assert parse_custom_ranges(None) == {}
 
 
 def test_unknown_levels_fall_back():

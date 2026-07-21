@@ -295,11 +295,28 @@ def efectos_to_enabled(level: str, fx_vars: "dict | None" = None) -> dict:
 
 def fuerza_to_strength(level: str, slider_pct: float = 50.0) -> float:
     """Traduce un nivel del eje 'Fuerza' (o 'Custom') a un float strength.
-    'Custom' mapea slider_pct∈[0,100] a [0.3, 2.5] lineal. Nivel desconocido -> 1.0."""
+    'Custom' mapea slider_pct∈[0,100] a strength centrado en el neutro: 0→0.0, 50→1.0, 100→2.0. Nivel desconocido -> 1.0."""
     if level == "Custom":
         pct = max(0.0, min(100.0, float(slider_pct)))
-        return round(0.3 + 0.022 * pct, 3)
+        return round(pct / 50.0, 3)
     return FUERZA_PRESETS.get(level, 1.0)
+
+
+def parse_custom_ranges(raw: "dict | None") -> dict:
+    """Valida las entradas min/max del panel Fuerza=Custom.
+    `raw` = {param: (min_str, max_str)}. Devuelve {param: (lo, hi)} float.
+    Omite un param si algún lado es vacío/inválido; ordena lo<=hi."""
+    out = {}
+    for param, pair in (raw or {}).items():
+        try:
+            lo = float(str(pair[0]).strip())
+            hi = float(str(pair[1]).strip())
+        except (TypeError, ValueError, IndexError):
+            continue
+        if lo > hi:
+            lo, hi = hi, lo
+        out[param] = (lo, hi)
+    return out
 
 
 def generate_variant_params(
