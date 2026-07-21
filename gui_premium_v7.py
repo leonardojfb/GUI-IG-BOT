@@ -3280,11 +3280,11 @@ class InstagramAutoPro(ctk.CTk):
         timeline.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(timeline, text="Timeline y frame", text_color=NEON_CYAN,
                      font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, padx=18, pady=(14, 8), sticky="w")
-        self.editor_timeline_video = ctk.CTkComboBox(timeline, values=["ElegÃ­ videos primero"],
+        self.editor_timeline_video = ctk.CTkComboBox(timeline, values=["Elegí videos primero"],
                                                       state="readonly", command=self.editor_timeline_video_changed,
                                                       fg_color=BG_INPUT, border_color=BORDER)
         self.editor_timeline_video.grid(row=0, column=1, padx=8, pady=(14, 8), sticky="ew")
-        self.editor_timeline_time = ctk.CTkLabel(timeline, text="ElegÃ­ un video para usar el timeline", text_color=TEXT_MUTED)
+        self.editor_timeline_time = ctk.CTkLabel(timeline, text="Elegí un video para usar el timeline", text_color=TEXT_MUTED)
         self.editor_timeline_time.grid(row=1, column=0, columnspan=2, padx=18, pady=(0, 4), sticky="w")
         self.editor_timeline_slider = ctk.CTkSlider(timeline, from_=0, to=1, number_of_steps=1,
                                                      command=self.editor_timeline_changed,
@@ -3459,6 +3459,7 @@ class InstagramAutoPro(ctk.CTk):
         if not info:
             return messagebox.showwarning("Timeline", "Elegí un video válido para el timeline.")
         timestamp = round(float(self.editor_timeline_slider.get())) / info["fps"]
+        overlays = self._editor_overlays_for_source(video, overlays)
         self.editor_status.configure(text="Generando preview del frame elegido…", text_color=WARNING)
 
         def task():
@@ -3646,14 +3647,17 @@ class InstagramAutoPro(ctk.CTk):
             values = {key: float(entries[key].get()) for key in ["Duración ms", "Tamaño %", "X %", "Y %", "Transparencia %"]}
         except ValueError:
             raise ValueError(f"Los valores numéricos de {label} no son válidos.")
-        if frame < 0 or values["Duración ms"] <= 0 or not 0 < values["Tamaño %"] <= 100 or not 0 <= values["Transparencia %"] <= 100:
+        if frame < 0 or values["Duración ms"] <= 0 or not 0 <= values["Tamaño %"] <= 100 or not 0 <= values["Transparencia %"] <= 100:
             raise ValueError(f"Revisá frame, duración, tamaño y transparencia de {label}.")
         return {"frame": int(frame), "duration_ms": values["Duración ms"], "size": values["Tamaño %"],
                 "x": values["X %"], "y": values["Y %"], "opacity": values["Transparencia %"],
                 "ratio": ratio.get(), "position": position.get()}
 
     def _editor_collect(self):
-        videos = [path for path in self.editor_video_paths if os.path.isfile(path)]
+        missing_videos = [path for path in self.editor_video_paths if not os.path.isfile(path)]
+        if missing_videos:
+            raise ValueError("No se encontraron los videos seleccionados: " + ", ".join(missing_videos))
+        videos = list(self.editor_video_paths)
         video = videos[0] if videos else ""
         if not video or not os.path.isfile(video):
             raise ValueError("Elegí un video base válido.")
@@ -3688,6 +3692,21 @@ class InstagramAutoPro(ctk.CTk):
                 self.editor_rows[index]["Frame"].insert(0, str(shared_frame))
         return videos, overlays
 
+    def _editor_overlays_for_source(self, source, overlays):
+        """Clone shared N x M overlays with frame numbers for one source FPS."""
+        if not self._editor_photo_video_batch_enabled() or not self.editor_timeline_info:
+            return overlays
+        import video_editor
+        source_info = self.editor_video_info.get(source)
+        if source_info is None:
+            source_info = video_editor.probe_video(source)
+            self.editor_video_info[source] = source_info
+        timestamp = round(float(self.editor_timeline_slider.get())) / self.editor_timeline_info["fps"]
+        return [
+            {**overlay, "frame": video_editor.timestamp_to_source_frame(timestamp, source_info["fps"])}
+            for overlay in overlays
+        ]
+
     def editor_preview(self):
         try:
             videos, overlays = self._editor_collect()
@@ -3700,6 +3719,7 @@ class InstagramAutoPro(ctk.CTk):
             except (IndexError, ValueError, AttributeError):
                 pass
         video = videos[0]
+        overlays = self._editor_overlays_for_source(video, overlays)
         self.editor_status.configure(text="Generando preview…", text_color=WARNING)
         def task():
             import video_editor
@@ -3740,7 +3760,8 @@ class InstagramAutoPro(ctk.CTk):
 
             for source, overlay, photo_index in pairs:
                 stem = os.path.splitext(os.path.basename(source))[0]
-                jobs.append((source, reserve_output(stem, f"foto{photo_index:02d}"), [overlay]))
+                source_overlays = self._editor_overlays_for_source(source, [overlay])
+                jobs.append((source, reserve_output(stem, f"foto{photo_index:02d}"), source_overlays))
             return self._editor_render_batch(jobs)
         video = videos[0]
         output = filedialog.asksaveasfilename(title="Guardar video editado", defaultextension=".mp4",
@@ -3761,7 +3782,7 @@ class InstagramAutoPro(ctk.CTk):
 
     def _editor_render_batch(self, jobs):
         """Render one job per requested video/photo combination."""
-        self.editor_status.configure(text=f"Renderizando {len(jobs)} videos con FFmpegâ€¦", text_color=WARNING)
+        self.editor_status.configure(text=f"Renderizando {len(jobs)} videos con FFmpeg…", text_color=WARNING)
 
         def task():
             import video_editor
@@ -3771,10 +3792,10 @@ class InstagramAutoPro(ctk.CTk):
             return completed
 
         def done(success, result):
-            self.editor_status.configure(text="âœ… Videos guardados" if success else "âŒ Error de render",
+            self.editor_status.configure(text="✅ Videos guardados" if success else "❌ Error de render",
                                          text_color=SUCCESS if success else DANGER)
             if success:
-                messagebox.showinfo("EdiciÃ³n completada",
+                messagebox.showinfo("Edición completada",
                                     f"{len(result)} videos guardados en:\n{os.path.dirname(result[0])}")
             else:
                 messagebox.showerror("Renderizar lote", result)

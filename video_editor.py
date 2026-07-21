@@ -24,6 +24,11 @@ def build_photo_video_pairs(videos: list[str], overlays: list[dict]) -> list[tup
     ]
 
 
+def timestamp_to_source_frame(timestamp: float, fps: float) -> int:
+    """Convert a shared timeline instant into the frame number of one source."""
+    return max(0, round(max(0.0, float(timestamp)) * max(0.0, float(fps))))
+
+
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(
@@ -38,6 +43,12 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
             "El proceso de FFmpeg/FFprobe superó el tiempo límite de "
             f"{EXTERNAL_PROCESS_TIMEOUT_SECONDS} segundos. Revisá el archivo e intentá nuevamente."
         ) from error
+    except OSError as error:
+        executable = cmd[0] if cmd else "FFmpeg/FFprobe"
+        raise RuntimeError(
+            f"No se pudo iniciar FFmpeg/FFprobe ({executable}). "
+            f"Verificá que esté instalado y disponible. Detalle: {error}"
+        ) from error
 
 
 def probe_video(path: str) -> dict:
@@ -47,7 +58,11 @@ def probe_video(path: str) -> dict:
         "-show_entries", "format=duration", "-of", "json", path,
     ])
     if result.returncode:
-        raise RuntimeError("No se pudo leer el video. Verificá que FFmpeg esté instalado.")
+        detail = (result.stderr or "").strip()[-600:]
+        message = f"No se pudo leer el video '{path}' con FFprobe."
+        if detail:
+            message += f" Detalle: {detail}"
+        raise RuntimeError(message)
     data = json.loads(result.stdout)
     stream = (data.get("streams") or [{}])[0]
     def number(value, fallback=0.0):
@@ -103,7 +118,7 @@ def _overlay_filter(info: dict, item: dict, input_index: int) -> str:
     x, y = _xy(info["width"], info["height"], ow, oh, item["position"], float(item["x"]), float(item["y"]))
     start = max(0, int(item["frame"]))
     end = start + max(1, round(float(item["duration_ms"]) * info["fps"] / 1000)) - 1
-    opacity = max(0, min(1, float(item["opacity"]) / 100))
+    opacity = 0 if float(item["size"]) <= 0 else max(0, min(1, float(item["opacity"]) / 100))
     return (f"[{input_index}:v]scale={ow}:{oh}:force_original_aspect_ratio=increase,"
             f"crop={ow}:{oh},format=rgba,"
             f"colorchannelmixer=aa={opacity}[ov{input_index}];"
@@ -161,6 +176,8 @@ def render_preview(
         raise RuntimeError("No se pudo extraer un frame de preview.")
     canvas = Image.open(output_path).convert("RGBA")
     for item in overlays:
+        if float(item["size"]) <= 0:
+            continue
         start = int(item["frame"]) / info["fps"]
         end = start + float(item["duration_ms"]) / 1000
         if not start <= timestamp <= end:

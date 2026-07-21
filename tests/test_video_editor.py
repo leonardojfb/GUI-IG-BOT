@@ -38,6 +38,143 @@ class _FakeSlider:
         self.value = value
 
 
+def _editor_fake(video_paths, timeline_fps=60, timeline_frame=299):
+    def value_entry(value):
+        return _FakeEntry(value)
+
+    def photo_row(photo):
+        return {
+            "photo": value_entry(photo),
+            "manual_var": SimpleNamespace(get=lambda: False),
+            "Frame": value_entry(0),
+        }
+
+    fake = SimpleNamespace(
+        editor_video_paths=video_paths,
+        editor_rows=[photo_row("a.png"), photo_row("b.png")],
+        editor_global_enabled=SimpleNamespace(get=lambda: True),
+        editor_global_entries={
+            "Duración ms": value_entry(500), "Tamaño %": value_entry(25),
+            "X %": value_entry(50), "Y %": value_entry(50),
+            "Transparencia %": value_entry(100),
+        },
+        editor_global_ratio=SimpleNamespace(get=lambda: "9:16"),
+        editor_global_position=SimpleNamespace(get=lambda: "Manual X/Y"),
+        editor_timeline_info={"duration": 10, "fps": timeline_fps},
+        editor_timeline_slider=_FakeSlider(timeline_frame),
+        editor_timeline_changed=lambda _frame: None,
+        editor_video_info={
+            video_paths[0]: {"duration": 10, "fps": 24},
+            video_paths[1]: {"duration": 10, "fps": 60},
+        },
+        editor_status=SimpleNamespace(configure=lambda **_kwargs: None),
+    )
+    fake._editor_photo_video_batch_enabled = MethodType(
+        InstagramAutoPro._editor_photo_video_batch_enabled, fake)
+    fake._editor_update_timeline_range = MethodType(
+        InstagramAutoPro._editor_update_timeline_range, fake)
+    fake._editor_read_overlay_config = MethodType(
+        InstagramAutoPro._editor_read_overlay_config, fake)
+    fake._editor_collect = MethodType(InstagramAutoPro._editor_collect, fake)
+    fake._editor_cartesian_batch = MethodType(InstagramAutoPro._editor_cartesian_batch, fake)
+    fake._editor_overlays_for_source = MethodType(
+        InstagramAutoPro._editor_overlays_for_source, fake)
+    return fake
+
+
+def test_timestamp_to_source_frame_converts_shared_60fps_moment_for_24fps_video():
+    timestamp = 299 / 60
+
+    assert timestamp < 5
+    assert video_editor.timestamp_to_source_frame(timestamp, 24) == 120
+
+
+def test_editor_preview_converts_shared_timestamp_to_the_preview_source_fps():
+    fake = _editor_fake(["v24.mp4", "v60.mp4"])
+    workers = []
+
+    class CapturingWorker:
+        def __init__(self, _app, _done, task):
+            workers.append(task)
+
+        def start(self):
+            pass
+
+    with patch("gui_premium_v7.os.path.isfile", return_value=True), patch(
+        "gui_premium_v7.WorkerThread", CapturingWorker
+    ), patch("video_editor.render_preview", return_value=("preview.png", 1.0)) as preview:
+        InstagramAutoPro.editor_preview(fake)
+        workers[0]()
+
+    preview.assert_called_once()
+    assert preview.call_args.args[1][0]["frame"] == 120
+
+
+def test_editor_render_converts_shared_timestamp_for_every_source_fps(tmp_path):
+    fake = _editor_fake(["v24.mp4", "v60.mp4"])
+    jobs = []
+
+    def capture_jobs(_self, planned_jobs):
+        jobs.extend(planned_jobs)
+        return "scheduled"
+
+    fake._editor_render_batch = MethodType(capture_jobs, fake)
+    with patch("gui_premium_v7.os.path.isfile", return_value=True), patch(
+        "gui_premium_v7.os.path.exists", return_value=False
+    ), patch("gui_premium_v7.filedialog.askdirectory", return_value=str(tmp_path)):
+        assert InstagramAutoPro.editor_render(fake) == "scheduled"
+
+    assert [job[2][0]["frame"] for job in jobs] == [120, 299, 120, 299]
+    assert [row["Frame"].get() for row in fake.editor_rows] == ["299", "299"]
+
+
+def test_editor_accepts_zero_size_as_an_invisible_overlay_and_keeps_100_percent():
+    def config(size):
+        entries = {
+            "Duración ms": _FakeEntry(500), "Tamaño %": _FakeEntry(size),
+            "X %": _FakeEntry(50), "Y %": _FakeEntry(50),
+            "Transparencia %": _FakeEntry(100),
+        }
+        return InstagramAutoPro._editor_read_overlay_config(
+            None, entries, SimpleNamespace(get=lambda: "9:16"),
+            SimpleNamespace(get=lambda: "Manual X/Y"), 0, "la configuración global",
+        )
+
+    zero = config(0)
+    full = config(100)
+
+    assert zero["size"] == 0
+    assert "colorchannelmixer=aa=0" in video_editor._overlay_filter(
+        {"width": 1080, "height": 1920, "fps": 30}, zero, 1)
+    assert full["size"] == 100
+
+
+def test_editor_collect_reports_every_selected_video_that_disappeared():
+    fake = _editor_fake(["available.mp4", "missing.mp4"])
+
+    with patch("gui_premium_v7.os.path.isfile", side_effect=lambda path: path != "missing.mp4"):
+        with pytest.raises(ValueError, match="missing\\.mp4"):
+            InstagramAutoPro._editor_collect(fake)
+
+
+@pytest.mark.parametrize("error", [FileNotFoundError("ffmpeg"), OSError("access denied")])
+def test_run_turns_missing_executable_and_os_errors_into_actionable_runtime_errors(error):
+    with patch("video_editor.subprocess.run", side_effect=error):
+        with pytest.raises(RuntimeError, match="No se pudo iniciar.*FFmpeg/FFprobe"):
+            video_editor._run(["ffmpeg", "-version"])
+
+
+def test_probe_video_error_includes_stderr_and_source_path():
+    result = SimpleNamespace(returncode=1, stdout="", stderr="invalid video stream")
+
+    with patch("video_editor._run", return_value=result):
+        with pytest.raises(RuntimeError) as error:
+            video_editor.probe_video("broken-source.mp4")
+
+    assert "broken-source.mp4" in str(error.value)
+    assert "invalid video stream" in str(error.value)
+
+
 def test_editor_collect_clamps_typed_multi_photo_video_timeline_to_five_seconds():
     def value_entry(value):
         return _FakeEntry(value)
