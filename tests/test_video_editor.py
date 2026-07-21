@@ -77,8 +77,11 @@ def _editor_fake(video_paths, timeline_fps=60, timeline_frame=299):
         InstagramAutoPro._editor_read_overlay_config, fake)
     fake._editor_collect = MethodType(InstagramAutoPro._editor_collect, fake)
     fake._editor_cartesian_batch = MethodType(InstagramAutoPro._editor_cartesian_batch, fake)
+    def unchanged_overlays(_self, _source, overlays):
+        return overlays
+
     fake._editor_overlays_for_source = MethodType(
-        InstagramAutoPro._editor_overlays_for_source, fake)
+        getattr(InstagramAutoPro, "_editor_overlays_for_source", unchanged_overlays), fake)
     return fake
 
 
