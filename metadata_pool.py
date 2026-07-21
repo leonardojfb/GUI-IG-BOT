@@ -276,30 +276,36 @@ DEFAULT_VARIANT_EFFECTS = {
 def generate_variant_params(
     rng: "random.Random | None" = None,
     enabled: "dict | None" = None,
+    strength: float = 1.0,
 ) -> dict:
     """
-    Sortea una combinación de micro-ediciones. Cada llamada produce una mezcla
-    distinta (no todas las variantes se aplican siempre) para que el resultado
-    final de cada copia sea único por poco, no por una fórmula fija.
-    `enabled` permite apagar efectos individuales (claves de DEFAULT_VARIANT_EFFECTS);
-    un efecto apagado queda en su valor neutro y nunca se aplica.
+    Sortea una combinación de micro-ediciones. `enabled` (claves de
+    DEFAULT_VARIANT_EFFECTS) prende/apaga cada efecto. `strength` (float, default
+    1.0) escala la magnitud de cada rango desde su valor neutro y la probabilidad
+    de disparo de los efectos probabilísticos; strength=1.0 reproduce el
+    comportamiento histórico exacto.
     """
     r = rng or random
     en = {**DEFAULT_VARIANT_EFFECTS, **(enabled or {})}
+    s = max(0.0, float(strength))
+
+    def fires(p: float) -> bool:
+        return r.random() < min(1.0, p * s)
+
     return {
-        "crop_px":       r.randint(2, 10) if en["crop"] else 0,
-        "mirror":        bool(en["mirror"] and r.random() < 0.5),
-        "zoom_pct":      r.uniform(1.0, 1.05) if (en["zoom"] and r.random() < 0.7) else 1.0,
-        "rotate_deg":    r.uniform(-1.5, 1.5) if (en["rotate"] and r.random() < 0.6) else 0.0,
-        "brightness":    r.uniform(-0.03, 0.03) if en["color"] else 0.0,
-        "contrast":      r.uniform(0.94, 1.06) if en["color"] else 1.0,
-        "saturation":    r.uniform(0.90, 1.10) if en["color"] else 1.0,
-        "gamma":         r.uniform(0.95, 1.05) if en["color"] else 1.0,
-        # Mínimo 4: niveles 2-3 quedan casi borrados por la compresión CRF 20.
-        "noise":         r.randint(4, 8) if (en["noise"] and r.random() < 0.4) else 0,
-        "speed":         r.uniform(0.985, 1.015) if (en["speed"] and r.random() < 0.5) else 1.0,
-        "trim_start_ms": r.randint(0, 150) if en["trim"] else 0,
-        "trim_end_ms":   r.randint(0, 150) if en["trim"] else 0,
+        "crop_px":       r.randint(round(2 * s), round(10 * s)) if en["crop"] else 0,
+        "mirror":        bool(en["mirror"] and fires(0.5)),
+        "zoom_pct":      r.uniform(1.0, 1.0 + 0.05 * s) if (en["zoom"] and fires(0.7)) else 1.0,
+        "rotate_deg":    r.uniform(-1.5 * s, 1.5 * s) if (en["rotate"] and fires(0.6)) else 0.0,
+        "brightness":    r.uniform(-0.03 * s, 0.03 * s) if en["color"] else 0.0,
+        "contrast":      r.uniform(1.0 - 0.06 * s, 1.0 + 0.06 * s) if en["color"] else 1.0,
+        "saturation":    r.uniform(1.0 - 0.10 * s, 1.0 + 0.10 * s) if en["color"] else 1.0,
+        "gamma":         r.uniform(1.0 - 0.05 * s, 1.0 + 0.05 * s) if en["color"] else 1.0,
+        # Piso 4: niveles 2-3 quedan casi borrados por la compresión CRF 20.
+        "noise":         max(4, r.randint(round(4 * s), round(8 * s))) if (en["noise"] and fires(0.4)) else 0,
+        "speed":         r.uniform(1.0 - 0.015 * s, 1.0 + 0.015 * s) if (en["speed"] and fires(0.5)) else 1.0,
+        "trim_start_ms": r.randint(0, round(150 * s)) if en["trim"] else 0,
+        "trim_end_ms":   r.randint(0, round(150 * s)) if en["trim"] else 0,
     }
 
 
@@ -367,6 +373,7 @@ def apply_variant_and_metadata(
     meta: dict,
     rng: "random.Random | None" = None,
     enabled: "dict | None" = None,
+    strength: float = 1.0,
 ) -> dict:
     """
     Genera una copia realmente distinta a nivel de píxeles (recorte de bordes,
@@ -378,7 +385,7 @@ def apply_variant_and_metadata(
     Devuelve los parámetros usados (útil para logging/depuración).
     """
     width, height, duration, has_audio = _probe_video_info(input_path)
-    params = generate_variant_params(rng, enabled)
+    params = generate_variant_params(rng, enabled, strength)
 
     start = params["trim_start_ms"] / 1000.0
     end = params["trim_end_ms"] / 1000.0
