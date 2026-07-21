@@ -3657,6 +3657,8 @@ class InstagramAutoPro(ctk.CTk):
         video = videos[0] if videos else ""
         if not video or not os.path.isfile(video):
             raise ValueError("Elegí un video base válido.")
+        if self._editor_photo_video_batch_enabled() and self.editor_timeline_info:
+            self._editor_update_timeline_range()
         overlays = []
         global_enabled = self.editor_global_enabled.get()
         global_frame = round(float(self.editor_timeline_slider.get())) if self.editor_timeline_info else 0
