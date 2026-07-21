@@ -1,4 +1,12 @@
 from video_editor import _ratio_size, _xy, build_photo_video_pairs
+from gui_premium_v7 import InstagramAutoPro
+
+
+def test_editor_treats_any_multi_pair_selection_as_a_batch():
+    method = InstagramAutoPro._editor_cartesian_batch
+    assert method(None, ["v.mp4"], [{"photo": "a.png"}, {"photo": "b.png"}])
+    assert method(None, ["v1.mp4", "v2.mp4"], [{"photo": "a.png"}])
+    assert not method(None, ["v.mp4"], [{"photo": "a.png"}])
 
 
 def test_pairs_one_video_many_photos():
