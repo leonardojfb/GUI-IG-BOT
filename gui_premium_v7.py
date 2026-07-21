@@ -3945,10 +3945,47 @@ class InstagramAutoPro(ctk.CTk):
                          default="Default", command=self._forge_on_fuerza_change).grid(
                              row=9, column=0, columnspan=2, sticky="ew", padx=18, pady=(0, 6))
 
-        # Slider de Fuerza (solo visible en Custom)
-        self.forge_strength_slider = ctk.CTkSlider(card_cfg, from_=0, to=100, number_of_steps=100)
+        # Panel de Fuerza=Custom (slider general + rangos por efecto + espejo)
+        FORGE_RANGE_ROWS = [
+            ("crop",       "Recorte (px)",   "2",     "10"),
+            ("zoom",       "Zoom (factor)",  "1.00",  "1.05"),
+            ("rotate",     "Rotación (°)",   "-1.5",  "1.5"),
+            ("brightness", "Brillo (Δ)",     "-0.03", "0.03"),
+            ("contrast",   "Contraste (×)",  "0.94",  "1.06"),
+            ("saturation", "Saturación (×)", "0.90",  "1.10"),
+            ("gamma",      "Gamma (×)",      "0.95",  "1.05"),
+            ("noise",      "Grano",          "4",     "8"),
+            ("speed",      "Velocidad (×)",  "0.985", "1.015"),
+            ("trim",       "Trim (ms)",      "0",     "150"),
+        ]
+        self.forge_custom_panel = ctk.CTkFrame(card_cfg, fg_color="transparent")
+        self.forge_custom_panel.grid_columnconfigure(2, weight=1)
+        self._forge_custom_row = 10   # grid row inside card_cfg (reuse the old slider row)
+
+        ctk.CTkLabel(self.forge_custom_panel, text="Intensidad general", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11)).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 2))
+        self.forge_strength_slider = ctk.CTkSlider(self.forge_custom_panel, from_=0, to=100, number_of_steps=100)
         self.forge_strength_slider.set(50)
-        self._forge_strength_row = 10   # remembered so the callback can grid/ungrid it
+        self.forge_strength_slider.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(0, 8))
+
+        self.forge_range_entries = {}
+        for i, (param, label, dmin, dmax) in enumerate(FORGE_RANGE_ROWS):
+            rr = 2 + i
+            ctk.CTkLabel(self.forge_custom_panel, text=label, text_color=TEXT_BODY,
+                         font=ctk.CTkFont(size=11)).grid(row=rr, column=0, sticky="w", pady=2)
+            e_min = ctk.CTkEntry(self.forge_custom_panel, width=64, fg_color=BG_INPUT, border_color=BORDER)
+            e_min.insert(0, dmin)
+            e_min.grid(row=rr, column=1, padx=(8, 4), pady=2)
+            e_max = ctk.CTkEntry(self.forge_custom_panel, width=64, fg_color=BG_INPUT, border_color=BORDER)
+            e_max.insert(0, dmax)
+            e_max.grid(row=rr, column=2, sticky="w", padx=(4, 0), pady=2)
+            self.forge_range_entries[param] = (e_min, e_max)
+
+        self.forge_custom_mirror_var = tk.BooleanVar(value=False)
+        ctk.CTkCheckBox(self.forge_custom_panel, text="Espejo horizontal",
+                        variable=self.forge_custom_mirror_var,
+                        font=ctk.CTkFont(size=11), text_color=TEXT_BODY).grid(
+                            row=2 + len(FORGE_RANGE_ROWS), column=0, columnspan=3, sticky="w", pady=(6, 0))
 
         # — Micro-ediciones por copia (variant engine) —
         self.FORGE_FX_DEFS = [
@@ -4054,10 +4091,10 @@ class InstagramAutoPro(ctk.CTk):
     def _forge_on_fuerza_change(self, level: str) -> None:
         self.forge_fuerza_var.set(level)
         if level == "Custom":
-            self.forge_strength_slider.grid(row=self._forge_strength_row, column=0, columnspan=2,
-                                            sticky="ew", padx=18, pady=(0, 6))
-        elif self.forge_strength_slider.winfo_manager():
-            self.forge_strength_slider.grid_remove()
+            self.forge_custom_panel.grid(row=self._forge_custom_row, column=0, columnspan=2,
+                                         sticky="ew", padx=18, pady=(0, 6))
+        elif self.forge_custom_panel.winfo_manager():
+            self.forge_custom_panel.grid_remove()
 
     def _forge_reload_cats(self):
         cats = self.db.get_categories()
@@ -4153,8 +4190,15 @@ class InstagramAutoPro(ctk.CTk):
         import metadata_pool
         fx_vals = {key: var.get() for key, var in self.forge_fx_vars.items()}
         fx_enabled = metadata_pool.efectos_to_enabled(self.forge_efectos_var.get(), fx_vals)
-        forge_strength = metadata_pool.fuerza_to_strength(
-            self.forge_fuerza_var.get(), self.forge_strength_slider.get())
+        fuerza_level = self.forge_fuerza_var.get()
+        if fuerza_level == "Custom":
+            forge_strength = metadata_pool.fuerza_to_strength("Custom", self.forge_strength_slider.get())
+            forge_overrides = metadata_pool.parse_custom_ranges(
+                {p: (mn.get(), mx.get()) for p, (mn, mx) in self.forge_range_entries.items()})
+            fx_enabled["mirror"] = bool(self.forge_custom_mirror_var.get())
+        else:
+            forge_strength = metadata_pool.fuerza_to_strength(fuerza_level)
+            forge_overrides = None
         active_fx = [lbl for key, lbl in self.FORGE_FX_DEFS if fx_enabled[key]]
         fx_desc = ", ".join(active_fx) if active_fx else "ninguna (solo metadata, sin re-encode)"
 
@@ -4194,7 +4238,8 @@ class InstagramAutoPro(ctk.CTk):
                     out_name = f"{vid_id}__c{copy_num:02d}{ext}"
                     out_path = os.path.join(output_dir, out_name)
                     metadata_pool.apply_variant_and_metadata(vid_path, out_path, meta,
-                                                             enabled=fx_enabled, strength=forge_strength)
+                                                             enabled=fx_enabled, strength=forge_strength,
+                                                             overrides=forge_overrides)
                     db_ref.save_forge_video(tanda_name, filename, out_name, vh)
                     fingerprints.append({"video_hash": f"{vh}_{copy_num}", **meta})
                     meta_idx += 1
