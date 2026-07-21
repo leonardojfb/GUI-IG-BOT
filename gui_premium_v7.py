@@ -3354,6 +3354,29 @@ class InstagramAutoPro(ctk.CTk):
                   variable=self.forge_dist_var).grid(row=5, column=0, columnspan=2,
                                                      sticky="ew", padx=18, pady=(6, 4))
 
+        # ── Eje Efectos (qué efectos) ────────────────────────────────────
+        ctk.CTkLabel(card_cfg, text="Efectos", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11, weight="bold")).grid(
+                         row=6, column=0, columnspan=2, sticky="w", padx=18, pady=(8, 2))
+        self.forge_efectos_var = tk.StringVar(value="Default")
+        SegmentedControl(card_cfg, values=["Default", "Light", "Medio", "Alto", "Custom"],
+                         default="Default", command=self._forge_on_efectos_change).grid(
+                             row=7, column=0, columnspan=2, sticky="ew", padx=18, pady=(0, 6))
+
+        # ── Eje Fuerza (cuánta intensidad) ────────────────────────────────
+        ctk.CTkLabel(card_cfg, text="Fuerza", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11, weight="bold")).grid(
+                         row=8, column=0, columnspan=2, sticky="w", padx=18, pady=(4, 2))
+        self.forge_fuerza_var = tk.StringVar(value="Default")
+        SegmentedControl(card_cfg, values=["Default", "Light", "Medio", "Alto", "Custom"],
+                         default="Default", command=self._forge_on_fuerza_change).grid(
+                             row=9, column=0, columnspan=2, sticky="ew", padx=18, pady=(0, 6))
+
+        # Slider de Fuerza (solo visible en Custom)
+        self.forge_strength_slider = ctk.CTkSlider(card_cfg, from_=0, to=100, number_of_steps=100)
+        self.forge_strength_slider.set(50)
+        self._forge_strength_row = 10   # remembered so the callback can grid/ungrid it
+
         # — Micro-ediciones por copia (variant engine) —
         self.FORGE_FX_DEFS = [
             ("crop",   "Recorte de bordes"),
@@ -3366,7 +3389,7 @@ class InstagramAutoPro(ctk.CTk):
             ("trim",   "Recorte de ms"),
         ]
         fx_frame = ctk.CTkFrame(card_cfg, fg_color="transparent")
-        fx_frame.grid(row=6, column=0, columnspan=2, sticky="ew",
+        fx_frame.grid(row=11, column=0, columnspan=2, sticky="ew",
                       padx=18, pady=(4, 16))
         fx_frame.grid_columnconfigure(0, weight=1)
         fx_frame.grid_columnconfigure(1, weight=1)
@@ -3380,6 +3403,7 @@ class InstagramAutoPro(ctk.CTk):
             self.forge_fx_vars[key] = var
             ToggleRow(fx_frame, lbl, variable=var).grid(
                 row=1 + i // 2, column=i % 2, sticky="ew", padx=(0, 8), pady=3)
+        self.fx_frame = fx_frame
 
         # ── Tabla Preview ────────────────────────────────────────────────
         preview_card = ctk.CTkFrame(scroll, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
@@ -3441,6 +3465,26 @@ class InstagramAutoPro(ctk.CTk):
                                           font=ctk.CTkFont(size=11),
                                           text_color=TEXT_MUTED)
         self.forge_pb_lbl.grid(row=1, column=0, sticky="w")
+
+        # Estado inicial "Default": ocultar toggles manuales y slider de Custom.
+        self._forge_on_efectos_change("Default")
+        self._forge_on_fuerza_change("Default")
+
+    def _forge_on_efectos_change(self, level: str) -> None:
+        self.forge_efectos_var.set(level)
+        # Los 8 toggles manuales solo se muestran en Custom.
+        if level == "Custom":
+            self.fx_frame.grid()
+        elif self.fx_frame.winfo_manager():
+            self.fx_frame.grid_remove()
+
+    def _forge_on_fuerza_change(self, level: str) -> None:
+        self.forge_fuerza_var.set(level)
+        if level == "Custom":
+            self.forge_strength_slider.grid(row=self._forge_strength_row, column=0, columnspan=2,
+                                            sticky="ew", padx=18, pady=(0, 6))
+        elif self.forge_strength_slider.winfo_manager():
+            self.forge_strength_slider.grid_remove()
 
     def _forge_reload_cats(self):
         cats = self.db.get_categories()
@@ -3533,7 +3577,11 @@ class InstagramAutoPro(ctk.CTk):
 
         # Leer checkboxes de micro-ediciones en el hilo principal (tk vars no
         # son seguras desde el worker).
-        fx_enabled = {key: var.get() for key, var in self.forge_fx_vars.items()}
+        import metadata_pool
+        fx_vals = {key: var.get() for key, var in self.forge_fx_vars.items()}
+        fx_enabled = metadata_pool.efectos_to_enabled(self.forge_efectos_var.get(), fx_vals)
+        forge_strength = metadata_pool.fuerza_to_strength(
+            self.forge_fuerza_var.get(), self.forge_strength_slider.get())
         active_fx = [lbl for key, lbl in self.FORGE_FX_DEFS if fx_enabled[key]]
         fx_desc = ", ".join(active_fx) if active_fx else "ninguna (solo metadata, sin re-encode)"
 
@@ -3572,7 +3620,8 @@ class InstagramAutoPro(ctk.CTk):
                     meta = meta_list[meta_idx]
                     out_name = f"{vid_id}__c{copy_num:02d}{ext}"
                     out_path = os.path.join(output_dir, out_name)
-                    metadata_pool.apply_variant_and_metadata(vid_path, out_path, meta, enabled=fx_enabled)
+                    metadata_pool.apply_variant_and_metadata(vid_path, out_path, meta,
+                                                             enabled=fx_enabled, strength=forge_strength)
                     db_ref.save_forge_video(tanda_name, filename, out_name, vh)
                     fingerprints.append({"video_hash": f"{vh}_{copy_num}", **meta})
                     meta_idx += 1
