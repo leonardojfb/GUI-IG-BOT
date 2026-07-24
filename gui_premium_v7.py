@@ -634,6 +634,71 @@ class SelectionDialog(ctk.CTkToplevel):
             messagebox.showwarning("⚠️", "Selecciona o escribe algo.")
 
 
+def build_bulk_account_updates(category: str, assigned_va: str) -> dict:
+    """Construye el dict de campos a actualizar, ignorando 'Sin cambios'."""
+    updates = {}
+    if category and category != "Sin cambios":
+        updates["account_type"] = category
+    if assigned_va and assigned_va != "Sin cambios":
+        updates["assigned_va"] = assigned_va
+    return updates
+
+
+def resolve_selected_account_ids(accounts: list[dict], usernames: list[str]) -> list[int]:
+    """Resuelve los IDs de cuenta a partir de los usernames seleccionados en la tabla."""
+    selected = set(usernames)
+    return [account["id"] for account in accounts if account["username"] in selected]
+
+
+class BulkEditAccountsDialog(ctk.CTkToplevel):
+    """Diálogo para editar categoría y/o VA de varias cuentas seleccionadas a la vez."""
+    def __init__(self, parent, count, categories, vas):
+        super().__init__(parent)
+        self.title("Editar cuentas seleccionadas")
+        self.geometry("380x300")
+        self.configure(fg_color=BG_CARD)
+        self.result = None
+        self.transient(parent)
+        self.grab_set()
+        self.resizable(False, False)
+
+        plural = "s" if count != 1 else ""
+        ctk.CTkLabel(self, text=f"{count} cuenta{plural} seleccionada{plural}",
+                     font=ctk.CTkFont(size=13, weight="bold"),
+                     text_color=TEXT_H1).pack(pady=(20, 10), padx=20, anchor="w")
+
+        ctk.CTkLabel(self, text="Categoría:", font=ctk.CTkFont(size=11),
+                     text_color=TEXT_MUTED).pack(padx=20, anchor="w")
+        self.cat_menu = ctk.CTkOptionMenu(self, values=["Sin cambios"] + list(categories),
+                                          fg_color=BG_INPUT, button_color=NEON_CYAN)
+        self.cat_menu.set("Sin cambios")
+        self.cat_menu.pack(padx=20, pady=(4, 10), fill="x")
+
+        ctk.CTkLabel(self, text="VA:", font=ctk.CTkFont(size=11),
+                     text_color=TEXT_MUTED).pack(padx=20, anchor="w")
+        self.va_menu = ctk.CTkOptionMenu(self, values=["Sin cambios", "Sin Asignar"] + list(vas),
+                                         fg_color=BG_INPUT, button_color=NEON_CYAN)
+        self.va_menu.set("Sin cambios")
+        self.va_menu.pack(padx=20, pady=(4, 16), fill="x")
+
+        btn_row = ctk.CTkFrame(self, fg_color="transparent")
+        btn_row.pack(padx=20, fill="x")
+        ctk.CTkButton(btn_row, text="✅ Aplicar", fg_color=NEON_CYAN,
+                      text_color=BG_APP, hover_color="#00c9b0",
+                      corner_radius=BTN_RADIUS, command=self._confirm).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(btn_row, text="Cancelar", fg_color=BG_CARD2,
+                      text_color=TEXT_MUTED, hover_color=BORDER,
+                      corner_radius=BTN_RADIUS, command=self.destroy).pack(side="left")
+
+    def _confirm(self):
+        category = self.cat_menu.get()
+        assigned_va = self.va_menu.get()
+        if not build_bulk_account_updates(category, assigned_va):
+            messagebox.showwarning("⚠️", "Elige al menos un cambio.")
+            return
+        self.result = (category, assigned_va)
+        self.destroy()
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # APLICACIÓN PRINCIPAL
@@ -972,12 +1037,12 @@ class InstagramAutoPro(ctk.CTk):
             elif fr.winfo_manager():
                 fr.grid_remove()
         self._frames[name].tkraise()
-        if name == "Cuentas" and hasattr(self, "_acc_scroll"):
-            self._admin_load_accounts()
-        if name == "VerifyLegacy" and hasattr(self, "_verify_legacy_panel"):
-            self._verify_legacy_panel.refresh()
-        if name == "Tandas" and hasattr(self, "_tandas_list_scroll"):
-            self._refresh_tandas_list()
+        # Nota: NO recargar listas acá. Cada panel (Cuentas, VerifyLegacy,
+        # Tandas) reconstruye todas sus filas (CTkOptionMenu/CTkEntry por
+        # cuenta) destruyendo y recreando widgets — hacerlo en cada cambio de
+        # pestaña, aunque nada haya cambiado, es lo que colgaba la UI al
+        # navegar. Cada panel ya tiene su propio botón "Actualizar"/"Recargar
+        # lista" y se refresca solo tras acciones que sí modifican datos.
 
     # ── Reloj ─────────────────────────────────────────────────────────────
     def _build_updates_frame(self):
@@ -1181,6 +1246,10 @@ class InstagramAutoPro(ctk.CTk):
         self.kpi_videos  = self._make_kpi_card(kpi_row, "🎬", "Videos Enviados", "0", NEON_PURPLE, 1)
         self.kpi_vas     = self._make_kpi_card(kpi_row, "👥", "VAs Activos", "0", SUCCESS, 2)
 
+        # Orden de columna elegido por el usuario (persistido entre rebuilds)
+        self._dash_sort_col = None
+        self._dash_sort_reverse = False
+
         # ── Área Central (Tabla) ─────────────────────────────────────────
         center_row = ctk.CTkFrame(f, fg_color="transparent")
         center_row.grid(row=2, column=0, sticky="nsew", padx=24, pady=(14, 0))
@@ -1232,10 +1301,8 @@ class InstagramAutoPro(ctk.CTk):
         btn_bar = ctk.CTkFrame(f, fg_color="transparent")
         btn_bar.grid(row=3, column=0, sticky="ew", padx=24, pady=(10, 16))
 
-        GhostButton(btn_bar, text="Cambiar Categoría",
-                    command=self.change_account_category).pack(side="left", padx=(0, 8))
-        GhostButton(btn_bar, text="Reasignar VA",
-                    command=self.reassign_va).pack(side="left", padx=(0, 8))
+        GhostButton(btn_bar, text="Editar cuentas seleccionadas",
+                    command=self.bulk_edit_accounts).pack(side="left", padx=(0, 8))
         DangerButton(btn_bar, text="Eliminar",
                      command=self.delete_account).pack(side="left", padx=(0, 8))
         PrimaryButton(btn_bar, text="Actualizar",
@@ -1270,7 +1337,16 @@ class InstagramAutoPro(ctk.CTk):
 
     # ── Lógica Dashboard ─────────────────────────────────────────────────────
     def refresh_dashboard(self):
-        """Recarga la tabla y actualiza KPIs."""
+        """Recarga la tabla y actualiza KPIs. Solo se llama tras acciones que
+        modifican datos (borrar, reasignar, etc.) o al presionar 'Actualizar'
+        — no hay temporizador de fondo, así que la selección de filas y el
+        orden de columna solo cambian cuando el usuario lo pide."""
+        # delete()+insert() reconstruye filas con iids nuevos, perdiendo la
+        # selección; la recuperamos por username después de reinsertar.
+        selected_usernames = {
+            self.tree.item(iid)["values"][2].lstrip("@")
+            for iid in self.tree.selection()
+        }
         for item in self.tree.get_children():
             self.tree.delete(item)
 
@@ -1289,6 +1365,17 @@ class InstagramAutoPro(ctk.CTk):
                              values=(va, tg, f"@{acc['username']}",
                                      acc["account_type"], vids, fecha))
 
+        # Reaplicar el orden de columna elegido por el usuario (si lo hay);
+        # de lo contrario cada rebuild vuelve al orden crudo de la DB.
+        if self._dash_sort_col:
+            self._sort_tree(self.tree, self._dash_sort_col, self._dash_sort_reverse)
+
+        if selected_usernames:
+            restored = [iid for iid in self.tree.get_children()
+                        if self.tree.item(iid)["values"][2].lstrip("@") in selected_usernames]
+            if restored:
+                self.tree.selection_set(restored)
+
         # KPIs
         self.kpi_cuentas.configure(text=str(len(accounts)))
         self.kpi_videos.configure(text=str(total_videos))
@@ -1298,9 +1385,6 @@ class InstagramAutoPro(ctk.CTk):
         self._admin_refresh()
         if hasattr(self, "c_tandas"):
             self.reload_dist_lists()
-
-        # Auto-refresh en 30 segundos
-        self.after(30000, self.refresh_dashboard)
 
     def _filter_tree(self):
         """Filtra filas de la tabla por texto del buscador."""
@@ -1320,45 +1404,34 @@ class InstagramAutoPro(ctk.CTk):
         row = cur.fetchone()
         return row["tg_group_id"] if row and row["tg_group_id"] else "N/A"
 
-    def get_selected_account(self):
-        sel = self.tree.selection()
-        if not sel:
-            messagebox.showwarning("⚠️", "Selecciona una cuenta en la tabla.")
-            return None
-        return self.tree.item(sel[0])["values"][2].lstrip("@")
-
     def get_selected_accounts(self) -> list[str]:
         return [self.tree.item(iid)["values"][2].lstrip("@")
                 for iid in self.tree.selection()]
 
-    def change_account_category(self):
-        username = self.get_selected_account()
-        if not username:
+    def bulk_edit_accounts(self):
+        usernames = self.get_selected_accounts()
+        if not usernames:
+            messagebox.showwarning("⚠️", "Selecciona al menos una cuenta.")
             return
-        dialog = SelectionDialog(self, "Cambiar Categoría",
-                                 f"Nueva categoría para @{username}",
-                                 self.db.get_categories())
+        dialog = BulkEditAccountsDialog(self, len(usernames),
+                                        self.db.get_categories(), self.db.get_vas())
         self.wait_window(dialog)
-        if dialog.result:
-            cat = dialog.result.upper()
-            self.db.add_category(cat)
-            self.db.update_account(username, account_type=cat)
-            self.refresh_dashboard()
-            messagebox.showinfo("✅", "Categoría actualizada.")
-
-    def reassign_va(self):
-        username = self.get_selected_account()
-        if not username:
+        if not dialog.result:
             return
-        dialog = SelectionDialog(self, "Reasignar VA",
-                                 f"Asignar VA para @{username}",
-                                 self.db.get_vas())
-        self.wait_window(dialog)
-        if dialog.result:
-            self.db.add_va(dialog.result)
-            self.db.update_account(username, assigned_va=dialog.result)
-            self.refresh_dashboard()
-            messagebox.showinfo("✅", "VA actualizado.")
+        category, assigned_va = dialog.result
+        updates = build_bulk_account_updates(category, assigned_va)
+        if not updates:
+            return
+        if category != "Sin cambios":
+            self.db.add_category(category)
+        account_ids = resolve_selected_account_ids(self.db.get_all_accounts(), usernames)
+        try:
+            self.db.bulk_update_accounts(account_ids, **updates)
+        except Exception as exc:
+            messagebox.showerror("❌", f"No se pudo actualizar: {exc}")
+            return
+        self.refresh_dashboard()
+        messagebox.showinfo("✅", f"{len(account_ids)} cuenta(s) actualizada(s).")
 
     def delete_account(self):
         usernames = self.get_selected_accounts()
@@ -1385,6 +1458,9 @@ class InstagramAutoPro(ctk.CTk):
             tv.move(k, "", idx)
             tv.item(k, tags=("even" if idx % 2 == 0 else "odd",))
         tv.heading(col, command=lambda: self._sort_tree(tv, col, not reverse))
+        if tv is getattr(self, "tree", None):
+            self._dash_sort_col = col
+            self._dash_sort_reverse = reverse
 
     def _build_team_frame(self):
         """Panel Admin para VAs y categorías; las tandas se gestionan en su pestaña."""
@@ -2202,8 +2278,21 @@ class InstagramAutoPro(ctk.CTk):
 
     def _build_dist_cuentas_tab(self, parent):
         """Tab: bloques secuenciales — cada cuenta recibe un bloque distinto del pool."""
-        parent.grid_rowconfigure(5, weight=1)
+        parent.grid_rowconfigure(0, weight=1)
         parent.grid_columnconfigure(0, weight=1)
+
+        body = ctk.CTkScrollableFrame(parent, fg_color="transparent")
+        body.grid(row=0, column=0, sticky="nsew")
+        body.grid_columnconfigure(0, weight=1)
+
+        # Mismo fix que en Forge: sin esto, mouse/trackpad con delta chico de
+        # scroll (int(delta/6) trunca a 0 en CTkScrollableFrame) no mueve nada.
+        def _cuentas_wheel_fix(event):
+            if body.check_if_master_is_canvas(event.widget) and body._parent_canvas.yview() != (0.0, 1.0):
+                body._parent_canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+        body.bind_all("<MouseWheel>", _cuentas_wheel_fix, add="+")
+
+        parent = body
 
         # ── Diagrama visual ──────────────────────────────────────────────
         diag = Card(parent, title="Flujo de distribución por cuentas")
@@ -2320,7 +2409,7 @@ class InstagramAutoPro(ctk.CTk):
                       command=lambda: self._acct_dist_run(preview_only=False)).pack(side="left", padx=10)
 
         # ── Resultados ───────────────────────────────────────────────────
-        self.acct_dist_result = ctk.CTkTextbox(parent, fg_color=BG_CARD2,
+        self.acct_dist_result = ctk.CTkTextbox(parent, fg_color=BG_CARD2, height=200,
                                                 text_color=NEON_CYAN, font=FONT_MONO)
         self.acct_dist_result.grid(row=5, column=0, sticky="nsew", padx=16, pady=(0, 16))
 
@@ -3017,6 +3106,16 @@ class InstagramAutoPro(ctk.CTk):
 
         import organizadortg as telegram_bot
         cap_file = self.acct_cap_file or self.tandas_cap_file or None
+        if not cap_file and hasattr(self, "c_tandas"):
+            tanda = self.db.get_tanda_by_name(self.c_tandas.get().strip())
+            cap_file = (tanda or {}).get("captions_file_path") or None
+        if cap_file and not os.path.isfile(cap_file):
+            self.bot_log(f"⚠️ Archivo de captions no encontrado: {cap_file}", "WARNING")
+            cap_file = None
+        self.bot_log(
+            f"📝 Captions: {os.path.basename(cap_file) if cap_file else 'sin archivo'}",
+            "INFO",
+        )
         self.tg_controller = telegram_bot.TelegramBotController(date_str, selected_accounts, captions_file=cap_file)
         
         self.btn_start_tg.configure(state="disabled")
@@ -3831,6 +3930,14 @@ class InstagramAutoPro(ctk.CTk):
         scroll.grid(row=0, column=0, sticky="nsew")
         scroll.grid_columnconfigure(0, weight=1)
 
+        # CTkScrollableFrame divide el delta de la rueda entre 6 y trunca a
+        # int, así que mice/trackpads que mandan deltas chicos (smooth-scroll)
+        # terminan con paso 0 y la rueda no hace nada. Forzamos mínimo 1 unidad.
+        def _forge_wheel_fix(event):
+            if scroll.check_if_master_is_canvas(event.widget) and scroll._parent_canvas.yview() != (0.0, 1.0):
+                scroll._parent_canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+        scroll.bind_all("<MouseWheel>", _forge_wheel_fix, add="+")
+
         # ── Header ──────────────────────────────────────────────────────
         PageHeader(scroll, kicker="CONTENIDO", title="Forge de Metadata",
                    description="Inyecta fingerprints iPhone únicos · 276,000 combinaciones disponibles",
@@ -4224,6 +4331,7 @@ class InstagramAutoPro(ctk.CTk):
         self.forge_pb_lbl.configure(text="Procesando con FFmpeg...", text_color=WARNING)
 
         def task():
+            import re
             import metadata_pool
             os.makedirs(output_dir, exist_ok=True)
             fingerprints = []
@@ -4233,7 +4341,14 @@ class InstagramAutoPro(ctk.CTk):
                 base, ext = os.path.splitext(filename)
                 vid_id = base.replace(" ", "_").replace("__", "_")
                 vh = metadata_pool.get_video_hash(vid_path)
-                for copy_num in range(1, copies + 1):
+                existing_max = 0
+                copy_pattern = re.compile(rf"^{re.escape(vid_id)}__c(\d+){re.escape(ext)}$")
+                for fname in os.listdir(output_dir):
+                    m = copy_pattern.match(fname)
+                    if m:
+                        existing_max = max(existing_max, int(m.group(1)))
+                for offset in range(1, copies + 1):
+                    copy_num = existing_max + offset
                     meta = meta_list[meta_idx]
                     out_name = f"{vid_id}__c{copy_num:02d}{ext}"
                     out_path = os.path.join(output_dir, out_name)
