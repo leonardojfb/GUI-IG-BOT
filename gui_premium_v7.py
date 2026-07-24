@@ -2441,8 +2441,6 @@ class InstagramAutoPro(ctk.CTk):
             if hasattr(self, "acct_dist_cat"):
                 self.acct_dist_cat.configure(values=cats)
                 if not self.acct_dist_cat.get() and cats: self.acct_dist_cat.set(cats[0])
-            if hasattr(self, "c_forge_cat"):
-                self._forge_reload_cats()
         except Exception as e:
             print(f"⚠️ Error al refrescar listas dist: {e}")
 
@@ -4000,7 +3998,6 @@ class InstagramAutoPro(ctk.CTk):
         # has no .strip(), so this field MUST stay a CTkEntry.
         cfg_rows = [
             ("Nombre de tanda:",   "e_forge_tanda",   None,    None),
-            ("Categoría destino:", "c_forge_cat",      "combo", None),
             ("Copias por vídeo:",   "e_forge_copies",  None,    "stepper"),
             ("Días a distribuir:", "e_forge_days",     "MAX",   None),
         ]
@@ -4012,15 +4009,6 @@ class InstagramAutoPro(ctk.CTk):
                 widget = Stepper(card_cfg, value=4, min=1, max=50)
                 widget.grid(row=row_i, column=1, padx=(0, 18), pady=7, sticky="w")
                 setattr(self, attr, widget)
-            elif default == "combo":
-                widget = ctk.CTkComboBox(card_cfg, values=[], fg_color=BG_INPUT,
-                                         border_color=BORDER,
-                                         button_color=NEON_CYAN,
-                                         dropdown_fg_color=BG_CARD2)
-                widget.grid(row=row_i, column=1, padx=(0, 18), pady=7, sticky="ew")
-                setattr(self, attr, widget)
-                self.c_forge_cat = widget
-                self._forge_reload_cats()
             else:
                 widget = ctk.CTkEntry(card_cfg, fg_color=BG_INPUT,
                                       border_color=BORDER)
@@ -4028,11 +4016,6 @@ class InstagramAutoPro(ctk.CTk):
                     widget.insert(0, default)
                 widget.grid(row=row_i, column=1, padx=(0, 18), pady=7, sticky="ew")
                 setattr(self, attr, widget)
-
-        self.forge_dist_var = tk.BooleanVar(value=True)
-        ToggleRow(card_cfg, "Distribuir automáticamente al procesar",
-                  variable=self.forge_dist_var).grid(row=5, column=0, columnspan=2,
-                                                     sticky="ew", padx=18, pady=(6, 4))
 
         # ── Eje Efectos (qué efectos) ────────────────────────────────────
         ctk.CTkLabel(card_cfg, text="Efectos", text_color=TEXT_MUTED,
@@ -4203,13 +4186,6 @@ class InstagramAutoPro(ctk.CTk):
         elif self.forge_custom_panel.winfo_manager():
             self.forge_custom_panel.grid_remove()
 
-    def _forge_reload_cats(self):
-        cats = self.db.get_categories()
-        if hasattr(self, "c_forge_cat"):
-            self.c_forge_cat.configure(values=cats)
-            if cats and not self.c_forge_cat.get():
-                self.c_forge_cat.set(cats[0])
-
     def forge_add_videos(self):
         paths = filedialog.askopenfilenames(
             title="Seleccionar Videos",
@@ -4275,13 +4251,9 @@ class InstagramAutoPro(ctk.CTk):
             return messagebox.showwarning("⚠️", "Generá el preview primero.")
 
         tanda_name = self.e_forge_tanda.get().strip()
-        category   = self.c_forge_cat.get()
-        auto_dist  = self.forge_dist_var.get()
 
         if not tanda_name:
             return messagebox.showwarning("⚠️", "Ingresá un nombre para la tanda Forge.")
-        if not category:
-            return messagebox.showwarning("⚠️", "Seleccioná una categoría destino.")
         try:
             copies = int(self.e_forge_copies.get())
             if copies < 1:
@@ -4289,7 +4261,6 @@ class InstagramAutoPro(ctk.CTk):
         except ValueError:
             return messagebox.showwarning("⚠️", "Copias por vídeo debe ser un número >= 1.")
 
-        days_input = self.e_forge_days.get().strip() or "MAX"
         n_total = len(self.forge_video_paths) * copies
 
         # Leer checkboxes de micro-ediciones en el hilo principal (tk vars no
@@ -4312,9 +4283,7 @@ class InstagramAutoPro(ctk.CTk):
         if not messagebox.askyesno("Confirmar Forge", (
             f"¿Generar {len(self.forge_video_paths)} vídeos × {copies} copias = {n_total} archivos con metadata iPhone única?\n\n"
             f"Tanda: {tanda_name}\n"
-            f"Categoría: {category}\n"
-            f"Micro-ediciones: {fx_desc}\n"
-            f"Distribuir automáticamente: {'Sí' if auto_dist else 'No'}"
+            f"Micro-ediciones: {fx_desc}"
         )):
             return
 
@@ -4366,12 +4335,6 @@ class InstagramAutoPro(ctk.CTk):
                 f"📁 Guardados en: videos_finales/{tanda_name}/\n"
                 f"🔮 Tanda '{tanda_name}' registrada en la DB."
             )
-            if auto_dist:
-                import Organizador
-                dist_result = Organizador.distribute_tanda(
-                    tanda_name, category, copies, False, days_input
-                )
-                msg += f"\n\n{dist_result}"
             return msg
 
         def done(success, result):
