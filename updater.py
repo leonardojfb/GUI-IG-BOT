@@ -43,12 +43,14 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "database.py",
         "organizadortg.py",
         "videos.py",
+        "video_editor.py",
         "metadata_pool.py",
         "telegram_core.py",
         "cleaner.py",
         "vercuentas.py",
         "logo_elittisse.svg",
         "styles/colors.py",
+        "styles/components.py",
         "styles/__init__.py",
     }
 )
