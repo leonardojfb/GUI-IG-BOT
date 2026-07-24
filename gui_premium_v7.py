@@ -149,6 +149,11 @@ def build_bulk_account_updates(category: str, assigned_va: str) -> dict:
     return updates
 
 
+def resolve_selected_account_ids(accounts: list[dict], usernames: list[str]) -> list[int]:
+    selected = set(usernames)
+    return [account["id"] for account in accounts if account["username"] in selected]
+
+
 class AccountStatusPanel(ctk.CTkFrame):
     """Panel de control de cuentas IG con verificación HTTP sigilosa."""
 
@@ -1241,10 +1246,8 @@ class InstagramAutoPro(ctk.CTk):
         btn_bar = ctk.CTkFrame(f, fg_color="transparent")
         btn_bar.grid(row=3, column=0, sticky="ew", padx=24, pady=(10, 16))
 
-        GhostButton(btn_bar, text="Cambiar Categoría",
-                    command=self.change_account_category).pack(side="left", padx=(0, 8))
-        GhostButton(btn_bar, text="Reasignar VA",
-                    command=self.reassign_va).pack(side="left", padx=(0, 8))
+        GhostButton(btn_bar, text="Editar cuentas seleccionadas",
+                    command=self.bulk_edit_accounts).pack(side="left", padx=(0, 8))
         DangerButton(btn_bar, text="Eliminar",
                      command=self.delete_account).pack(side="left", padx=(0, 8))
         PrimaryButton(btn_bar, text="Actualizar",
@@ -1339,6 +1342,108 @@ class InstagramAutoPro(ctk.CTk):
     def get_selected_accounts(self) -> list[str]:
         return [self.tree.item(iid)["values"][2].lstrip("@")
                 for iid in self.tree.selection()]
+
+    def bulk_edit_accounts(self):
+        usernames = self.get_selected_accounts()
+        if not usernames:
+            messagebox.showwarning("⚠️", "Selecciona al menos una cuenta.")
+            return
+
+        categories = self.db.get_categories() or ["GENERAL"]
+        vas = self.db.get_vas()
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Editar cuentas seleccionadas")
+        dialog.geometry("430x300")
+        dialog.configure(fg_color=BG_CARD)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        ctk.CTkLabel(
+            dialog,
+            text=f"Editar {len(usernames)} cuenta(s)",
+            text_color=TEXT_H1,
+            font=ctk.CTkFont(size=16, weight="bold"),
+        ).pack(anchor="w", padx=24, pady=(22, 6))
+        ctk.CTkLabel(
+            dialog,
+            text="Elegí categoría, VA o ambos. ‘Sin cambios’ conserva el valor actual.",
+            text_color=TEXT_MUTED,
+            wraplength=380,
+        ).pack(anchor="w", padx=24, pady=(0, 16))
+
+        category_var = tk.StringVar(value="Sin cambios")
+        va_var = tk.StringVar(value="Sin cambios")
+        category_values = ["Sin cambios"] + categories
+        va_values = ["Sin cambios", "Sin Asignar"] + vas
+
+        fields = ctk.CTkFrame(dialog, fg_color="transparent")
+        fields.pack(fill="x", padx=24)
+        fields.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(fields, text="Categoría", text_color=TEXT_BODY).grid(
+            row=0, column=0, sticky="w", pady=6
+        )
+        ctk.CTkOptionMenu(
+            fields,
+            variable=category_var,
+            values=category_values,
+            fg_color=BG_INPUT,
+            button_color=BG_CARD2,
+            button_hover_color=BORDER,
+            text_color=TEXT_BODY,
+        ).grid(row=0, column=1, sticky="ew", padx=(16, 0), pady=6)
+        ctk.CTkLabel(fields, text="VA", text_color=TEXT_BODY).grid(
+            row=1, column=0, sticky="w", pady=6
+        )
+        ctk.CTkOptionMenu(
+            fields,
+            variable=va_var,
+            values=va_values,
+            fg_color=BG_INPUT,
+            button_color=BG_CARD2,
+            button_hover_color=BORDER,
+            text_color=TEXT_BODY,
+        ).grid(row=1, column=1, sticky="ew", padx=(16, 0), pady=6)
+
+        def confirm():
+            updates = build_bulk_account_updates(category_var.get(), va_var.get())
+            if not updates:
+                messagebox.showwarning(
+                    "Sin cambios", "Elegí una categoría, un VA o ambos.", parent=dialog
+                )
+                return
+            account_ids = resolve_selected_account_ids(self.db.get_all_accounts(), usernames)
+            if not account_ids:
+                messagebox.showwarning(
+                    "Cuentas no encontradas",
+                    "Las cuentas seleccionadas ya no están disponibles.",
+                    parent=dialog,
+                )
+                return
+            try:
+                if "account_type" in updates:
+                    self.db.add_category(updates["account_type"])
+                self.db.bulk_update_accounts(account_ids, **updates)
+            except Exception as exc:
+                messagebox.showerror(
+                    "Error",
+                    f"No se pudieron actualizar las cuentas: {exc}",
+                    parent=dialog,
+                )
+                return
+            dialog.destroy()
+            self.refresh_dashboard()
+            messagebox.showinfo(
+                "✅",
+                f"{len(account_ids)} cuenta(s) actualizada(s).",
+                parent=self,
+            )
+
+        buttons = ctk.CTkFrame(dialog, fg_color="transparent")
+        buttons.pack(fill="x", padx=24, pady=(22, 18))
+        GhostButton(buttons, text="Cancelar", command=dialog.destroy).pack(side="right")
+        PrimaryButton(buttons, text="Aplicar cambios", command=confirm).pack(
+            side="right", padx=(0, 8)
+        )
 
     def change_account_category(self):
         username = self.get_selected_account()

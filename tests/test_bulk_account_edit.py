@@ -7,7 +7,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from database import DatabaseManager
-from gui_premium_v7 import build_bulk_account_updates
+from gui_premium_v7 import build_bulk_account_updates, resolve_selected_account_ids
 
 
 class BulkAccountEditTest(unittest.TestCase):
@@ -52,6 +52,22 @@ class BulkAccountEditTest(unittest.TestCase):
             self.assertEqual(values["three"]["account_type"], "SUICIDE")
             self.assertEqual(values["three"]["assigned_va"], "Sin Asignar")
             db.close()
+
+
+class BulkAccountHandlerTest(unittest.TestCase):
+    def test_selected_usernames_resolve_to_database_ids(self):
+        rows = [
+            {"id": 10, "username": "one"},
+            {"id": 11, "username": "two"},
+            {"id": 12, "username": "three"},
+        ]
+        self.assertEqual(
+            resolve_selected_account_ids(rows, ["one", "three"]),
+            [10, 12],
+        )
+
+    def test_no_fields_means_no_database_call(self):
+        self.assertEqual(build_bulk_account_updates("Sin cambios", "Sin cambios"), {})
 
 
 if __name__ == "__main__":
