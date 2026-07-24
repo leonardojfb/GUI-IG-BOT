@@ -352,9 +352,9 @@ class InstagramOrganizerGUI:
         self.root.wait_window(dialog)
         
         if dialog.result:
-            cat_upper = dialog.result.upper()
-            self.db.add_category(cat_upper) 
-            self.db.update_account(username, account_type=cat_upper)
+            cat = dialog.result
+            self.db.add_category(cat)
+            self.db.update_account(username, account_type=cat)
             self.refresh_dashboard()
             messagebox.showinfo("✅", "Categoría actualizada.")
 
