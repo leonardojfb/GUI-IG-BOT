@@ -634,6 +634,71 @@ class SelectionDialog(ctk.CTkToplevel):
             messagebox.showwarning("⚠️", "Selecciona o escribe algo.")
 
 
+def build_bulk_account_updates(category: str, assigned_va: str) -> dict:
+    """Construye el dict de campos a actualizar, ignorando 'Sin cambios'."""
+    updates = {}
+    if category and category != "Sin cambios":
+        updates["account_type"] = category
+    if assigned_va and assigned_va != "Sin cambios":
+        updates["assigned_va"] = assigned_va
+    return updates
+
+
+def resolve_selected_account_ids(accounts: list[dict], usernames: list[str]) -> list[int]:
+    """Resuelve los IDs de cuenta a partir de los usernames seleccionados en la tabla."""
+    selected = set(usernames)
+    return [account["id"] for account in accounts if account["username"] in selected]
+
+
+class BulkEditAccountsDialog(ctk.CTkToplevel):
+    """Diálogo para editar categoría y/o VA de varias cuentas seleccionadas a la vez."""
+    def __init__(self, parent, count, categories, vas):
+        super().__init__(parent)
+        self.title("Editar cuentas seleccionadas")
+        self.geometry("380x300")
+        self.configure(fg_color=BG_CARD)
+        self.result = None
+        self.transient(parent)
+        self.grab_set()
+        self.resizable(False, False)
+
+        plural = "s" if count != 1 else ""
+        ctk.CTkLabel(self, text=f"{count} cuenta{plural} seleccionada{plural}",
+                     font=ctk.CTkFont(size=13, weight="bold"),
+                     text_color=TEXT_H1).pack(pady=(20, 10), padx=20, anchor="w")
+
+        ctk.CTkLabel(self, text="Categoría:", font=ctk.CTkFont(size=11),
+                     text_color=TEXT_MUTED).pack(padx=20, anchor="w")
+        self.cat_menu = ctk.CTkOptionMenu(self, values=["Sin cambios"] + list(categories),
+                                          fg_color=BG_INPUT, button_color=NEON_CYAN)
+        self.cat_menu.set("Sin cambios")
+        self.cat_menu.pack(padx=20, pady=(4, 10), fill="x")
+
+        ctk.CTkLabel(self, text="VA:", font=ctk.CTkFont(size=11),
+                     text_color=TEXT_MUTED).pack(padx=20, anchor="w")
+        self.va_menu = ctk.CTkOptionMenu(self, values=["Sin cambios", "Sin Asignar"] + list(vas),
+                                         fg_color=BG_INPUT, button_color=NEON_CYAN)
+        self.va_menu.set("Sin cambios")
+        self.va_menu.pack(padx=20, pady=(4, 16), fill="x")
+
+        btn_row = ctk.CTkFrame(self, fg_color="transparent")
+        btn_row.pack(padx=20, fill="x")
+        ctk.CTkButton(btn_row, text="✅ Aplicar", fg_color=NEON_CYAN,
+                      text_color=BG_APP, hover_color="#00c9b0",
+                      corner_radius=BTN_RADIUS, command=self._confirm).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(btn_row, text="Cancelar", fg_color=BG_CARD2,
+                      text_color=TEXT_MUTED, hover_color=BORDER,
+                      corner_radius=BTN_RADIUS, command=self.destroy).pack(side="left")
+
+    def _confirm(self):
+        category = self.cat_menu.get()
+        assigned_va = self.va_menu.get()
+        if not build_bulk_account_updates(category, assigned_va):
+            messagebox.showwarning("⚠️", "Elige al menos un cambio.")
+            return
+        self.result = (category, assigned_va)
+        self.destroy()
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # APLICACIÓN PRINCIPAL
@@ -865,6 +930,7 @@ class InstagramAutoPro(ctk.CTk):
 
         # — Navegación agrupada por flujo de trabajo —
         nav_groups = [
+            ("Edición",       [("🖼️   Edición de video", "VideoEditor")]),
             ("Contenido",    [("🔮   Forge", "Forge"), ("🎬   Tandas", "Tandas")]),
             ("Distribución", [("🚀   Logística", "Logistica"), ("📡   Cuentas", "Cuentas"),
                               ("📲   Telegram", "Telegram")]),
@@ -921,7 +987,7 @@ class InstagramAutoPro(ctk.CTk):
         container.grid_columnconfigure(0, weight=1)
         self._container = container
 
-        for name in ["Dashboard", "Equipo", "Tandas", "Logistica", "Telegram", "Cuentas", "VerifyLegacy", "AIAdvisor", "Forge", "Actualizaciones"]:
+        for name in ["Dashboard", "Equipo", "Tandas", "Logistica", "Telegram", "Cuentas", "VerifyLegacy", "AIAdvisor", "Forge", "VideoEditor", "Actualizaciones"]:
             f = ctk.CTkFrame(container, fg_color=BG_APP, corner_radius=0)
             f.grid(row=0, column=0, sticky="nsew")
             self._frames[name] = f
@@ -936,6 +1002,7 @@ class InstagramAutoPro(ctk.CTk):
         self._build_verify_legacy_frame()
         self._build_ai_frame()
         self._build_forge_frame()
+        self._build_video_editor_frame()
         self._build_updates_frame()
 
     # ── Status Bar ────────────────────────────────────────────────────────
@@ -970,12 +1037,12 @@ class InstagramAutoPro(ctk.CTk):
             elif fr.winfo_manager():
                 fr.grid_remove()
         self._frames[name].tkraise()
-        if name == "Cuentas" and hasattr(self, "_acc_scroll"):
-            self._admin_load_accounts()
-        if name == "VerifyLegacy" and hasattr(self, "_verify_legacy_panel"):
-            self._verify_legacy_panel.refresh()
-        if name == "Tandas" and hasattr(self, "_tandas_list_scroll"):
-            self._refresh_tandas_list()
+        # Nota: NO recargar listas acá. Cada panel (Cuentas, VerifyLegacy,
+        # Tandas) reconstruye todas sus filas (CTkOptionMenu/CTkEntry por
+        # cuenta) destruyendo y recreando widgets — hacerlo en cada cambio de
+        # pestaña, aunque nada haya cambiado, es lo que colgaba la UI al
+        # navegar. Cada panel ya tiene su propio botón "Actualizar"/"Recargar
+        # lista" y se refresca solo tras acciones que sí modifican datos.
 
     # ── Reloj ─────────────────────────────────────────────────────────────
     def _build_updates_frame(self):
@@ -1179,6 +1246,10 @@ class InstagramAutoPro(ctk.CTk):
         self.kpi_videos  = self._make_kpi_card(kpi_row, "🎬", "Videos Enviados", "0", NEON_PURPLE, 1)
         self.kpi_vas     = self._make_kpi_card(kpi_row, "👥", "VAs Activos", "0", SUCCESS, 2)
 
+        # Orden de columna elegido por el usuario (persistido entre rebuilds)
+        self._dash_sort_col = None
+        self._dash_sort_reverse = False
+
         # ── Área Central (Tabla) ─────────────────────────────────────────
         center_row = ctk.CTkFrame(f, fg_color="transparent")
         center_row.grid(row=2, column=0, sticky="nsew", padx=24, pady=(14, 0))
@@ -1230,10 +1301,8 @@ class InstagramAutoPro(ctk.CTk):
         btn_bar = ctk.CTkFrame(f, fg_color="transparent")
         btn_bar.grid(row=3, column=0, sticky="ew", padx=24, pady=(10, 16))
 
-        GhostButton(btn_bar, text="Cambiar Categoría",
-                    command=self.change_account_category).pack(side="left", padx=(0, 8))
-        GhostButton(btn_bar, text="Reasignar VA",
-                    command=self.reassign_va).pack(side="left", padx=(0, 8))
+        GhostButton(btn_bar, text="Editar cuentas seleccionadas",
+                    command=self.bulk_edit_accounts).pack(side="left", padx=(0, 8))
         DangerButton(btn_bar, text="Eliminar",
                      command=self.delete_account).pack(side="left", padx=(0, 8))
         PrimaryButton(btn_bar, text="Actualizar",
@@ -1268,7 +1337,16 @@ class InstagramAutoPro(ctk.CTk):
 
     # ── Lógica Dashboard ─────────────────────────────────────────────────────
     def refresh_dashboard(self):
-        """Recarga la tabla y actualiza KPIs."""
+        """Recarga la tabla y actualiza KPIs. Solo se llama tras acciones que
+        modifican datos (borrar, reasignar, etc.) o al presionar 'Actualizar'
+        — no hay temporizador de fondo, así que la selección de filas y el
+        orden de columna solo cambian cuando el usuario lo pide."""
+        # delete()+insert() reconstruye filas con iids nuevos, perdiendo la
+        # selección; la recuperamos por username después de reinsertar.
+        selected_usernames = {
+            self.tree.item(iid)["values"][2].lstrip("@")
+            for iid in self.tree.selection()
+        }
         for item in self.tree.get_children():
             self.tree.delete(item)
 
@@ -1287,6 +1365,17 @@ class InstagramAutoPro(ctk.CTk):
                              values=(va, tg, f"@{acc['username']}",
                                      acc["account_type"], vids, fecha))
 
+        # Reaplicar el orden de columna elegido por el usuario (si lo hay);
+        # de lo contrario cada rebuild vuelve al orden crudo de la DB.
+        if self._dash_sort_col:
+            self._sort_tree(self.tree, self._dash_sort_col, self._dash_sort_reverse)
+
+        if selected_usernames:
+            restored = [iid for iid in self.tree.get_children()
+                        if self.tree.item(iid)["values"][2].lstrip("@") in selected_usernames]
+            if restored:
+                self.tree.selection_set(restored)
+
         # KPIs
         self.kpi_cuentas.configure(text=str(len(accounts)))
         self.kpi_videos.configure(text=str(total_videos))
@@ -1296,9 +1385,6 @@ class InstagramAutoPro(ctk.CTk):
         self._admin_refresh()
         if hasattr(self, "c_tandas"):
             self.reload_dist_lists()
-
-        # Auto-refresh en 30 segundos
-        self.after(30000, self.refresh_dashboard)
 
     def _filter_tree(self):
         """Filtra filas de la tabla por texto del buscador."""
@@ -1318,45 +1404,34 @@ class InstagramAutoPro(ctk.CTk):
         row = cur.fetchone()
         return row["tg_group_id"] if row and row["tg_group_id"] else "N/A"
 
-    def get_selected_account(self):
-        sel = self.tree.selection()
-        if not sel:
-            messagebox.showwarning("⚠️", "Selecciona una cuenta en la tabla.")
-            return None
-        return self.tree.item(sel[0])["values"][2].lstrip("@")
-
     def get_selected_accounts(self) -> list[str]:
         return [self.tree.item(iid)["values"][2].lstrip("@")
                 for iid in self.tree.selection()]
 
-    def change_account_category(self):
-        username = self.get_selected_account()
-        if not username:
+    def bulk_edit_accounts(self):
+        usernames = self.get_selected_accounts()
+        if not usernames:
+            messagebox.showwarning("⚠️", "Selecciona al menos una cuenta.")
             return
-        dialog = SelectionDialog(self, "Cambiar Categoría",
-                                 f"Nueva categoría para @{username}",
-                                 self.db.get_categories())
+        dialog = BulkEditAccountsDialog(self, len(usernames),
+                                        self.db.get_categories(), self.db.get_vas())
         self.wait_window(dialog)
-        if dialog.result:
-            cat = dialog.result.upper()
-            self.db.add_category(cat)
-            self.db.update_account(username, account_type=cat)
-            self.refresh_dashboard()
-            messagebox.showinfo("✅", "Categoría actualizada.")
-
-    def reassign_va(self):
-        username = self.get_selected_account()
-        if not username:
+        if not dialog.result:
             return
-        dialog = SelectionDialog(self, "Reasignar VA",
-                                 f"Asignar VA para @{username}",
-                                 self.db.get_vas())
-        self.wait_window(dialog)
-        if dialog.result:
-            self.db.add_va(dialog.result)
-            self.db.update_account(username, assigned_va=dialog.result)
-            self.refresh_dashboard()
-            messagebox.showinfo("✅", "VA actualizado.")
+        category, assigned_va = dialog.result
+        updates = build_bulk_account_updates(category, assigned_va)
+        if not updates:
+            return
+        if category != "Sin cambios":
+            self.db.add_category(category)
+        account_ids = resolve_selected_account_ids(self.db.get_all_accounts(), usernames)
+        try:
+            self.db.bulk_update_accounts(account_ids, **updates)
+        except Exception as exc:
+            messagebox.showerror("❌", f"No se pudo actualizar: {exc}")
+            return
+        self.refresh_dashboard()
+        messagebox.showinfo("✅", f"{len(account_ids)} cuenta(s) actualizada(s).")
 
     def delete_account(self):
         usernames = self.get_selected_accounts()
@@ -1383,6 +1458,9 @@ class InstagramAutoPro(ctk.CTk):
             tv.move(k, "", idx)
             tv.item(k, tags=("even" if idx % 2 == 0 else "odd",))
         tv.heading(col, command=lambda: self._sort_tree(tv, col, not reverse))
+        if tv is getattr(self, "tree", None):
+            self._dash_sort_col = col
+            self._dash_sort_reverse = reverse
 
     def _build_team_frame(self):
         """Panel Admin para VAs y categorías; las tandas se gestionan en su pestaña."""
@@ -2200,8 +2278,21 @@ class InstagramAutoPro(ctk.CTk):
 
     def _build_dist_cuentas_tab(self, parent):
         """Tab: bloques secuenciales — cada cuenta recibe un bloque distinto del pool."""
-        parent.grid_rowconfigure(5, weight=1)
+        parent.grid_rowconfigure(0, weight=1)
         parent.grid_columnconfigure(0, weight=1)
+
+        body = ctk.CTkScrollableFrame(parent, fg_color="transparent")
+        body.grid(row=0, column=0, sticky="nsew")
+        body.grid_columnconfigure(0, weight=1)
+
+        # Mismo fix que en Forge: sin esto, mouse/trackpad con delta chico de
+        # scroll (int(delta/6) trunca a 0 en CTkScrollableFrame) no mueve nada.
+        def _cuentas_wheel_fix(event):
+            if body.check_if_master_is_canvas(event.widget) and body._parent_canvas.yview() != (0.0, 1.0):
+                body._parent_canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+        body.bind_all("<MouseWheel>", _cuentas_wheel_fix, add="+")
+
+        parent = body
 
         # ── Diagrama visual ──────────────────────────────────────────────
         diag = Card(parent, title="Flujo de distribución por cuentas")
@@ -2318,7 +2409,7 @@ class InstagramAutoPro(ctk.CTk):
                       command=lambda: self._acct_dist_run(preview_only=False)).pack(side="left", padx=10)
 
         # ── Resultados ───────────────────────────────────────────────────
-        self.acct_dist_result = ctk.CTkTextbox(parent, fg_color=BG_CARD2,
+        self.acct_dist_result = ctk.CTkTextbox(parent, fg_color=BG_CARD2, height=200,
                                                 text_color=NEON_CYAN, font=FONT_MONO)
         self.acct_dist_result.grid(row=5, column=0, sticky="nsew", padx=16, pady=(0, 16))
 
@@ -3015,6 +3106,16 @@ class InstagramAutoPro(ctk.CTk):
 
         import organizadortg as telegram_bot
         cap_file = self.acct_cap_file or self.tandas_cap_file or None
+        if not cap_file and hasattr(self, "c_tandas"):
+            tanda = self.db.get_tanda_by_name(self.c_tandas.get().strip())
+            cap_file = (tanda or {}).get("captions_file_path") or None
+        if cap_file and not os.path.isfile(cap_file):
+            self.bot_log(f"⚠️ Archivo de captions no encontrado: {cap_file}", "WARNING")
+            cap_file = None
+        self.bot_log(
+            f"📝 Captions: {os.path.basename(cap_file) if cap_file else 'sin archivo'}",
+            "INFO",
+        )
         self.tg_controller = telegram_bot.TelegramBotController(date_str, selected_accounts, captions_file=cap_file)
         
         self.btn_start_tg.configure(state="disabled")
@@ -3244,6 +3345,577 @@ class InstagramAutoPro(ctk.CTk):
 
 
     # ══════════════════════════════════════════════════════════════════════
+    # EDICIÓN DE VIDEO: FOTOS SOBRE FRAMES
+    def _build_video_editor_frame(self):
+        self.editor_rows = []
+        f = self._frames["VideoEditor"]
+        f.grid_rowconfigure(0, weight=1)
+        f.grid_columnconfigure(0, weight=1)
+        scroll = ctk.CTkScrollableFrame(f, fg_color="transparent")
+        scroll.grid(row=0, column=0, sticky="nsew")
+        scroll.grid_columnconfigure(0, weight=1)
+        PageHeader(scroll, kicker="CONTENIDO", title="Edición de video",
+                   description="Colocá una o varias fotos durante milisegundos en frames específicos",
+                   action=("Preview", self.editor_preview)).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 0))
+
+        source = ctk.CTkFrame(scroll, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        source.grid(row=1, column=0, sticky="ew", padx=24, pady=14)
+        source.grid_columnconfigure(1, weight=1)
+        self.editor_video_paths = []
+        self.editor_video_info = {}
+        self.editor_timeline_map = {}
+        self.editor_timeline_info = None
+        ctk.CTkLabel(source, text="Videos base", text_color=NEON_CYAN,
+                     font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, padx=18, pady=16, sticky="w")
+        self.editor_video = ctk.CTkEntry(source, fg_color=BG_INPUT, border_color=BORDER,
+                                         placeholder_text="Elegí un MP4 o MOV")
+        self.editor_video.grid(row=0, column=1, padx=8, pady=16, sticky="ew")
+        PrimaryButton(source, text="Elegir videos", command=self.editor_choose_video).grid(row=0, column=2, padx=18, pady=16)
+        self.editor_info = ctk.CTkLabel(source, text="Sin videos seleccionados", text_color=TEXT_MUTED)
+        self.editor_info.grid(row=1, column=0, columnspan=3, padx=18, pady=(0, 14), sticky="w")
+
+        timeline = ctk.CTkFrame(scroll, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        timeline.grid(row=2, column=0, sticky="ew", padx=24, pady=(0, 14))
+        timeline.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(timeline, text="Timeline y frame", text_color=NEON_CYAN,
+                     font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, padx=18, pady=(14, 8), sticky="w")
+        self.editor_timeline_video = ctk.CTkComboBox(timeline, values=["Elegí videos primero"],
+                                                      state="readonly", command=self.editor_timeline_video_changed,
+                                                      fg_color=BG_INPUT, border_color=BORDER)
+        self.editor_timeline_video.grid(row=0, column=1, padx=8, pady=(14, 8), sticky="ew")
+        self.editor_timeline_time = ctk.CTkLabel(timeline, text="Elegí un video para usar el timeline", text_color=TEXT_MUTED)
+        self.editor_timeline_time.grid(row=1, column=0, columnspan=2, padx=18, pady=(0, 4), sticky="w")
+        self.editor_timeline_slider = ctk.CTkSlider(timeline, from_=0, to=1, number_of_steps=1,
+                                                     command=self.editor_timeline_changed,
+                                                     fg_color=BG_INPUT, progress_color=ACCENT, button_color=NEON_CYAN)
+        self.editor_timeline_slider.grid(row=2, column=0, columnspan=2, padx=18, pady=(0, 10), sticky="ew")
+        ctk.CTkLabel(timeline, text="Aplicar este frame a:", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11)).grid(row=3, column=0, padx=18, pady=(0, 14), sticky="w")
+        controls = ctk.CTkFrame(timeline, fg_color="transparent")
+        controls.grid(row=3, column=1, padx=(8, 18), pady=(0, 14), sticky="e")
+        self.editor_timeline_target = ctk.CTkComboBox(controls, values=["Foto 1"], state="readonly",
+                                                       command=self.editor_timeline_target_changed,
+                                                       fg_color=BG_INPUT, border_color=BORDER, width=120)
+        self.editor_timeline_target.set("Foto 1")
+        self.editor_timeline_target.pack(side="left", padx=(0, 8))
+        GhostButton(controls, text="Usar frame", command=self.editor_apply_timeline_frame).pack(side="left", padx=(0, 8))
+        PrimaryButton(controls, text="Ver frame", command=self.editor_preview_timeline).pack(side="left")
+
+        self.editor_rows_frame = ctk.CTkFrame(scroll, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        self.editor_rows_frame.grid(row=3, column=0, sticky="ew", padx=24, pady=(0, 14))
+        self.editor_rows_frame.grid_columnconfigure(0, weight=1)
+        hdr = ctk.CTkFrame(self.editor_rows_frame, fg_color="transparent")
+        hdr.grid(row=0, column=0, sticky="ew", padx=18, pady=(14, 4))
+        ctk.CTkLabel(hdr, text="Fotos y ubicación", text_color=NEON_PURPLE,
+                     font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
+        GhostButton(hdr, text="＋ Agregar foto", command=self.editor_add_row).pack(side="right")
+        self.editor_global_enabled = tk.BooleanVar(value=True)
+        global_config = ctk.CTkFrame(self.editor_rows_frame, fg_color=BG_CARD2, corner_radius=8)
+        global_config.grid(row=1, column=0, sticky="ew", padx=18, pady=(4, 6))
+        self._build_editor_global_config(global_config)
+        self.editor_add_row()
+
+        actions = ctk.CTkFrame(scroll, fg_color="transparent")
+        actions.grid(row=4, column=0, sticky="ew", padx=24, pady=(0, 14))
+        PrimaryButton(actions, text="👁️  Preview en frame aleatorio", command=self.editor_preview).pack(side="left", padx=(0, 8))
+        PrimaryButton(actions, text="Renderizar video", command=self.editor_render).pack(side="left")
+        self.editor_status = ctk.CTkLabel(actions, text="Configurá el video y las fotos.", text_color=TEXT_MUTED)
+        self.editor_status.pack(side="left", padx=16)
+
+        preview = ctk.CTkFrame(scroll, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        preview.grid(row=5, column=0, sticky="nsew", padx=24, pady=(0, 24))
+        ctk.CTkLabel(preview, text="Vista previa del frame aleatorio", text_color=TEXT_BODY,
+                     font=ctk.CTkFont(size=13, weight="bold")).pack(pady=(14, 4))
+        self.editor_preview_label = ctk.CTkLabel(preview, text="El preview aparecerá acá", text_color=TEXT_MUTED,
+                                                 width=720, height=360)
+        self.editor_preview_label.pack(padx=18, pady=(0, 14))
+
+    def editor_choose_video(self):
+        paths = filedialog.askopenfilenames(title="Videos base", filetypes=[("Videos", "*.mp4 *.mov *.mkv *.avi"), ("Todos", "*.*")])
+        if not paths:
+            return
+        self.editor_video_paths = list(paths)
+        self.editor_video_info = {}
+        self.editor_video.delete(0, "end")
+        self.editor_video.insert(0, paths[0] if len(paths) == 1 else f"{len(paths)} videos seleccionados")
+        path = paths[0]
+        choices = [f"{index + 1}. {os.path.basename(video)}" for index, video in enumerate(paths)]
+        self.editor_timeline_map = dict(zip(choices, paths))
+        self.editor_timeline_video.configure(values=choices)
+        self.editor_timeline_video.set(choices[0])
+        try:
+            import video_editor
+            info = video_editor.probe_video(path)
+            self.editor_video_info[path] = info
+            self._editor_load_timeline(path)
+            self.editor_info.configure(text=f"{info['width']}×{info['height']} · {info['fps']:.2f} FPS · {info['duration']:.1f} s")
+        except Exception as exc:
+            self.editor_info.configure(text=f"No se pudo leer el video: {exc}", text_color=DANGER)
+
+    def _editor_photo_video_batch_enabled(self):
+        selected_photos = sum(bool(item["photo"].get().strip()) for item in self.editor_rows)
+        return len(self.editor_video_paths) > 1 and selected_photos > 1
+
+    def _editor_update_timeline_range(self, reset=False):
+        info = self.editor_timeline_info
+        if not info:
+            return
+        limit_seconds = min(5.0, info["duration"]) if self._editor_photo_video_batch_enabled() else info["duration"]
+        max_frame = max(0, round(limit_seconds * info["fps"]) - 1)
+        current_frame = 0 if reset else min(round(float(self.editor_timeline_slider.get())), max_frame)
+        self.editor_timeline_slider.configure(from_=0, to=max(1, max_frame), number_of_steps=max(1, max_frame))
+        self.editor_timeline_slider.set(current_frame)
+        self.editor_timeline_changed(current_frame)
+
+    def _editor_cartesian_batch(self, videos, overlays):
+        return len(videos) * len(overlays) > 1
+
+    def _editor_load_timeline(self, path):
+        try:
+            import video_editor
+            info = self.editor_video_info.get(path) or video_editor.probe_video(path)
+            self.editor_video_info[path] = info
+            self.editor_timeline_info = info
+            self._editor_update_timeline_range(reset=True)
+        except Exception as exc:
+            self.editor_timeline_info = None
+            self.editor_timeline_time.configure(text=f"No se pudo preparar el timeline: {exc}", text_color=DANGER)
+
+    def editor_timeline_video_changed(self, choice):
+        path = self.editor_timeline_map.get(choice)
+        if path:
+            self._editor_load_timeline(path)
+
+    def editor_timeline_changed(self, value):
+        info = self.editor_timeline_info
+        if not info:
+            return
+        frame = max(0, round(float(value)))
+        seconds = frame / info["fps"]
+        minutes, remainder = divmod(seconds, 60)
+        batch_note = "  ·  Lote: primeros 5 s" if self._editor_photo_video_batch_enabled() else ""
+        self.editor_timeline_time.configure(
+            text=f"Frame {frame}  ·  {int(minutes):02d}:{remainder:06.3f}  ·  {info['fps']:.2f} FPS{batch_note}",
+            text_color=TEXT_BODY,
+        )
+
+    def _editor_timeline_item(self):
+        try:
+            index = int(self.editor_timeline_target.get().split()[1]) - 1
+            return self.editor_rows[index]
+        except (IndexError, ValueError, AttributeError):
+            return None
+
+    def _editor_refresh_timeline_targets(self):
+        if not hasattr(self, "editor_timeline_target"):
+            return
+        choices = [f"Foto {index}" for index in range(1, len(self.editor_rows) + 1)] or ["Foto 1"]
+        current = self.editor_timeline_target.get()
+        self.editor_timeline_target.configure(values=choices)
+        self.editor_timeline_target.set(current if current in choices else choices[0])
+
+    def _editor_reindex_rows(self):
+        for index, item in enumerate(self.editor_rows, start=1):
+            item["frame"].grid(row=index + 1, column=0, sticky="ew", padx=18, pady=6)
+            item["label"].configure(text=f"Foto {index}")
+
+    def editor_timeline_target_changed(self, _choice):
+        item = self._editor_timeline_item()
+        if (not item or self._editor_photo_video_batch_enabled()
+                or (self.editor_global_enabled.get() and not item["manual_var"].get())):
+            return
+        if not self.editor_timeline_info:
+            return
+        try:
+            frame = max(0, float(item["Frame"].get()))
+            self.editor_timeline_slider.set(frame)
+            self.editor_timeline_changed(frame)
+        except ValueError:
+            pass
+
+    def editor_apply_timeline_frame(self):
+        item = self._editor_timeline_item()
+        if not item or not self.editor_timeline_info:
+            return messagebox.showwarning("Timeline", "Elegí un video y una foto antes de aplicar el frame.")
+        frame = str(round(float(self.editor_timeline_slider.get())))
+        apply_to_all = (self._editor_photo_video_batch_enabled()
+                        or (self.editor_global_enabled.get() and not item["manual_var"].get()))
+        targets = self.editor_rows if apply_to_all else [item]
+        for target in targets:
+            target["Frame"].delete(0, "end")
+            target["Frame"].insert(0, frame)
+        if apply_to_all:
+            self.editor_status.configure(text=f"Frame {frame} asignado a todas las fotos del lote.", text_color=SUCCESS)
+            return
+        self.editor_status.configure(text=f"Frame {frame} asignado a {self.editor_timeline_target.get()}.", text_color=SUCCESS)
+
+    def editor_preview_timeline(self):
+        try:
+            videos, overlays = self._editor_collect()
+        except Exception as exc:
+            return messagebox.showwarning("Preview", str(exc))
+        if self._editor_cartesian_batch(videos, overlays):
+            try:
+                photo_index = int(self.editor_timeline_target.get().split()[1]) - 1
+                overlays = [overlays[photo_index]]
+            except (IndexError, ValueError, AttributeError):
+                pass
+        video = self.editor_timeline_map.get(self.editor_timeline_video.get(), videos[0])
+        info = self.editor_timeline_info or self.editor_video_info.get(video)
+        if not info:
+            return messagebox.showwarning("Timeline", "Elegí un video válido para el timeline.")
+        timestamp = round(float(self.editor_timeline_slider.get())) / info["fps"]
+        overlays = self._editor_overlays_for_source(video, overlays)
+        self.editor_status.configure(text="Generando preview del frame elegido…", text_color=WARNING)
+
+        def task():
+            import video_editor
+            return video_editor.render_preview(video, overlays, timestamp=timestamp)
+
+        def done(success, result):
+            if not success:
+                self.editor_status.configure(text="Error de preview", text_color=DANGER)
+                return messagebox.showerror("Preview", result)
+            path, actual_time = result
+            from PIL import Image
+            image = Image.open(path).convert("RGB")
+            image.thumbnail((760, 420), Image.Resampling.LANCZOS)
+            self.editor_preview_image = ctk.CTkImage(light_image=image, dark_image=image, size=image.size)
+            self.editor_preview_label.configure(image=self.editor_preview_image, text="")
+            self.editor_status.configure(text=f"Preview del timeline en {actual_time:.3f} s.", text_color=SUCCESS)
+
+        WorkerThread(self, done, task).start()
+
+    def _build_editor_global_config(self, container):
+        container.grid_columnconfigure(0, weight=1)
+        header = ctk.CTkFrame(container, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=12, pady=(10, 4))
+        ctk.CTkLabel(header, text="Configuración global de fotos", text_color=NEON_CYAN,
+                     font=ctk.CTkFont(size=12, weight="bold")).pack(side="left")
+        self.editor_global_switch = ctk.CTkSwitch(
+            header, text="Aplicar a todas", variable=self.editor_global_enabled,
+            command=self._editor_refresh_config_modes, progress_color=ACCENT, button_color=NEON_CYAN,
+        )
+        self.editor_global_switch.pack(side="right")
+        ctk.CTkLabel(container, text="El frame se toma del timeline. Activá “Editar individual” solo para excepciones.",
+                     text_color=TEXT_MUTED, font=ctk.CTkFont(size=10)).grid(row=1, column=0, sticky="w", padx=12)
+
+        fields = ctk.CTkFrame(container, fg_color="transparent")
+        fields.grid(row=2, column=0, sticky="ew", padx=12, pady=(4, 2))
+        specs = [("Duración ms", "500"), ("Tamaño %", "25"), ("X %", "50"),
+                 ("Y %", "50"), ("Transparencia %", "100")]
+        self.editor_global_entries = {}
+        for column, (label, default) in enumerate(specs):
+            ctk.CTkLabel(fields, text=label, text_color=TEXT_MUTED, font=ctk.CTkFont(size=10)).grid(row=0, column=column, padx=3)
+            entry = ctk.CTkEntry(fields, width=88, fg_color=BG_INPUT, border_color=BORDER)
+            entry.insert(0, default)
+            entry.grid(row=1, column=column, padx=3)
+            self.editor_global_entries[label] = entry
+        self.editor_global_ratio = ctk.CTkComboBox(fields, values=["Original", "9:16", "1:1", "4:5", "16:9", "6:19"],
+                                                   width=100, fg_color=BG_INPUT, border_color=BORDER)
+        self.editor_global_ratio.set("9:16")
+        self.editor_global_ratio.grid(row=1, column=5, padx=3)
+        ctk.CTkLabel(fields, text="Relación", text_color=TEXT_MUTED, font=ctk.CTkFont(size=10)).grid(row=0, column=5, padx=3)
+        self.editor_global_position = ctk.CTkComboBox(
+            fields, values=["Manual X/Y", "Centro", "Arriba izquierda", "Arriba centro", "Arriba derecha",
+                            "Abajo izquierda", "Abajo centro", "Abajo derecha"], width=130,
+            fg_color=BG_INPUT, border_color=BORDER,
+        )
+        self.editor_global_position.set("Manual X/Y")
+        self.editor_global_position.grid(row=1, column=6, padx=3)
+        ctk.CTkLabel(fields, text="Posición", text_color=TEXT_MUTED, font=ctk.CTkFont(size=10)).grid(row=0, column=6, padx=3)
+
+        move = ctk.CTkFrame(container, fg_color="transparent")
+        move.grid(row=3, column=0, sticky="ew", padx=12, pady=(2, 10))
+        move.grid_columnconfigure(1, weight=1)
+        move.grid_columnconfigure(4, weight=1)
+        ctk.CTkLabel(move, text="Mover X", text_color=TEXT_MUTED, font=ctk.CTkFont(size=10)).grid(row=0, column=0, padx=(0, 5))
+        global_x_value = ctk.CTkLabel(move, text="50%", text_color=TEXT_BODY, font=ctk.CTkFont(size=10), width=35)
+        global_x_value.grid(row=0, column=2, padx=(5, 14))
+        self.editor_global_x_slider = ctk.CTkSlider(
+            move, from_=0, to=100, number_of_steps=100, fg_color=BG_INPUT, progress_color=ACCENT, button_color=NEON_CYAN,
+            command=lambda value: self._editor_position_slider_changed(self.editor_global_entries["X %"], global_x_value, value),
+        )
+        self.editor_global_x_slider.set(50)
+        self.editor_global_x_slider.grid(row=0, column=1, sticky="ew")
+        ctk.CTkLabel(move, text="Mover Y", text_color=TEXT_MUTED, font=ctk.CTkFont(size=10)).grid(row=0, column=3, padx=(0, 5))
+        global_y_value = ctk.CTkLabel(move, text="50%", text_color=TEXT_BODY, font=ctk.CTkFont(size=10), width=35)
+        global_y_value.grid(row=0, column=5, padx=(5, 0))
+        self.editor_global_y_slider = ctk.CTkSlider(
+            move, from_=0, to=100, number_of_steps=100, fg_color=BG_INPUT, progress_color=ACCENT, button_color=NEON_CYAN,
+            command=lambda value: self._editor_position_slider_changed(self.editor_global_entries["Y %"], global_y_value, value),
+        )
+        self.editor_global_y_slider.set(50)
+        self.editor_global_y_slider.grid(row=0, column=4, sticky="ew")
+        self.editor_global_controls = [*self.editor_global_entries.values(), self.editor_global_ratio,
+                                       self.editor_global_position, self.editor_global_x_slider, self.editor_global_y_slider]
+
+    def _editor_refresh_config_modes(self):
+        global_enabled = self.editor_global_enabled.get()
+        for control in getattr(self, "editor_global_controls", []):
+            control.configure(state="normal" if global_enabled else "disabled")
+        for item in self.editor_rows:
+            individual = item["manual_var"].get() or not global_enabled
+            for control in item["config_controls"]:
+                control.configure(state="normal" if individual else "disabled")
+
+    def _editor_position_slider_changed(self, entry, label, value):
+        percentage = max(0, min(100, round(float(value))))
+        entry.delete(0, "end")
+        entry.insert(0, str(percentage))
+        label.configure(text=f"{percentage}%")
+
+    def editor_add_row(self):
+        row = ctk.CTkFrame(self.editor_rows_frame, fg_color=BG_CARD2, corner_radius=8)
+        row.grid(row=len(self.editor_rows) + 2, column=0, sticky="ew", padx=18, pady=6)
+        row.grid_columnconfigure(1, weight=1)
+        idx = len(self.editor_rows) + 1
+        photo_label = ctk.CTkLabel(row, text=f"Foto {idx}", text_color=NEON_CYAN,
+                                   font=ctk.CTkFont(size=12, weight="bold"), width=60)
+        photo_label.grid(row=0, column=0, rowspan=2, padx=12, pady=10)
+        photo = ctk.CTkEntry(row, fg_color=BG_INPUT, border_color=BORDER, placeholder_text="Archivo de imagen")
+        photo.grid(row=0, column=1, padx=6, pady=(10, 4), sticky="ew")
+        ctk.CTkButton(row, text="Elegir fotos", width=90, command=lambda e=photo: self.editor_choose_photo(e)).grid(row=0, column=2, padx=6, pady=(10, 4))
+        manual_var = tk.BooleanVar(value=False)
+        ctk.CTkSwitch(row, text="Editar individual", variable=manual_var, progress_color=ACCENT,
+                      button_color=NEON_CYAN, command=self._editor_refresh_config_modes).grid(row=0, column=3, padx=6, pady=(10, 4))
+        fields = ctk.CTkFrame(row, fg_color="transparent")
+        fields.grid(row=1, column=1, columnspan=2, sticky="ew", padx=6, pady=(0, 10))
+        specs = [("Frame", "0"), ("Duración ms", "500"), ("Tamaño %", "25"), ("X %", "50"), ("Y %", "50"), ("Transparencia %", "100")]
+        entries = {}
+        for col, (field_label, default) in enumerate(specs):
+            ctk.CTkLabel(fields, text=field_label, text_color=TEXT_MUTED, font=ctk.CTkFont(size=10)).grid(row=0, column=col, padx=3)
+            ent = ctk.CTkEntry(fields, width=74, fg_color=BG_INPUT, border_color=BORDER)
+            ent.insert(0, default)
+            ent.grid(row=1, column=col, padx=3)
+            entries[field_label] = ent
+        ratio = ctk.CTkComboBox(fields, values=["Original", "9:16", "1:1", "4:5", "16:9", "6:19"], width=100,
+                                fg_color=BG_INPUT, border_color=BORDER)
+        ratio.set("9:16")
+        ratio.grid(row=1, column=6, padx=3)
+        ctk.CTkLabel(fields, text="Relación", text_color=TEXT_MUTED, font=ctk.CTkFont(size=10)).grid(row=0, column=6, padx=3)
+        position = ctk.CTkComboBox(fields, values=["Manual X/Y", "Centro", "Arriba izquierda", "Arriba centro", "Arriba derecha", "Abajo izquierda", "Abajo centro", "Abajo derecha"], width=125,
+                                   fg_color=BG_INPUT, border_color=BORDER)
+        position.set("Manual X/Y")
+        position.grid(row=1, column=7, padx=3)
+        move = ctk.CTkFrame(row, fg_color="transparent")
+        move.grid(row=2, column=1, columnspan=2, sticky="ew", padx=6, pady=(0, 10))
+        move.grid_columnconfigure(1, weight=1)
+        move.grid_columnconfigure(4, weight=1)
+        ctk.CTkLabel(move, text="Mover X", text_color=TEXT_MUTED, font=ctk.CTkFont(size=10)).grid(row=0, column=0, padx=(0, 5), sticky="w")
+        x_value = ctk.CTkLabel(move, text="50%", text_color=TEXT_BODY, font=ctk.CTkFont(size=10), width=35)
+        x_value.grid(row=0, column=2, padx=(5, 14))
+        x_slider = ctk.CTkSlider(move, from_=0, to=100, number_of_steps=100, fg_color=BG_INPUT,
+                                 progress_color=ACCENT, button_color=NEON_CYAN,
+                                 command=lambda value, e=entries["X %"], lbl=x_value: self._editor_position_slider_changed(e, lbl, value))
+        x_slider.set(50)
+        x_slider.grid(row=0, column=1, sticky="ew")
+        ctk.CTkLabel(move, text="Mover Y", text_color=TEXT_MUTED, font=ctk.CTkFont(size=10)).grid(row=0, column=3, padx=(0, 5), sticky="w")
+        y_value = ctk.CTkLabel(move, text="50%", text_color=TEXT_BODY, font=ctk.CTkFont(size=10), width=35)
+        y_value.grid(row=0, column=5, padx=(5, 0))
+        y_slider = ctk.CTkSlider(move, from_=0, to=100, number_of_steps=100, fg_color=BG_INPUT,
+                                 progress_color=ACCENT, button_color=NEON_CYAN,
+                                 command=lambda value, e=entries["Y %"], lbl=y_value: self._editor_position_slider_changed(e, lbl, value))
+        y_slider.set(50)
+        y_slider.grid(row=0, column=4, sticky="ew")
+        ctk.CTkLabel(fields, text="Posición", text_color=TEXT_MUTED, font=ctk.CTkFont(size=10)).grid(row=0, column=7, padx=3)
+        ctk.CTkButton(row, text="✕", width=28, fg_color=DANGER, command=lambda r=row: self.editor_remove_row(r)).grid(row=0, column=4, rowspan=2, padx=10)
+        config_controls = [*entries.values(), ratio, position, x_slider, y_slider]
+        self.editor_rows.append({"frame": row, "label": photo_label, "photo": photo, "ratio": ratio, "position": position,
+                                 "manual_var": manual_var, "config_controls": config_controls, **entries})
+        self._editor_reindex_rows()
+        self._editor_refresh_timeline_targets()
+        self._editor_refresh_config_modes()
+        self._editor_update_timeline_range()
+
+    def editor_choose_photo(self, entry):
+        paths = filedialog.askopenfilenames(title="Fotos para overlay", filetypes=[("Imágenes", "*.png *.jpg *.jpeg *.webp"), ("Todos", "*.*")])
+        if paths:
+            entry.delete(0, "end")
+            entry.insert(0, paths[0])
+            for path in paths[1:]:
+                self.editor_add_row()
+                new_entry = self.editor_rows[-1]["photo"]
+                new_entry.delete(0, "end")
+                new_entry.insert(0, path)
+            self._editor_update_timeline_range()
+
+    def editor_remove_row(self, row):
+        if len(self.editor_rows) == 1:
+            return
+        item = next((item for item in self.editor_rows if item["frame"] == row), None)
+        if item:
+            self.editor_rows.remove(item)
+            row.destroy()
+            self._editor_reindex_rows()
+            self._editor_refresh_timeline_targets()
+            self._editor_update_timeline_range()
+
+    def _editor_read_overlay_config(self, entries, ratio, position, frame, label):
+        try:
+            values = {key: float(entries[key].get()) for key in ["Duración ms", "Tamaño %", "X %", "Y %", "Transparencia %"]}
+        except ValueError:
+            raise ValueError(f"Los valores numéricos de {label} no son válidos.")
+        if (frame < 0 or values["Duración ms"] <= 0
+                or not 0 <= values["Tamaño %"] <= 100
+                or not 0 <= values["X %"] <= 100
+                or not 0 <= values["Y %"] <= 100
+                or not 0 <= values["Transparencia %"] <= 100):
+            raise ValueError(f"Revisá frame, duración, tamaño y transparencia de {label}.")
+        return {"frame": int(frame), "duration_ms": values["Duración ms"], "size": values["Tamaño %"],
+                "x": values["X %"], "y": values["Y %"], "opacity": values["Transparencia %"],
+                "ratio": ratio.get(), "position": position.get()}
+
+    def _editor_collect(self):
+        missing_videos = [path for path in self.editor_video_paths if not os.path.isfile(path)]
+        if missing_videos:
+            raise ValueError("No se encontraron los videos seleccionados: " + ", ".join(missing_videos))
+        videos = list(self.editor_video_paths)
+        video = videos[0] if videos else ""
+        if not video or not os.path.isfile(video):
+            raise ValueError("Elegí un video base válido.")
+        if self._editor_photo_video_batch_enabled() and self.editor_timeline_info:
+            self._editor_update_timeline_range()
+        overlays = []
+        global_enabled = self.editor_global_enabled.get()
+        global_frame = round(float(self.editor_timeline_slider.get())) if self.editor_timeline_info else 0
+        global_config = None
+        if global_enabled:
+            global_config = self._editor_read_overlay_config(
+                self.editor_global_entries, self.editor_global_ratio, self.editor_global_position,
+                global_frame, "la configuración global",
+            )
+        for i, item in enumerate(self.editor_rows, start=1):
+            photo = item["photo"].get().strip()
+            if not photo or not os.path.isfile(photo):
+                raise ValueError(f"Elegí la imagen de la Foto {i}.")
+            if global_config is not None and not item["manual_var"].get():
+                overlay = dict(global_config)
+            else:
+                overlay = self._editor_read_overlay_config(
+                    item, item["ratio"], item["position"], float(item["Frame"].get()), f"la Foto {i}",
+                )
+            overlay["photo"] = photo
+            overlays.append(overlay)
+        if self._editor_photo_video_batch_enabled() and self.editor_timeline_info:
+            shared_frame = round(float(self.editor_timeline_slider.get()))
+            for index, overlay in enumerate(overlays):
+                overlay["frame"] = shared_frame
+                self.editor_rows[index]["Frame"].delete(0, "end")
+                self.editor_rows[index]["Frame"].insert(0, str(shared_frame))
+        return videos, overlays
+
+    def _editor_overlays_for_source(self, source, overlays):
+        """Clone shared N x M overlays with frame numbers for one source FPS."""
+        if not self._editor_photo_video_batch_enabled() or not self.editor_timeline_info:
+            return overlays
+        import video_editor
+        source_info = self.editor_video_info.get(source)
+        if source_info is None:
+            source_info = video_editor.probe_video(source)
+            self.editor_video_info[source] = source_info
+        timestamp = round(float(self.editor_timeline_slider.get())) / self.editor_timeline_info["fps"]
+        return [
+            {**overlay, "frame": video_editor.timestamp_to_source_frame(timestamp, source_info["fps"])}
+            for overlay in overlays
+        ]
+
+    def editor_preview(self):
+        try:
+            videos, overlays = self._editor_collect()
+        except Exception as exc:
+            return messagebox.showwarning("Preview", str(exc))
+        if self._editor_cartesian_batch(videos, overlays):
+            try:
+                photo_index = int(self.editor_timeline_target.get().split()[1]) - 1
+                overlays = [overlays[photo_index]]
+            except (IndexError, ValueError, AttributeError):
+                pass
+        video = videos[0]
+        overlays = self._editor_overlays_for_source(video, overlays)
+        self.editor_status.configure(text="Generando preview…", text_color=WARNING)
+        def task():
+            import video_editor
+            return video_editor.render_preview(video, overlays)
+        def done(success, result):
+            if not success:
+                self.editor_status.configure(text="Error de preview", text_color=DANGER)
+                return messagebox.showerror("Preview", result)
+            path, timestamp = result
+            from PIL import Image
+            image = Image.open(path).convert("RGB")
+            image.thumbnail((760, 420), Image.Resampling.LANCZOS)
+            self.editor_preview_image = ctk.CTkImage(light_image=image, dark_image=image, size=image.size)
+            self.editor_preview_label.configure(image=self.editor_preview_image, text="")
+            self.editor_status.configure(text=f"Preview en {timestamp:.2f} s (frame aleatorio)", text_color=SUCCESS)
+        WorkerThread(self, done, task).start()
+
+    def editor_render(self):
+        try:
+            videos, overlays = self._editor_collect()
+        except Exception as exc:
+            return messagebox.showwarning("Renderizar", str(exc))
+        import video_editor
+        pairs = video_editor.build_photo_video_pairs(videos, overlays)
+        if len(pairs) > 1:
+            output_dir = filedialog.askdirectory(title="Carpeta donde guardar los videos editados")
+            if not output_dir:
+                return
+            jobs, occupied = [], set()
+            def reserve_output(stem, label):
+                output = os.path.join(output_dir, f"{stem}_{label}_editado.mp4")
+                suffix = 2
+                while output in occupied or os.path.exists(output):
+                    output = os.path.join(output_dir, f"{stem}_{label}_editado_{suffix}.mp4")
+                    suffix += 1
+                occupied.add(output)
+                return output
+
+            for source, overlay, photo_index in pairs:
+                stem = os.path.splitext(os.path.basename(source))[0]
+                source_overlays = self._editor_overlays_for_source(source, [overlay])
+                jobs.append((source, reserve_output(stem, f"foto{photo_index:02d}"), source_overlays))
+            return self._editor_render_batch(jobs)
+        video = videos[0]
+        output = filedialog.asksaveasfilename(title="Guardar video editado", defaultextension=".mp4",
+                                              filetypes=[("MP4", "*.mp4")], initialfile="video_editado.mp4")
+        if not output:
+            return
+        self.editor_status.configure(text="Renderizando con FFmpeg…", text_color=WARNING)
+        def task():
+            import video_editor
+            return video_editor.render_video(video, output, overlays)
+        def done(success, result):
+            self.editor_status.configure(text="✅ Video guardado" if success else "❌ Error de render", text_color=SUCCESS if success else DANGER)
+            if success:
+                messagebox.showinfo("Edición completada", f"Video guardado en:\n{result}")
+            else:
+                messagebox.showerror("Renderizar", result)
+        WorkerThread(self, done, task).start()
+
+    def _editor_render_batch(self, jobs):
+        """Render one job per requested video/photo combination."""
+        self.editor_status.configure(text=f"Renderizando {len(jobs)} videos con FFmpeg…", text_color=WARNING)
+
+        def task():
+            import video_editor
+            completed = []
+            for source, output, job_overlays in jobs:
+                completed.append(video_editor.render_video(source, output, job_overlays))
+            return completed
+
+        def done(success, result):
+            self.editor_status.configure(text="✅ Videos guardados" if success else "❌ Error de render",
+                                         text_color=SUCCESS if success else DANGER)
+            if success:
+                messagebox.showinfo("Edición completada",
+                                    f"{len(result)} videos guardados en:\n{os.path.dirname(result[0])}")
+            else:
+                messagebox.showerror("Renderizar lote", result)
+
+        WorkerThread(self, done, task).start()
+
+
     # FORGE DE METADATA
     # ══════════════════════════════════════════════════════════════════════
     def _build_forge_frame(self):
@@ -3257,6 +3929,14 @@ class InstagramAutoPro(ctk.CTk):
         scroll = ctk.CTkScrollableFrame(f, fg_color="transparent")
         scroll.grid(row=0, column=0, sticky="nsew")
         scroll.grid_columnconfigure(0, weight=1)
+
+        # CTkScrollableFrame divide el delta de la rueda entre 6 y trunca a
+        # int, así que mice/trackpads que mandan deltas chicos (smooth-scroll)
+        # terminan con paso 0 y la rueda no hace nada. Forzamos mínimo 1 unidad.
+        def _forge_wheel_fix(event):
+            if scroll.check_if_master_is_canvas(event.widget) and scroll._parent_canvas.yview() != (0.0, 1.0):
+                scroll._parent_canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+        scroll.bind_all("<MouseWheel>", _forge_wheel_fix, add="+")
 
         # ── Header ──────────────────────────────────────────────────────
         PageHeader(scroll, kicker="CONTENIDO", title="Forge de Metadata",
@@ -3354,6 +4034,66 @@ class InstagramAutoPro(ctk.CTk):
                   variable=self.forge_dist_var).grid(row=5, column=0, columnspan=2,
                                                      sticky="ew", padx=18, pady=(6, 4))
 
+        # ── Eje Efectos (qué efectos) ────────────────────────────────────
+        ctk.CTkLabel(card_cfg, text="Efectos", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11, weight="bold")).grid(
+                         row=6, column=0, columnspan=2, sticky="w", padx=18, pady=(8, 2))
+        self.forge_efectos_var = tk.StringVar(value="Default")
+        SegmentedControl(card_cfg, values=["Default", "Light", "Medio", "Alto", "Custom"],
+                         default="Default", command=self._forge_on_efectos_change).grid(
+                             row=7, column=0, columnspan=2, sticky="ew", padx=18, pady=(0, 6))
+
+        # ── Eje Fuerza (cuánta intensidad) ────────────────────────────────
+        ctk.CTkLabel(card_cfg, text="Fuerza", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11, weight="bold")).grid(
+                         row=8, column=0, columnspan=2, sticky="w", padx=18, pady=(4, 2))
+        self.forge_fuerza_var = tk.StringVar(value="Default")
+        SegmentedControl(card_cfg, values=["Default", "Light", "Medio", "Alto", "Custom"],
+                         default="Default", command=self._forge_on_fuerza_change).grid(
+                             row=9, column=0, columnspan=2, sticky="ew", padx=18, pady=(0, 6))
+
+        # Panel de Fuerza=Custom (slider general + rangos por efecto + espejo)
+        FORGE_RANGE_ROWS = [
+            ("crop",       "Recorte (px)",   "2",     "10"),
+            ("zoom",       "Zoom (factor)",  "1.00",  "1.05"),
+            ("rotate",     "Rotación (°)",   "-1.5",  "1.5"),
+            ("brightness", "Brillo (Δ)",     "-0.03", "0.03"),
+            ("contrast",   "Contraste (×)",  "0.94",  "1.06"),
+            ("saturation", "Saturación (×)", "0.90",  "1.10"),
+            ("gamma",      "Gamma (×)",      "0.95",  "1.05"),
+            ("noise",      "Grano",          "4",     "8"),
+            ("speed",      "Velocidad (×)",  "0.985", "1.015"),
+            ("trim",       "Trim (ms)",      "0",     "150"),
+        ]
+        self.forge_custom_panel = ctk.CTkFrame(card_cfg, fg_color="transparent")
+        self.forge_custom_panel.grid_columnconfigure(2, weight=1)
+        self._forge_custom_row = 10   # grid row inside card_cfg (reuse the old slider row)
+
+        ctk.CTkLabel(self.forge_custom_panel, text="Intensidad general", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11)).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 2))
+        self.forge_strength_slider = ctk.CTkSlider(self.forge_custom_panel, from_=0, to=100, number_of_steps=100)
+        self.forge_strength_slider.set(50)
+        self.forge_strength_slider.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(0, 8))
+
+        self.forge_range_entries = {}
+        for i, (param, label, dmin, dmax) in enumerate(FORGE_RANGE_ROWS):
+            rr = 2 + i
+            ctk.CTkLabel(self.forge_custom_panel, text=label, text_color=TEXT_BODY,
+                         font=ctk.CTkFont(size=11)).grid(row=rr, column=0, sticky="w", pady=2)
+            e_min = ctk.CTkEntry(self.forge_custom_panel, width=64, fg_color=BG_INPUT, border_color=BORDER)
+            e_min.insert(0, dmin)
+            e_min.grid(row=rr, column=1, padx=(8, 4), pady=2)
+            e_max = ctk.CTkEntry(self.forge_custom_panel, width=64, fg_color=BG_INPUT, border_color=BORDER)
+            e_max.insert(0, dmax)
+            e_max.grid(row=rr, column=2, sticky="w", padx=(4, 0), pady=2)
+            self.forge_range_entries[param] = (e_min, e_max)
+
+        self.forge_custom_mirror_var = tk.BooleanVar(value=False)
+        ctk.CTkCheckBox(self.forge_custom_panel, text="Espejo horizontal",
+                        variable=self.forge_custom_mirror_var,
+                        font=ctk.CTkFont(size=11), text_color=TEXT_BODY).grid(
+                            row=2 + len(FORGE_RANGE_ROWS), column=0, columnspan=3, sticky="w", pady=(6, 0))
+
         # — Micro-ediciones por copia (variant engine) —
         self.FORGE_FX_DEFS = [
             ("crop",   "Recorte de bordes"),
@@ -3366,7 +4106,7 @@ class InstagramAutoPro(ctk.CTk):
             ("trim",   "Recorte de ms"),
         ]
         fx_frame = ctk.CTkFrame(card_cfg, fg_color="transparent")
-        fx_frame.grid(row=6, column=0, columnspan=2, sticky="ew",
+        fx_frame.grid(row=11, column=0, columnspan=2, sticky="ew",
                       padx=18, pady=(4, 16))
         fx_frame.grid_columnconfigure(0, weight=1)
         fx_frame.grid_columnconfigure(1, weight=1)
@@ -3380,6 +4120,7 @@ class InstagramAutoPro(ctk.CTk):
             self.forge_fx_vars[key] = var
             ToggleRow(fx_frame, lbl, variable=var).grid(
                 row=1 + i // 2, column=i % 2, sticky="ew", padx=(0, 8), pady=3)
+        self.fx_frame = fx_frame
 
         # ── Tabla Preview ────────────────────────────────────────────────
         preview_card = ctk.CTkFrame(scroll, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
@@ -3441,6 +4182,26 @@ class InstagramAutoPro(ctk.CTk):
                                           font=ctk.CTkFont(size=11),
                                           text_color=TEXT_MUTED)
         self.forge_pb_lbl.grid(row=1, column=0, sticky="w")
+
+        # Estado inicial "Default": ocultar toggles manuales y slider de Custom.
+        self._forge_on_efectos_change("Default")
+        self._forge_on_fuerza_change("Default")
+
+    def _forge_on_efectos_change(self, level: str) -> None:
+        self.forge_efectos_var.set(level)
+        # Los 8 toggles manuales solo se muestran en Custom.
+        if level == "Custom":
+            self.fx_frame.grid()
+        elif self.fx_frame.winfo_manager():
+            self.fx_frame.grid_remove()
+
+    def _forge_on_fuerza_change(self, level: str) -> None:
+        self.forge_fuerza_var.set(level)
+        if level == "Custom":
+            self.forge_custom_panel.grid(row=self._forge_custom_row, column=0, columnspan=2,
+                                         sticky="ew", padx=18, pady=(0, 6))
+        elif self.forge_custom_panel.winfo_manager():
+            self.forge_custom_panel.grid_remove()
 
     def _forge_reload_cats(self):
         cats = self.db.get_categories()
@@ -3533,7 +4294,18 @@ class InstagramAutoPro(ctk.CTk):
 
         # Leer checkboxes de micro-ediciones en el hilo principal (tk vars no
         # son seguras desde el worker).
-        fx_enabled = {key: var.get() for key, var in self.forge_fx_vars.items()}
+        import metadata_pool
+        fx_vals = {key: var.get() for key, var in self.forge_fx_vars.items()}
+        fx_enabled = metadata_pool.efectos_to_enabled(self.forge_efectos_var.get(), fx_vals)
+        fuerza_level = self.forge_fuerza_var.get()
+        if fuerza_level == "Custom":
+            forge_strength = metadata_pool.fuerza_to_strength("Custom", self.forge_strength_slider.get())
+            forge_overrides = metadata_pool.parse_custom_ranges(
+                {p: (mn.get(), mx.get()) for p, (mn, mx) in self.forge_range_entries.items()})
+            fx_enabled["mirror"] = bool(self.forge_custom_mirror_var.get())
+        else:
+            forge_strength = metadata_pool.fuerza_to_strength(fuerza_level)
+            forge_overrides = None
         active_fx = [lbl for key, lbl in self.FORGE_FX_DEFS if fx_enabled[key]]
         fx_desc = ", ".join(active_fx) if active_fx else "ninguna (solo metadata, sin re-encode)"
 
@@ -3559,6 +4331,7 @@ class InstagramAutoPro(ctk.CTk):
         self.forge_pb_lbl.configure(text="Procesando con FFmpeg...", text_color=WARNING)
 
         def task():
+            import re
             import metadata_pool
             os.makedirs(output_dir, exist_ok=True)
             fingerprints = []
@@ -3568,11 +4341,20 @@ class InstagramAutoPro(ctk.CTk):
                 base, ext = os.path.splitext(filename)
                 vid_id = base.replace(" ", "_").replace("__", "_")
                 vh = metadata_pool.get_video_hash(vid_path)
-                for copy_num in range(1, copies + 1):
+                existing_max = 0
+                copy_pattern = re.compile(rf"^{re.escape(vid_id)}__c(\d+){re.escape(ext)}$")
+                for fname in os.listdir(output_dir):
+                    m = copy_pattern.match(fname)
+                    if m:
+                        existing_max = max(existing_max, int(m.group(1)))
+                for offset in range(1, copies + 1):
+                    copy_num = existing_max + offset
                     meta = meta_list[meta_idx]
                     out_name = f"{vid_id}__c{copy_num:02d}{ext}"
                     out_path = os.path.join(output_dir, out_name)
-                    metadata_pool.apply_variant_and_metadata(vid_path, out_path, meta, enabled=fx_enabled)
+                    metadata_pool.apply_variant_and_metadata(vid_path, out_path, meta,
+                                                             enabled=fx_enabled, strength=forge_strength,
+                                                             overrides=forge_overrides)
                     db_ref.save_forge_video(tanda_name, filename, out_name, vh)
                     fingerprints.append({"video_hash": f"{vh}_{copy_num}", **meta})
                     meta_idx += 1

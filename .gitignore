@@ -30,6 +30,7 @@ organizador.db
 *.sqlite3
 telegram_state_v11.json
 dist_accounts_history.json
+.worktrees/
 fingerprint_history.json
 captions.txt
 accounts_*.txt

@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS forge_video_registry (
     output_name  TEXT NOT NULL,
     video_hash   TEXT DEFAULT '',
     processed_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(tanda_name, source_name)
+    UNIQUE(tanda_name, source_name, output_name)
 );
 """
 
@@ -101,6 +101,40 @@ class DatabaseManager:
         except Exception as e:
             print(f"Error inicializando base de datos: {e}")
         self._migrate_columns()
+        self._migrate_forge_registry_unique()
+
+    def _migrate_forge_registry_unique(self):
+        """Amplía el UNIQUE de forge_video_registry a (tanda_name, source_name,
+        output_name) en DBs viejas, donde solo cubría (tanda_name, source_name)
+        y por eso 'INSERT OR REPLACE' pisaba todas las copias salvo la última."""
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='forge_video_registry'"
+        )
+        row = cur.fetchone()
+        if not row or not row[0] or "UNIQUE(tanda_name, source_name, output_name)" in row[0]:
+            return
+        try:
+            cur.executescript('''
+                ALTER TABLE forge_video_registry RENAME TO forge_video_registry_old;
+                CREATE TABLE forge_video_registry (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tanda_name   TEXT NOT NULL,
+                    source_name  TEXT NOT NULL,
+                    output_name  TEXT NOT NULL,
+                    video_hash   TEXT DEFAULT '',
+                    processed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(tanda_name, source_name, output_name)
+                );
+                INSERT OR IGNORE INTO forge_video_registry
+                    (tanda_name, source_name, output_name, video_hash, processed_at)
+                    SELECT tanda_name, source_name, output_name, video_hash, processed_at
+                    FROM forge_video_registry_old;
+                DROP TABLE forge_video_registry_old;
+            ''')
+            self.conn.commit()
+        except Exception as e:
+            print(f"⚠️ No se pudo migrar forge_video_registry: {e}")
 
     def _migrate_columns(self):
         """Agrega columnas nuevas si aún no existen (migraciones no destructivas)."""

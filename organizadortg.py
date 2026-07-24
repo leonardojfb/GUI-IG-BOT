@@ -167,8 +167,19 @@ def load_clean_captions(path=None):
     blocks = re.findall(pattern, content, flags=re.DOTALL)
     captions = [b.strip() for b in blocks if b.strip()]
     if not captions:
-        # Fallback: cada línea no vacía es un caption
-        captions = [line.strip() for line in content.splitlines() if line.strip()]
+        # Fallback: cada bloque separado por una línea en blanco es parte de un
+        # caption. Un caption puede contener líneas en blanco internas; sus
+        # hashtags suelen marcar el cierre del bloque.
+        paragraphs = [block.strip() for block in re.split(r"\r?\n\s*\r?\n", content) if block.strip()]
+        captions = []
+        pending = []
+        for paragraph in paragraphs:
+            pending.append(paragraph)
+            if re.search(r"#\w+", paragraph):
+                captions.append("\n\n".join(pending))
+                pending = []
+        if pending:
+            captions.append("\n\n".join(pending))
     return captions
 
 def shuffle_hashtags(text):
@@ -177,6 +188,13 @@ def shuffle_hashtags(text):
     text_no_hashes = re.sub(r'#\w+', '', text).strip()
     random.shuffle(hashtags)
     return f"{text_no_hashes}\n\n{' '.join(hashtags)}"
+
+
+def caption_for_video(pool, video_index):
+    """Asigna captions en orden estable y vuelve a empezar si faltan captions."""
+    if not pool:
+        return None
+    return shuffle_hashtags(pool[video_index % len(pool)])
 
 history_db = load_json(os.path.join(base_dir, HISTORY_FILE))
 captions_pool = []  # se carga en execute_telegram_plan con el archivo elegido por el usuario
@@ -438,6 +456,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, c
     print(f"── Topics listos. Iniciando envíos ──\n")
 
     global_sent = 0
+    caption_index = 0
     fecha_envio = start_date
 
     sorted_days = sorted(day_account_videos.keys(), key=lambda x: int(x.split('_')[1]))
@@ -500,7 +519,8 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, c
                     else:
                         print(f"⚠️ Error en Telegram API (sendMessage) para @{username}: {msg_res}")
 
-                cap = shuffle_hashtags(random.choice(pool)) if pool else None
+                cap = caption_for_video(pool, caption_index) if pool else None
+                caption_index += 1
                 try:
                     ok, t_id = _send_video_to_topic(chat_id, t_id, cap, vid['path'], topics_state, username, tag)
                     if ok:

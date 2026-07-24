@@ -273,33 +273,104 @@ DEFAULT_VARIANT_EFFECTS = {
 }
 
 
+# ── Presets de los dos ejes de Forge ─────────────────────────────────────────
+EFECTOS_PRESETS = {
+    "Default": {"crop", "zoom", "rotate", "color", "noise", "speed", "trim"},   # 7, sin mirror
+    "Light":   {"color", "trim"},
+    "Medio":   {"crop", "color", "noise", "speed", "trim"},
+    "Alto":    {"crop", "mirror", "zoom", "rotate", "color", "noise", "speed", "trim"},
+}
+FUERZA_PRESETS = {"Default": 1.0, "Light": 0.5, "Medio": 1.0, "Alto": 2.4}
+
+
+def efectos_to_enabled(level: str, fx_vars: "dict | None" = None) -> dict:
+    """Traduce un nivel del eje 'Efectos' (o 'Custom') al dict `enabled` de 8 claves.
+    'Custom' lee los 8 on/off de `fx_vars` (clave->bool). Nivel desconocido -> Default."""
+    if level == "Custom":
+        vals = fx_vars or {}
+        return {k: bool(vals.get(k, DEFAULT_VARIANT_EFFECTS[k])) for k in DEFAULT_VARIANT_EFFECTS}
+    on = EFECTOS_PRESETS.get(level, EFECTOS_PRESETS["Default"])
+    return {k: (k in on) for k in DEFAULT_VARIANT_EFFECTS}
+
+
+def fuerza_to_strength(level: str, slider_pct: float = 50.0) -> float:
+    """Traduce un nivel del eje 'Fuerza' (o 'Custom') a un float strength.
+    'Custom' mapea slider_pct∈[0,100] a strength centrado en el neutro: 0→0.0, 50→1.0, 100→2.0. Nivel desconocido -> 1.0."""
+    if level == "Custom":
+        pct = max(0.0, min(100.0, float(slider_pct)))
+        return round(pct / 50.0, 3)
+    return FUERZA_PRESETS.get(level, 1.0)
+
+
+def parse_custom_ranges(raw: "dict | None") -> dict:
+    """Valida las entradas min/max del panel Fuerza=Custom.
+    `raw` = {param: (min_str, max_str)}. Devuelve {param: (lo, hi)} float.
+    Omite un param si algún lado es vacío/inválido; ordena lo<=hi."""
+    out = {}
+    for param, pair in (raw or {}).items():
+        try:
+            lo = float(str(pair[0]).strip())
+            hi = float(str(pair[1]).strip())
+        except (TypeError, ValueError, IndexError):
+            continue
+        if lo > hi:
+            lo, hi = hi, lo
+        out[param] = (lo, hi)
+    return out
+
+
 def generate_variant_params(
     rng: "random.Random | None" = None,
     enabled: "dict | None" = None,
+    strength: float = 1.0,
+    overrides: "dict | None" = None,
 ) -> dict:
     """
-    Sortea una combinación de micro-ediciones. Cada llamada produce una mezcla
-    distinta (no todas las variantes se aplican siempre) para que el resultado
-    final de cada copia sea único por poco, no por una fórmula fija.
-    `enabled` permite apagar efectos individuales (claves de DEFAULT_VARIANT_EFFECTS);
-    un efecto apagado queda en su valor neutro y nunca se aplica.
+    Sortea micro-ediciones. `enabled` prende/apaga cada efecto; `strength` escala
+    la magnitud (desde el neutro) y la probabilidad de disparo; `overrides`
+    (dict param->(lo,hi) en unidades del motor) reemplaza el rango base de ese
+    param antes de escalar por strength. strength=1.0 y overrides=None reproducen
+    el comportamiento histórico exacto.
     """
     r = rng or random
     en = {**DEFAULT_VARIANT_EFFECTS, **(enabled or {})}
+    s = max(0.0, float(strength))
+    ov = overrides or {}
+
+    def fires(p: float) -> bool:
+        return r.random() < min(1.0, p * s)
+
+    def base(param: str, lo: float, hi: float, neutral: float):
+        # override reemplaza el rango base; strength escala la desviación del neutro.
+        if param in ov:
+            lo, hi = ov[param]
+        return neutral + (lo - neutral) * s, neutral + (hi - neutral) * s
+
+    crop_lo, crop_hi = base("crop", 2, 10, 0)
+    zoom_lo, zoom_hi = base("zoom", 1.0, 1.05, 1.0)
+    rot_lo, rot_hi   = base("rotate", -1.5, 1.5, 0)
+    br_lo, br_hi     = base("brightness", -0.03, 0.03, 0)
+    co_lo, co_hi     = base("contrast", 0.94, 1.06, 1.0)
+    sa_lo, sa_hi     = base("saturation", 0.90, 1.10, 1.0)
+    ga_lo, ga_hi     = base("gamma", 0.95, 1.05, 1.0)
+    no_lo, no_hi     = base("noise", 4, 8, 0)
+    sp_lo, sp_hi     = base("speed", 0.985, 1.015, 1.0)
+    tr_lo, tr_hi     = base("trim", 0, 150, 0)
+
     return {
-        "crop_px":       r.randint(2, 10) if en["crop"] else 0,
-        "mirror":        bool(en["mirror"] and r.random() < 0.5),
-        "zoom_pct":      r.uniform(1.0, 1.05) if (en["zoom"] and r.random() < 0.7) else 1.0,
-        "rotate_deg":    r.uniform(-1.5, 1.5) if (en["rotate"] and r.random() < 0.6) else 0.0,
-        "brightness":    r.uniform(-0.03, 0.03) if en["color"] else 0.0,
-        "contrast":      r.uniform(0.94, 1.06) if en["color"] else 1.0,
-        "saturation":    r.uniform(0.90, 1.10) if en["color"] else 1.0,
-        "gamma":         r.uniform(0.95, 1.05) if en["color"] else 1.0,
-        # Mínimo 4: niveles 2-3 quedan casi borrados por la compresión CRF 20.
-        "noise":         r.randint(4, 8) if (en["noise"] and r.random() < 0.4) else 0,
-        "speed":         r.uniform(0.985, 1.015) if (en["speed"] and r.random() < 0.5) else 1.0,
-        "trim_start_ms": r.randint(0, 150) if en["trim"] else 0,
-        "trim_end_ms":   r.randint(0, 150) if en["trim"] else 0,
+        "crop_px":       r.randint(round(crop_lo), round(crop_hi)) if en["crop"] else 0,
+        "mirror":        bool(en["mirror"] and fires(0.5)),
+        "zoom_pct":      r.uniform(zoom_lo, zoom_hi) if (en["zoom"] and fires(0.7)) else 1.0,
+        "rotate_deg":    r.uniform(rot_lo, rot_hi) if (en["rotate"] and fires(0.6)) else 0.0,
+        "brightness":    r.uniform(br_lo, br_hi) if en["color"] else 0.0,
+        "contrast":      r.uniform(co_lo, co_hi) if en["color"] else 1.0,
+        "saturation":    r.uniform(sa_lo, sa_hi) if en["color"] else 1.0,
+        "gamma":         r.uniform(ga_lo, ga_hi) if en["color"] else 1.0,
+        # Piso 4: niveles 2-3 quedan casi borrados por la compresión CRF 20.
+        "noise":         max(4, r.randint(round(no_lo), round(no_hi))) if (en["noise"] and fires(0.4)) else 0,
+        "speed":         r.uniform(sp_lo, sp_hi) if (en["speed"] and fires(0.5)) else 1.0,
+        "trim_start_ms": r.randint(round(tr_lo), round(tr_hi)) if en["trim"] else 0,
+        "trim_end_ms":   r.randint(round(tr_lo), round(tr_hi)) if en["trim"] else 0,
     }
 
 
@@ -367,6 +438,8 @@ def apply_variant_and_metadata(
     meta: dict,
     rng: "random.Random | None" = None,
     enabled: "dict | None" = None,
+    strength: float = 1.0,
+    overrides: "dict | None" = None,
 ) -> dict:
     """
     Genera una copia realmente distinta a nivel de píxeles (recorte de bordes,
@@ -378,7 +451,7 @@ def apply_variant_and_metadata(
     Devuelve los parámetros usados (útil para logging/depuración).
     """
     width, height, duration, has_audio = _probe_video_info(input_path)
-    params = generate_variant_params(rng, enabled)
+    params = generate_variant_params(rng, enabled, strength, overrides)
 
     start = params["trim_start_ms"] / 1000.0
     end = params["trim_end_ms"] / 1000.0
