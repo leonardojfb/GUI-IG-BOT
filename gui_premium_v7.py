@@ -140,6 +140,15 @@ def _random_headers(cookie: str) -> dict:
 # ══════════════════════════════════════════════════════════════════════════════
 # PANEL DE ESTADO DE CUENTAS
 # ══════════════════════════════════════════════════════════════════════════════
+def build_bulk_account_updates(category: str, assigned_va: str) -> dict:
+    updates = {}
+    if category and category != "Sin cambios":
+        updates["account_type"] = category
+    if assigned_va and assigned_va != "Sin cambios":
+        updates["assigned_va"] = assigned_va
+    return updates
+
+
 class AccountStatusPanel(ctk.CTkFrame):
     """Panel de control de cuentas IG con verificación HTTP sigilosa."""
 
