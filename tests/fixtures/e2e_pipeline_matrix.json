@@ -1,0 +1,30 @@
+{
+  "categories": ["PRUEBA_CAT_A", "PRUEBA_CAT_B", "PRUEBA_CAT_C"],
+  "vas": [
+    {"name": "PRUEBA_VA_A", "telegram_id": "TEST_CHAT_A"},
+    {"name": "PRUEBA_VA_B", "telegram_id": "TEST_CHAT_B"},
+    {"name": "PRUEBA_VA_C", "telegram_id": "TEST_CHAT_C"}
+  ],
+  "accounts": [
+    {"username": "prueba_a_va_a", "category": "PRUEBA_CAT_A", "va": "PRUEBA_VA_A"},
+    {"username": "prueba_a_va_b", "category": "PRUEBA_CAT_A", "va": "PRUEBA_VA_B"},
+    {"username": "prueba_a_va_c", "category": "PRUEBA_CAT_A", "va": "PRUEBA_VA_C"},
+    {"username": "prueba_b_va_a", "category": "PRUEBA_CAT_B", "va": "PRUEBA_VA_A"},
+    {"username": "prueba_b_va_b", "category": "PRUEBA_CAT_B", "va": "PRUEBA_VA_B"},
+    {"username": "prueba_b_va_c", "category": "PRUEBA_CAT_B", "va": "PRUEBA_VA_C"},
+    {"username": "prueba_c_va_a", "category": "PRUEBA_CAT_C", "va": "PRUEBA_VA_A"},
+    {"username": "prueba_c_va_b", "category": "PRUEBA_CAT_C", "va": "PRUEBA_VA_B"},
+    {"username": "prueba_c_va_c", "category": "PRUEBA_CAT_C", "va": "PRUEBA_VA_C"}
+  ],
+  "tandas": {
+    "ED_A": {"stage": "edicion", "category": "PRUEBA_CAT_A", "caption": "CAP_ED_A.txt"},
+    "ED_B": {"stage": "edicion", "category": "PRUEBA_CAT_B", "caption": null},
+    "ED_C": {"stage": "edicion", "category": "PRUEBA_CAT_C", "caption": null},
+    "TA_A": {"stage": "tanda", "category": "PRUEBA_CAT_A", "caption": null},
+    "TA_B": {"stage": "tanda", "category": "PRUEBA_CAT_B", "caption": "CAP_TA_B.txt"},
+    "TA_C": {"stage": "tanda", "category": "PRUEBA_CAT_C", "caption": null},
+    "FO_A": {"stage": "forge", "category": "PRUEBA_CAT_A", "caption": null},
+    "FO_B": {"stage": "forge", "category": "PRUEBA_CAT_B", "caption": null},
+    "FO_C": {"stage": "forge", "category": "PRUEBA_CAT_C", "caption": "CAP_FO_C.txt"}
+  }
+}
