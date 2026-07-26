@@ -719,9 +719,6 @@ class InstagramAutoPro(ctk.CTk):
         # Estado de rutas (Tandas)
         self.p1_dir = ""
         self.p2_dir = ""
-        self.cap_file = ""
-        self.acct_cap_file = ""
-        self.tandas_cap_file = ""
         self.tg_controller = None
         self._tg_accounts = []
         self._tg_only_with_videos = None  # se inicializa en _build_tg_frame
@@ -1940,16 +1937,9 @@ class InstagramAutoPro(ctk.CTk):
         lbl_cap = ctk.CTkLabel(dlg, text=f"Cap: {os.path.basename(state['cap']) or '—'}",
                                text_color=WARNING, font=ctk.CTkFont(size=11), anchor="w")
         lbl_cap.pack(fill="x", padx=20)
-
-        def pick_cap():
-            path = filedialog.askopenfilename(filetypes=[("Texto", "*.txt")], parent=dlg)
-            if path:
-                state["cap"] = path
-                lbl_cap.configure(text=f"Cap: {os.path.basename(path)}")
-        ctk.CTkButton(dlg, text="📄 Cambiar Captions", fg_color=WARNING,
-                      hover_color=self._darken(WARNING), text_color=BG_APP,
-                      corner_radius=BTN_RADIUS, height=BTN_H, command=pick_cap
-                      ).pack(fill="x", padx=20, pady=(2, 12))
+        ctk.CTkLabel(dlg, text="Los captions se cambian solo desde Logística.",
+                     text_color=TEXT_MUTED, font=ctk.CTkFont(size=10), anchor="w"
+                     ).pack(fill="x", padx=20, pady=(2, 12))
 
         def save():
             new_name = e_name.get().strip().upper()
@@ -1996,28 +1986,20 @@ class InstagramAutoPro(ctk.CTk):
             self.lbl_tanda_p2.configure(
                 text=f"P2: {os.path.basename(path)}", text_color=NEON_CYAN)
 
-    def _tanda_admin_pick_cap(self):
-        path = filedialog.askopenfilename(filetypes=[("Archivos de texto", "*.txt")])
-        if path:
-            self._tanda_admin_cap = path
-            self.lbl_tanda_cap.configure(
-                text=f"Cap: {os.path.basename(path)}", text_color=WARNING)
-
     def _tanda_admin_save(self):
         name = self.e_tanda_admin_name.get().strip().upper()
         if not name:
             return messagebox.showwarning("⚠️", "Ingresa un nombre para la tanda.")
         if not self._tanda_admin_p1 or not self._tanda_admin_p2:
             return messagebox.showwarning("⚠️", "Selecciona las carpetas P1 y P2.")
+        existing = self.db.get_tanda_by_name(name) or {}
         self.db.add_tanda(name, self._tanda_admin_p1, self._tanda_admin_p2,
-                          self._tanda_admin_cap or None)
+                          existing.get("captions_file_path"))
         self.e_tanda_admin_name.delete(0, "end")
         self._tanda_admin_p1 = ""
         self._tanda_admin_p2 = ""
-        self._tanda_admin_cap = ""
         self.lbl_tanda_p1.configure(text="P1: —", text_color=TEXT_MUTED)
         self.lbl_tanda_p2.configure(text="P2: —", text_color=TEXT_MUTED)
-        self.lbl_tanda_cap.configure(text="Captions: —", text_color=TEXT_MUTED)
         self._admin_load_tandas()
         self.reload_dist_lists()
         messagebox.showinfo("✅", f"Tanda '{name}' guardada correctamente.")
@@ -2072,11 +2054,9 @@ class InstagramAutoPro(ctk.CTk):
         bot_card.grid(row=3, column=0, columnspan=2, sticky="ew", padx=24, pady=(10, 24))
         bot_body = bot_card.body
         
-        GhostButton(bot_body, text="Archivo Captions (.txt)",
-                    command=self.pick_captions).pack(side="left")
-        
-        self.lbl_cap = ctk.CTkLabel(bot_body, text="Ningún archivo seleccionado", text_color=TEXT_MUTED)
-        self.lbl_cap.pack(side="left", padx=10)
+        ctk.CTkLabel(
+            bot_body, text="Los captions se asignan por tanda desde Logística.", text_color=TEXT_MUTED
+        ).pack(side="left")
         
         self.btn_render = PrimaryButton(bot_body, text="INICIAR RENDER", height=BTN_H_LG,
                                         command=self.process_tanda)
@@ -2117,24 +2097,6 @@ class InstagramAutoPro(ctk.CTk):
             ctk.CTkLabel(target_frame, text=f"🎥 {f_name}", anchor="w",
                          text_color=TEXT_BODY, font=ctk.CTkFont(size=11)).pack(fill="x", padx=15, pady=2)
 
-    def pick_captions(self):
-        path = filedialog.askopenfilename(filetypes=[("Archivos de Texto", "*.txt")])
-        if path:
-            self.cap_file = path
-            self.lbl_cap.configure(text=os.path.basename(path), text_color=NEON_CYAN)
-
-    def pick_captions_acct(self):
-        path = filedialog.askopenfilename(filetypes=[("Archivos de Texto", "*.txt")])
-        if path:
-            self.acct_cap_file = path
-            self.acct_lbl_cap.configure(text=os.path.basename(path), text_color=NEON_CYAN)
-
-    def pick_captions_tandas(self):
-        path = filedialog.askopenfilename(filetypes=[("Archivos de Texto", "*.txt")])
-        if path:
-            self.tandas_cap_file = path
-            self.tandas_lbl_cap.configure(text=os.path.basename(path), text_color=NEON_CYAN)
-
     def _refresh_tandas_list(self):
         if not hasattr(self, "_tandas_list_scroll"):
             return
@@ -2166,10 +2128,11 @@ class InstagramAutoPro(ctk.CTk):
 
     def process_tanda(self):
         name = self.e_tanda_name.get().strip().upper()
-        if not name or not self.p1_dir or not self.p2_dir or not self.cap_file:
-            return messagebox.showwarning("⚠️", "Asegúrate de llenar el nombre, seleccionar P1, P2 y Captions.")
+        if not name or not self.p1_dir or not self.p2_dir:
+            return messagebox.showwarning("⚠️", "Asegúrate de llenar el nombre y seleccionar P1 y P2.")
 
-        self.db.add_tanda(name, self.p1_dir, self.p2_dir, self.cap_file)
+        existing = self.db.get_tanda_by_name(name) or {}
+        self.db.add_tanda(name, self.p1_dir, self.p2_dir, existing.get("captions_file_path"))
         self._refresh_tandas_list()
         self.reload_dist_lists()
 
@@ -2223,7 +2186,10 @@ class InstagramAutoPro(ctk.CTk):
 
         # Fila 0: Tandas y Categorías
         ctk.CTkLabel(parent, text="Tanda principal:", text_color=TEXT_MUTED).grid(row=0, column=0, padx=20, pady=(20, 10), sticky="e")
-        self.c_tandas = ctk.CTkComboBox(parent, values=[], fg_color=BG_INPUT, border_color=BORDER)
+        self.c_tandas = ctk.CTkComboBox(
+            parent, values=[], fg_color=BG_INPUT, border_color=BORDER,
+            command=self._refresh_tanda_caption_label,
+        )
         self.c_tandas.grid(row=0, column=1, padx=10, pady=(20, 10), sticky="ew")
 
         ctk.CTkLabel(parent, text="2da tanda (opcional):", text_color=TEXT_MUTED).grid(row=0, column=2, padx=20, pady=(20, 10), sticky="e")
@@ -2250,12 +2216,14 @@ class InstagramAutoPro(ctk.CTk):
                   variable=self.fillup_var).grid(row=3, column=0, columnspan=4,
                                                   padx=20, pady=(10, 10), sticky="ew")
 
-        # Fila 4: Archivo Captions
+        # Fila 4: captions persistidos por tanda (solo Logística)
         cap_row = ctk.CTkFrame(parent, fg_color=BG_CARD2, corner_radius=CARD_RADIUS)
         cap_row.grid(row=4, column=0, columnspan=4, sticky="ew", padx=20, pady=(0, 10))
-        GhostButton(cap_row, text="Archivo Captions (.txt)",
-                    command=self.pick_captions_tandas).pack(side="left", padx=16, pady=12)
-        self.tandas_lbl_cap = ctk.CTkLabel(cap_row, text="Ningún archivo seleccionado", text_color=TEXT_MUTED)
+        GhostButton(cap_row, text="Asignar captions a tanda",
+                    command=self.assign_captions_to_selected_tanda).pack(side="left", padx=16, pady=12)
+        DangerButton(cap_row, text="Quitar captions",
+                     command=self.clear_captions_from_selected_tanda).pack(side="left", padx=8, pady=12)
+        self.tandas_lbl_cap = ctk.CTkLabel(cap_row, text="Sin captions asignados", text_color=TEXT_MUTED)
         self.tandas_lbl_cap.pack(side="left", padx=10)
 
         # Botonera
@@ -2390,17 +2358,9 @@ class InstagramAutoPro(ctk.CTk):
         DangerButton(add_row, text="Última",
                      command=self._acct_dist_remove_last).pack(side="left")
 
-        # ── Archivo Captions ─────────────────────────────────────────────
-        cap_row = ctk.CTkFrame(parent, fg_color=BG_CARD2, corner_radius=CARD_RADIUS)
-        cap_row.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 6))
-        GhostButton(cap_row, text="Archivo Captions (.txt)",
-                    command=self.pick_captions_acct).pack(side="left", padx=16, pady=12)
-        self.acct_lbl_cap = ctk.CTkLabel(cap_row, text="Ningún archivo seleccionado", text_color=TEXT_MUTED)
-        self.acct_lbl_cap.pack(side="left", padx=10)
-
         # ── Botones principales ──────────────────────────────────────────
         btn_row = ctk.CTkFrame(parent, fg_color="transparent")
-        btn_row.grid(row=4, column=0, pady=16)
+        btn_row.grid(row=3, column=0, pady=16)
         GhostButton(btn_row, text="Resetear todo", height=BTN_H_LG,
                     command=self._acct_dist_reset).pack(side="left", padx=(0, 20))
         GhostButton(btn_row, text="PREVISUALIZAR", height=BTN_H_LG,
@@ -2411,7 +2371,7 @@ class InstagramAutoPro(ctk.CTk):
         # ── Resultados ───────────────────────────────────────────────────
         self.acct_dist_result = ctk.CTkTextbox(parent, fg_color=BG_CARD2, height=200,
                                                 text_color=NEON_CYAN, font=FONT_MONO)
-        self.acct_dist_result.grid(row=5, column=0, sticky="nsew", padx=16, pady=(0, 16))
+        self.acct_dist_result.grid(row=4, column=0, sticky="nsew", padx=16, pady=(0, 16))
 
     # ── Lógica Logística ─────────────────────────────────────────────────────
     def reload_dist_lists(self, event=None):
@@ -2425,6 +2385,7 @@ class InstagramAutoPro(ctk.CTk):
             if hasattr(self, "c_tandas"):
                 self.c_tandas.configure(values=tandas)
                 if not self.c_tandas.get() and tandas: self.c_tandas.set(tandas[0])
+                self._refresh_tanda_caption_label()
 
             if hasattr(self, "c_tandas_2"):
                 self.c_tandas_2.configure(values=[""] + tandas)
@@ -2441,10 +2402,40 @@ class InstagramAutoPro(ctk.CTk):
             if hasattr(self, "acct_dist_cat"):
                 self.acct_dist_cat.configure(values=cats)
                 if not self.acct_dist_cat.get() and cats: self.acct_dist_cat.set(cats[0])
-            if hasattr(self, "c_forge_cat"):
-                self._forge_reload_cats()
         except Exception as e:
             print(f"⚠️ Error al refrescar listas dist: {e}")
+
+    def _refresh_tanda_caption_label(self, _value=None):
+        if not hasattr(self, "tandas_lbl_cap") or not hasattr(self, "c_tandas"):
+            return
+        tanda = self.db.get_tanda_by_name(self.c_tandas.get().strip()) or {}
+        path = tanda.get("captions_file_path") or ""
+        if path:
+            self.tandas_lbl_cap.configure(text=os.path.basename(path), text_color=NEON_CYAN)
+        else:
+            self.tandas_lbl_cap.configure(text="Sin captions asignados", text_color=TEXT_MUTED)
+
+    def assign_captions_to_selected_tanda(self):
+        tanda_name = self.c_tandas.get().strip()
+        if not tanda_name:
+            return messagebox.showwarning("⚠️", "Selecciona una tanda primero.")
+        path = filedialog.askopenfilename(filetypes=[("Archivos de Texto", "*.txt")])
+        if not path:
+            return
+        if not self.db.set_tanda_captions(tanda_name, path):
+            return messagebox.showerror("Error", f"No encontré la tanda '{tanda_name}'.")
+        self._refresh_tanda_caption_label()
+        messagebox.showinfo("Captions asignados", f"'{os.path.basename(path)}' quedó asignado a '{tanda_name}'.")
+
+    def clear_captions_from_selected_tanda(self):
+        tanda_name = self.c_tandas.get().strip()
+        if not tanda_name:
+            return messagebox.showwarning("⚠️", "Selecciona una tanda primero.")
+        if not messagebox.askyesno("Quitar captions", f"¿Quitar los captions de '{tanda_name}'?"):
+            return
+        if not self.db.set_tanda_captions(tanda_name, None):
+            return messagebox.showerror("Error", f"No encontré la tanda '{tanda_name}'.")
+        self._refresh_tanda_caption_label()
 
     def preview_distribution(self):
         tanda = self.c_tandas.get()
@@ -2552,8 +2543,6 @@ class InstagramAutoPro(ctk.CTk):
 
     def _refresh_dist_frame(self):
         """Destruye y reconstruye el frame de Logística completo (equivalente a F5)."""
-        self.acct_cap_file = ""
-        self.tandas_cap_file = ""
         f = self._frames["Logistica"]
         for w in f.winfo_children():
             w.destroy()
@@ -3105,18 +3094,8 @@ class InstagramAutoPro(ctk.CTk):
         self.bot_log(f"Cuentas seleccionadas ({len(selected_accounts)}): {', '.join('@' + u for u in selected_accounts)}", "INFO")
 
         import organizadortg as telegram_bot
-        cap_file = self.acct_cap_file or self.tandas_cap_file or None
-        if not cap_file and hasattr(self, "c_tandas"):
-            tanda = self.db.get_tanda_by_name(self.c_tandas.get().strip())
-            cap_file = (tanda or {}).get("captions_file_path") or None
-        if cap_file and not os.path.isfile(cap_file):
-            self.bot_log(f"⚠️ Archivo de captions no encontrado: {cap_file}", "WARNING")
-            cap_file = None
-        self.bot_log(
-            f"📝 Captions: {os.path.basename(cap_file) if cap_file else 'sin archivo'}",
-            "INFO",
-        )
-        self.tg_controller = telegram_bot.TelegramBotController(date_str, selected_accounts, captions_file=cap_file)
+        self.bot_log("📝 Captions: se resuelven por tanda desde Logística.", "INFO")
+        self.tg_controller = telegram_bot.TelegramBotController(date_str, selected_accounts)
         
         self.btn_start_tg.configure(state="disabled")
         self.btn_pause_tg.configure(state="normal")
@@ -4000,7 +3979,6 @@ class InstagramAutoPro(ctk.CTk):
         # has no .strip(), so this field MUST stay a CTkEntry.
         cfg_rows = [
             ("Nombre de tanda:",   "e_forge_tanda",   None,    None),
-            ("Categoría destino:", "c_forge_cat",      "combo", None),
             ("Copias por vídeo:",   "e_forge_copies",  None,    "stepper"),
             ("Días a distribuir:", "e_forge_days",     "MAX",   None),
         ]
@@ -4012,15 +3990,6 @@ class InstagramAutoPro(ctk.CTk):
                 widget = Stepper(card_cfg, value=4, min=1, max=50)
                 widget.grid(row=row_i, column=1, padx=(0, 18), pady=7, sticky="w")
                 setattr(self, attr, widget)
-            elif default == "combo":
-                widget = ctk.CTkComboBox(card_cfg, values=[], fg_color=BG_INPUT,
-                                         border_color=BORDER,
-                                         button_color=NEON_CYAN,
-                                         dropdown_fg_color=BG_CARD2)
-                widget.grid(row=row_i, column=1, padx=(0, 18), pady=7, sticky="ew")
-                setattr(self, attr, widget)
-                self.c_forge_cat = widget
-                self._forge_reload_cats()
             else:
                 widget = ctk.CTkEntry(card_cfg, fg_color=BG_INPUT,
                                       border_color=BORDER)
@@ -4028,11 +3997,6 @@ class InstagramAutoPro(ctk.CTk):
                     widget.insert(0, default)
                 widget.grid(row=row_i, column=1, padx=(0, 18), pady=7, sticky="ew")
                 setattr(self, attr, widget)
-
-        self.forge_dist_var = tk.BooleanVar(value=True)
-        ToggleRow(card_cfg, "Distribuir automáticamente al procesar",
-                  variable=self.forge_dist_var).grid(row=5, column=0, columnspan=2,
-                                                     sticky="ew", padx=18, pady=(6, 4))
 
         # ── Eje Efectos (qué efectos) ────────────────────────────────────
         ctk.CTkLabel(card_cfg, text="Efectos", text_color=TEXT_MUTED,
@@ -4203,13 +4167,6 @@ class InstagramAutoPro(ctk.CTk):
         elif self.forge_custom_panel.winfo_manager():
             self.forge_custom_panel.grid_remove()
 
-    def _forge_reload_cats(self):
-        cats = self.db.get_categories()
-        if hasattr(self, "c_forge_cat"):
-            self.c_forge_cat.configure(values=cats)
-            if cats and not self.c_forge_cat.get():
-                self.c_forge_cat.set(cats[0])
-
     def forge_add_videos(self):
         paths = filedialog.askopenfilenames(
             title="Seleccionar Videos",
@@ -4275,13 +4232,9 @@ class InstagramAutoPro(ctk.CTk):
             return messagebox.showwarning("⚠️", "Generá el preview primero.")
 
         tanda_name = self.e_forge_tanda.get().strip()
-        category   = self.c_forge_cat.get()
-        auto_dist  = self.forge_dist_var.get()
 
         if not tanda_name:
             return messagebox.showwarning("⚠️", "Ingresá un nombre para la tanda Forge.")
-        if not category:
-            return messagebox.showwarning("⚠️", "Seleccioná una categoría destino.")
         try:
             copies = int(self.e_forge_copies.get())
             if copies < 1:
@@ -4289,7 +4242,6 @@ class InstagramAutoPro(ctk.CTk):
         except ValueError:
             return messagebox.showwarning("⚠️", "Copias por vídeo debe ser un número >= 1.")
 
-        days_input = self.e_forge_days.get().strip() or "MAX"
         n_total = len(self.forge_video_paths) * copies
 
         # Leer checkboxes de micro-ediciones en el hilo principal (tk vars no
@@ -4312,9 +4264,7 @@ class InstagramAutoPro(ctk.CTk):
         if not messagebox.askyesno("Confirmar Forge", (
             f"¿Generar {len(self.forge_video_paths)} vídeos × {copies} copias = {n_total} archivos con metadata iPhone única?\n\n"
             f"Tanda: {tanda_name}\n"
-            f"Categoría: {category}\n"
-            f"Micro-ediciones: {fx_desc}\n"
-            f"Distribuir automáticamente: {'Sí' if auto_dist else 'No'}"
+            f"Micro-ediciones: {fx_desc}"
         )):
             return
 
@@ -4359,19 +4309,16 @@ class InstagramAutoPro(ctk.CTk):
                     fingerprints.append({"video_hash": f"{vh}_{copy_num}", **meta})
                     meta_idx += 1
             db_ref.save_metadata_fingerprints(fingerprints)
-            db_ref.add_tanda(tanda_name, tanda_name, tanda_name, "")
+            existing_tanda = db_ref.get_tanda_by_name(tanda_name) or {}
+            db_ref.add_tanda(
+                tanda_name, tanda_name, tanda_name, existing_tanda.get("captions_file_path")
+            )
 
             msg = (
                 f"✅ {n_total} archivos generados ({len(videos)} vídeos × {copies} copias).\n"
                 f"📁 Guardados en: videos_finales/{tanda_name}/\n"
                 f"🔮 Tanda '{tanda_name}' registrada en la DB."
             )
-            if auto_dist:
-                import Organizador
-                dist_result = Organizador.distribute_tanda(
-                    tanda_name, category, copies, False, days_input
-                )
-                msg += f"\n\n{dist_result}"
             return msg
 
         def done(success, result):

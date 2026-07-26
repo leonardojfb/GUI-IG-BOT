@@ -295,6 +295,16 @@ class DatabaseManager:
         ''', (name, p1, p2, captions))
         self.conn.commit()
 
+    def set_tanda_captions(self, name, captions_path):
+        """Asigna o quita el archivo de captions de una tanda desde Logistica."""
+        cur = self.conn.cursor()
+        cur.execute(
+            "UPDATE batch_tandas SET captions_file_path = ? WHERE tanda_name = ?",
+            (captions_path or None, name),
+        )
+        self.conn.commit()
+        return cur.rowcount
+
     def get_tandas(self, active_only=False):
         """Alias de get_all_tandas para compatibilidad."""
         return self.get_all_tandas()

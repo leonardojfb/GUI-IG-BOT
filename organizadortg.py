@@ -196,8 +196,40 @@ def caption_for_video(pool, video_index):
         return None
     return shuffle_hashtags(pool[video_index % len(pool)])
 
+
+def _tanda_tag(tanda_name):
+    return str(tanda_name or "").strip().replace(" ", "_")
+
+
+def extract_tanda_tag_from_calendar_filename(filename):
+    """Extrae el tag de tanda que Logistica escribe en cada archivo calendarizado."""
+    match = re.search(r"__TANDA_(.+?)__ACC\d+__D\d+__S\d+(?:__\d+)?(?:\.[^.]+)?$", os.path.basename(filename))
+    return match.group(1) if match else None
+
+
+def load_tanda_caption_pools(tandas=None):
+    """Carga pools por tanda desde la asignacion persistida por Logistica."""
+    tandas = db.get_all_tandas() if tandas is None else tandas
+    pools = {}
+    for tanda in tandas:
+        name = tanda.get("tanda_name")
+        pool = load_clean_captions(tanda.get("captions_file_path"))
+        if name and pool:
+            pools[_tanda_tag(name)] = pool
+    return pools
+
+
+def caption_for_calendar_video(filename, pools, caption_indexes):
+    """Resuelve el caption por tanda; un archivo sin asignacion se envia sin caption."""
+    tanda_tag = extract_tanda_tag_from_calendar_filename(filename)
+    pool = pools.get(tanda_tag, []) if tanda_tag else []
+    if not pool:
+        return None
+    index = caption_indexes.get(tanda_tag, 0)
+    caption_indexes[tanda_tag] = index + 1
+    return caption_for_video(pool, index)
+
 history_db = load_json(os.path.join(base_dir, HISTORY_FILE))
-captions_pool = []  # se carga en execute_telegram_plan con el archivo elegido por el usuario
 
 # --- 3. BASE DE DATOS Y ENRUTAMIENTO ---
 def get_accounts_with_va_info():
@@ -420,10 +452,8 @@ def _account_tag(acc_info):
         return "SUICIDE"
     return category.upper() if category else "GENERAL"
 
-def execute_telegram_plan(start_date, selected_accounts=None, controller=None, captions_file=None):
-    pool = load_clean_captions(captions_file)
-    if captions_file and not pool:
-        print(f"⚠️ El archivo de captions '{captions_file}' no contenía texto válido — se enviará sin caption.")
+def execute_telegram_plan(start_date, selected_accounts=None, controller=None):
+    caption_pools = load_tanda_caption_pools()
 
     accounts = get_accounts_with_va_info()
     all_videos = scan_calendar_structure()
@@ -456,7 +486,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, c
     print(f"── Topics listos. Iniciando envíos ──\n")
 
     global_sent = 0
-    caption_index = 0
+    caption_indexes = {}
     fecha_envio = start_date
 
     sorted_days = sorted(day_account_videos.keys(), key=lambda x: int(x.split('_')[1]))
@@ -519,8 +549,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, c
                     else:
                         print(f"⚠️ Error en Telegram API (sendMessage) para @{username}: {msg_res}")
 
-                cap = caption_for_video(pool, caption_index) if pool else None
-                caption_index += 1
+                cap = caption_for_calendar_video(vid['filename'], caption_pools, caption_indexes)
                 try:
                     ok, t_id = _send_video_to_topic(chat_id, t_id, cap, vid['path'], topics_state, username, tag)
                     if ok:
@@ -537,10 +566,9 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, c
 
 # --- 4. CONTROLADOR DE HILOS Y MOTOR DE EJECUCIÓN ---
 class TelegramBotController:
-    def __init__(self, start_date_str, selected_accounts=None, captions_file=None):
+    def __init__(self, start_date_str, selected_accounts=None):
         self.start_date_str = start_date_str
         self.selected_accounts = selected_accounts
-        self.captions_file = captions_file
         self._paused = threading.Event()
         self._paused.set()
         self._stopped = False
@@ -560,7 +588,7 @@ class TelegramBotController:
         self._stopped = False
         try:
             start_date = datetime.strptime(self.start_date_str, "%Y-%m-%d")
-            result = execute_telegram_plan(start_date, self.selected_accounts, self, captions_file=self.captions_file)
+            result = execute_telegram_plan(start_date, self.selected_accounts, self)
             print(result)
         finally:
             self._running = False

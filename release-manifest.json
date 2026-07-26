@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.9",
+    "version":  "1.0.10",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.9",
-    "asset_name":  "MetodoIG-v1.0.9.zip",
-    "sha256":  "9f04b1585425a089f4041e9863ef3b7363e2f57f0a096ffe93db4df8a84177e9",
-    "notes":  "Motor Fuerza/Efectos con presets y rangos Custom por efecto. Editor de video (recorte, overlays, batches cartesianos foto+video). Edicion masiva de categoria/VA para cuentas seleccionadas. Fixes: rendimiento y persistencia de seleccion/orden en el dashboard, captions de Telegram multilinea y rotacion en orden, registro de Forge no pisaba copias, casing de categoria en GUI legacy.",
+    "github_release_tag":  "v1.0.10",
+    "asset_name":  "MetodoIG-v1.0.10.zip",
+    "sha256":  "680f34076b7532b5a3730f7d51a4df5140f10488595308bc86fd3d3b75202a33",
+    "notes":  "Captions asignados exclusivamente en Logística por tanda; Telegram los resuelve por __TANDA_ sin caption global. Incluye smoke E2E de trazabilidad y auditoría de distribución.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",
