@@ -1,5 +1,6 @@
 import organizadortg
 import database
+from Organizador import build_calendar_video_filename
 
 
 def test_caption_routing_uses_the_caption_assigned_to_each_tanda(tmp_path):
@@ -38,6 +39,19 @@ def test_caption_routing_accepts_tanda_names_with_spaces():
     assert organizadortg.extract_tanda_tag_from_calendar_filename(
         "clip__TANDA_PROMO_EVE__ACC2__D1__S1.mp4"
     ) == "PROMO_EVE"
+
+
+def test_calendarized_video_name_preserves_tanda_marker_for_caption_routing():
+    filename = build_calendar_video_filename(
+        "clip__c01.mp4",
+        tanda_name="PROMO EVE",
+        account_id=42,
+        day=3,
+        slot=2,
+    )
+
+    assert filename == "clip__c01__TANDA_PROMO_EVE__ACC42__D3__S2.mp4"
+    assert organizadortg.extract_tanda_tag_from_calendar_filename(filename) == "PROMO_EVE"
 
 
 def test_logistica_caption_assignment_persists_on_the_tanda(tmp_path):

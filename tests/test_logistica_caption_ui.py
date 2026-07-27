@@ -31,3 +31,9 @@ def test_logistica_caption_actions_target_the_requested_tanda_selector():
     assert 'selector_attr="c_tandas"' in clear
     assert "_get_logistica_caption_tanda_name(selector_attr)" in assign
     assert "_get_logistica_caption_tanda_name(selector_attr)" in clear
+
+
+def test_por_cuentas_distribution_calendarizes_filenames_for_telegram_captions():
+    run = _method_source("_acct_dist_run")
+
+    assert "build_calendar_video_filename" in run

@@ -2675,6 +2675,7 @@ class InstagramAutoPro(ctk.CTk):
 
         def task():
             import re
+            from Organizador import build_calendar_video_filename
 
             def forge_vid_id(fname):
                 base = os.path.splitext(fname)[0]
@@ -2695,6 +2696,15 @@ class InstagramAutoPro(ctk.CTk):
                     f"No hay suficientes videos ({len(all_vids)}) para "
                     f"{len(accounts)} cuentas × {vpd} vid/día × {days} días = {needed} necesarios"
                 )
+
+            db_account_ids = {
+                str(row.get("username")): row.get("id")
+                for row in self.db.get_all_accounts()
+            }
+            account_ids = {
+                acc: db_account_ids.get(acc) or idx + 1
+                for idx, acc in enumerate(accounts)
+            }
 
             pool = all_vids[:]
             random.shuffle(pool)
@@ -2794,9 +2804,26 @@ class InstagramAutoPro(ctk.CTk):
                     for day_idx, day_vids in enumerate(day_lists):
                         day_path = os.path.join(cal_root, f"Dia_{day_idx + 1}", acc)
                         os.makedirs(day_path, exist_ok=True)
-                        for vid_name in day_vids:
+                        for slot_idx, vid_name in enumerate(day_vids, 1):
                             src = os.path.join(folder, vid_name)
-                            dst = os.path.join(day_path, vid_name)
+                            dst_name = build_calendar_video_filename(
+                                vid_name,
+                                tanda,
+                                account_ids[acc],
+                                day_idx + 1,
+                                slot_idx,
+                            )
+                            dst = os.path.join(day_path, dst_name)
+                            if os.path.exists(dst):
+                                dst_name = build_calendar_video_filename(
+                                    vid_name,
+                                    tanda,
+                                    account_ids[acc],
+                                    day_idx + 1,
+                                    slot_idx,
+                                    collision_suffix=random.randint(1000, 9999),
+                                )
+                                dst = os.path.join(day_path, dst_name)
                             shutil.copy2(src, dst)
                             total_copiados += 1
 

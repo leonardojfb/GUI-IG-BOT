@@ -16,6 +16,14 @@ output_root = os.path.join(base_dir, "CALENDARIO_POSTEO")
 DAILY_GOAL = 46
 FILL_UP_ENABLED = True
 
+
+def build_calendar_video_filename(video_filename, tanda_name, account_id, day, slot, collision_suffix=None):
+    base, ext = os.path.splitext(video_filename)
+    tanda_tag = str(tanda_name or "").strip().replace(" ", "_")
+    suffix = f"__{collision_suffix}" if collision_suffix is not None else ""
+    return f"{base}__TANDA_{tanda_tag}__ACC{account_id}__D{day}__S{slot}{suffix}{ext}"
+
+
 def preview_distribution_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to_organize="MAX"):
     """
     Genera un reporte detallado de distribución, detallando VAs y Fill-up por cuenta.
@@ -963,14 +971,20 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
                     src = vid_item["path"]
                     vid_name = vid_item["filename"]
 
-                    base, ext = os.path.splitext(vid_name)
-                    tanda_tag = vid_item["tanda"].replace(" ", "_")
-
-                    unique_name = f"{base}__TANDA_{tanda_tag}__ACC{acc_id}__D{day}__S{slot}{ext}"
+                    unique_name = build_calendar_video_filename(
+                        vid_name, vid_item["tanda"], acc_id, day, slot
+                    )
                     dst = os.path.join(target_dir, unique_name)
 
                     if os.path.exists(dst):
-                        unique_name = f"{base}__TANDA_{tanda_tag}__ACC{acc_id}__D{day}__S{slot}__{random.randint(1000,9999)}{ext}"
+                        unique_name = build_calendar_video_filename(
+                            vid_name,
+                            vid_item["tanda"],
+                            acc_id,
+                            day,
+                            slot,
+                            collision_suffix=random.randint(1000, 9999),
+                        )
                         dst = os.path.join(target_dir, unique_name)
 
                     shutil.copy2(src, dst)
