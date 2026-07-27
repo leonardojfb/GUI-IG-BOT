@@ -2217,14 +2217,11 @@ class InstagramAutoPro(ctk.CTk):
                                                   padx=20, pady=(10, 10), sticky="ew")
 
         # Fila 4: captions persistidos por tanda (solo Logística)
-        cap_row = ctk.CTkFrame(parent, fg_color=BG_CARD2, corner_radius=CARD_RADIUS)
-        cap_row.grid(row=4, column=0, columnspan=4, sticky="ew", padx=20, pady=(0, 10))
-        GhostButton(cap_row, text="Asignar captions a tanda",
-                    command=self.assign_captions_to_selected_tanda).pack(side="left", padx=16, pady=12)
-        DangerButton(cap_row, text="Quitar captions",
-                     command=self.clear_captions_from_selected_tanda).pack(side="left", padx=8, pady=12)
-        self.tandas_lbl_cap = ctk.CTkLabel(cap_row, text="Sin captions asignados", text_color=TEXT_MUTED)
-        self.tandas_lbl_cap.pack(side="left", padx=10)
+        self._build_logistica_caption_controls(
+            parent, row=4, columnspan=4,
+            selector_attr="c_tandas", label_attr="tandas_lbl_cap",
+            padx=20, pady=(0, 10),
+        )
 
         # Botonera
         btn_box = ctk.CTkFrame(parent, fg_color="transparent")
@@ -2243,6 +2240,34 @@ class InstagramAutoPro(ctk.CTk):
         "3 semanas": 21,
         "1 mes": 30,
     }
+
+    def _build_logistica_caption_controls(
+        self,
+        parent,
+        *,
+        row,
+        columnspan,
+        selector_attr="c_tandas",
+        label_attr="tandas_lbl_cap",
+        padx=20,
+        pady=(0, 10),
+    ):
+        cap_row = ctk.CTkFrame(parent, fg_color=BG_CARD2, corner_radius=CARD_RADIUS)
+        cap_row.grid(row=row, column=0, columnspan=columnspan, sticky="ew", padx=padx, pady=pady)
+        GhostButton(
+            cap_row,
+            text="Asignar captions a tanda",
+            command=lambda attr=selector_attr: self.assign_captions_to_selected_tanda(attr),
+        ).pack(side="left", padx=16, pady=12)
+        DangerButton(
+            cap_row,
+            text="Quitar captions",
+            command=lambda attr=selector_attr: self.clear_captions_from_selected_tanda(attr),
+        ).pack(side="left", padx=8, pady=12)
+        label = ctk.CTkLabel(cap_row, text="Sin captions asignados", text_color=TEXT_MUTED)
+        label.pack(side="left", padx=10)
+        setattr(self, label_attr, label)
+        self._refresh_logistica_caption_label(selector_attr, label_attr)
 
     def _build_dist_cuentas_tab(self, parent):
         """Tab: bloques secuenciales — cada cuenta recibe un bloque distinto del pool."""
@@ -2288,32 +2313,40 @@ class InstagramAutoPro(ctk.CTk):
         # Fila 0: Tanda fuente
         ctk.CTkLabel(cfg, text="Tanda fuente:", text_color=TEXT_MUTED).grid(
             row=0, column=0, padx=(16, 8), pady=(16, 8), sticky="e")
-        self.acct_dist_tanda = ctk.CTkComboBox(cfg, values=[], fg_color=BG_INPUT,
-                                                border_color=BORDER)
+        self.acct_dist_tanda = ctk.CTkComboBox(
+            cfg, values=[], fg_color=BG_INPUT, border_color=BORDER,
+            command=self._refresh_tanda_caption_label,
+        )
         self.acct_dist_tanda.grid(row=0, column=1, columnspan=5, padx=(0, 16), pady=(16, 8), sticky="ew")
+
+        self._build_logistica_caption_controls(
+            cfg, row=1, columnspan=6,
+            selector_attr="acct_dist_tanda", label_attr="acct_dist_lbl_cap",
+            padx=(16, 16), pady=(0, 8),
+        )
 
         # Fila 1: Videos al día + Período + total calculado
         ctk.CTkLabel(cfg, text="Videos al día:", text_color=TEXT_MUTED).grid(
-            row=1, column=0, padx=(16, 8), pady=(4, 16), sticky="e")
+            row=2, column=0, padx=(16, 8), pady=(4, 16), sticky="e")
         self.acct_dist_vpd = Stepper(
             cfg, value=3, min=1, max=50,
             command=lambda _: self._acct_dist_update_total()
         )
-        self.acct_dist_vpd.grid(row=1, column=1, padx=(0, 16), pady=(4, 16), sticky="w")
+        self.acct_dist_vpd.grid(row=2, column=1, padx=(0, 16), pady=(4, 16), sticky="w")
 
         ctk.CTkLabel(cfg, text="Período:", text_color=TEXT_MUTED).grid(
-            row=1, column=2, padx=(8, 8), pady=(4, 16), sticky="e")
+            row=2, column=2, padx=(8, 8), pady=(4, 16), sticky="e")
         self.acct_dist_period = ctk.CTkComboBox(
             cfg, values=list(self.PERIOD_DAYS.keys()),
             fg_color=BG_INPUT, border_color=BORDER,
             command=lambda _: self._acct_dist_update_total())
         self.acct_dist_period.set("1 semana")
-        self.acct_dist_period.grid(row=1, column=3, padx=(0, 16), pady=(4, 16), sticky="ew")
+        self.acct_dist_period.grid(row=2, column=3, padx=(0, 16), pady=(4, 16), sticky="ew")
 
         self.acct_dist_total_lbl = ctk.CTkLabel(
             cfg, text="= 21 videos/cuenta",
             font=ctk.CTkFont(size=13, weight="bold"), text_color=NEON_CYAN)
-        self.acct_dist_total_lbl.grid(row=1, column=4, columnspan=2, padx=(0, 16), pady=(4, 16), sticky="w")
+        self.acct_dist_total_lbl.grid(row=2, column=4, columnspan=2, padx=(0, 16), pady=(4, 16), sticky="w")
         self._acct_dist_update_total()
 
         # ── Cuentas ──────────────────────────────────────────────────────
@@ -2394,6 +2427,7 @@ class InstagramAutoPro(ctk.CTk):
                 self.acct_dist_tanda.configure(values=tandas)
                 if not self.acct_dist_tanda.get() and tandas:
                     self.acct_dist_tanda.set(tandas[0])
+                self._refresh_tanda_caption_label()
 
             cats = self.db.get_categories()
             if hasattr(self, "c_dest"):
@@ -2406,17 +2440,29 @@ class InstagramAutoPro(ctk.CTk):
             print(f"⚠️ Error al refrescar listas dist: {e}")
 
     def _refresh_tanda_caption_label(self, _value=None):
-        if not hasattr(self, "tandas_lbl_cap") or not hasattr(self, "c_tandas"):
-            return
-        tanda = self.db.get_tanda_by_name(self.c_tandas.get().strip()) or {}
-        path = tanda.get("captions_file_path") or ""
-        if path:
-            self.tandas_lbl_cap.configure(text=os.path.basename(path), text_color=NEON_CYAN)
-        else:
-            self.tandas_lbl_cap.configure(text="Sin captions asignados", text_color=TEXT_MUTED)
+        self._refresh_logistica_caption_label("c_tandas", "tandas_lbl_cap")
+        self._refresh_logistica_caption_label("acct_dist_tanda", "acct_dist_lbl_cap")
 
-    def assign_captions_to_selected_tanda(self):
-        tanda_name = self.c_tandas.get().strip()
+    def _get_logistica_caption_tanda_name(self, selector_attr):
+        selector = getattr(self, selector_attr, None)
+        if selector is None:
+            return ""
+        return selector.get().strip()
+
+    def _refresh_logistica_caption_label(self, selector_attr, label_attr):
+        label = getattr(self, label_attr, None)
+        if label is None:
+            return
+        tanda_name = self._get_logistica_caption_tanda_name(selector_attr)
+        tanda = self.db.get_tanda_by_name(tanda_name) if tanda_name else None
+        path = (tanda or {}).get("captions_file_path") or ""
+        if path:
+            label.configure(text=os.path.basename(path), text_color=NEON_CYAN)
+        else:
+            label.configure(text="Sin captions asignados", text_color=TEXT_MUTED)
+
+    def assign_captions_to_selected_tanda(self, selector_attr="c_tandas"):
+        tanda_name = self._get_logistica_caption_tanda_name(selector_attr)
         if not tanda_name:
             return messagebox.showwarning("⚠️", "Selecciona una tanda primero.")
         path = filedialog.askopenfilename(filetypes=[("Archivos de Texto", "*.txt")])
@@ -2427,8 +2473,8 @@ class InstagramAutoPro(ctk.CTk):
         self._refresh_tanda_caption_label()
         messagebox.showinfo("Captions asignados", f"'{os.path.basename(path)}' quedó asignado a '{tanda_name}'.")
 
-    def clear_captions_from_selected_tanda(self):
-        tanda_name = self.c_tandas.get().strip()
+    def clear_captions_from_selected_tanda(self, selector_attr="c_tandas"):
+        tanda_name = self._get_logistica_caption_tanda_name(selector_attr)
         if not tanda_name:
             return messagebox.showwarning("⚠️", "Selecciona una tanda primero.")
         if not messagebox.askyesno("Quitar captions", f"¿Quitar los captions de '{tanda_name}'?"):
@@ -2792,7 +2838,7 @@ class InstagramAutoPro(ctk.CTk):
         ctrl_card = Card(f, title="Cuentas programadas")
         ctrl_card.grid(row=1, column=0, sticky="nsew", padx=(24, 12), pady=10)
         ctrl = ctrl_card.body
-        ctrl.grid_rowconfigure(4, weight=1)
+        ctrl.grid_rowconfigure(5, weight=1)
         ctrl.grid_columnconfigure(0, weight=1)
 
         # Fila 0: título + botón cargar
@@ -2835,18 +2881,28 @@ class InstagramAutoPro(ctk.CTk):
         self.sched_panel = ctk.CTkScrollableFrame(ctrl, fg_color=BG_INPUT, height=160)
         # NO se ejecuta .grid() aquí — se invoca en _toggle_schedule_panel al expandir
 
-        # Fila 4: listbox con selección múltiple
+        # Fila 4: reset opcional de topics
+        self._tg_reset_topics = tk.BooleanVar(value=False)
+        reset_topics_toggle = ToggleRow(
+            ctrl,
+            "Borrar topics existentes y recrear",
+            variable=self._tg_reset_topics,
+            fg_color=BG_CARD2,
+        )
+        reset_topics_toggle.grid(row=4, column=0, sticky="ew", pady=(8, 10))
+
+        # Fila 5: listbox con selección múltiple
         self.list_tg = tk.Listbox(ctrl, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
                                   selectbackground=self.themed(ACCENT),
                                   selectforeground=self.themed(ACCENT_TEXT),
                                   selectmode=tk.EXTENDED,
                                   borderwidth=0, highlightthickness=1,
                                   highlightbackground=self.themed(BORDER), font=FONT_BODY)
-        self.list_tg.grid(row=4, column=0, sticky="nsew", pady=(0, 10))
+        self.list_tg.grid(row=5, column=0, sticky="nsew", pady=(0, 10))
 
         # Controles inferiores
         bot_ctrl = ctk.CTkFrame(ctrl, fg_color="transparent")
-        bot_ctrl.grid(row=5, column=0, sticky="ew", pady=(10, 20))
+        bot_ctrl.grid(row=6, column=0, sticky="ew", pady=(10, 20))
         
         ctk.CTkLabel(bot_ctrl, text="Fecha Inicio (YYYY-MM-DD):", text_color=TEXT_MUTED).pack(side="left")
         self.e_date_tg = ctk.CTkEntry(bot_ctrl, fg_color=BG_INPUT, border_color=BORDER, width=120)
@@ -2854,7 +2910,7 @@ class InstagramAutoPro(ctk.CTk):
         self.e_date_tg.insert(0, datetime.now().strftime("%Y-%m-%d"))
 
         btn_row = ctk.CTkFrame(ctrl, fg_color="transparent")
-        btn_row.grid(row=6, column=0, sticky="ew", pady=(0, 0))
+        btn_row.grid(row=7, column=0, sticky="ew", pady=(0, 0))
         
         self.btn_start_tg = PrimaryButton(btn_row, text="▶ INICIAR", fg_color=TELEGRAM,
                                           text_color=TEXT_ON_DANGER, command=self.start_tg_bot)
@@ -3091,11 +3147,28 @@ class InstagramAutoPro(ctk.CTk):
         if not selected_accounts:
             return messagebox.showwarning("⚠️", "No se pudieron resolver las cuentas seleccionadas. Recarga la lista.")
 
+        reset_topics_var = getattr(self, "_tg_reset_topics", None)
+        reset_topics = bool(reset_topics_var.get()) if reset_topics_var is not None else False
+        if reset_topics:
+            if not messagebox.askyesno(
+                "Borrar topics existentes",
+                "Esto intentara borrar los topics ya registrados en los grupos Telegram "
+                "de las cuentas seleccionadas y luego recrearlos. Continuar?",
+                parent=self,
+            ):
+                return
+
         self.bot_log(f"Cuentas seleccionadas ({len(selected_accounts)}): {', '.join('@' + u for u in selected_accounts)}", "INFO")
 
         import organizadortg as telegram_bot
         self.bot_log("📝 Captions: se resuelven por tanda desde Logística.", "INFO")
-        self.tg_controller = telegram_bot.TelegramBotController(date_str, selected_accounts)
+        if reset_topics:
+            self.bot_log("🧹 Reset de topics activado: se borraran y recrearan antes del envio.", "WARNING")
+        self.tg_controller = telegram_bot.TelegramBotController(
+            date_str,
+            selected_accounts,
+            reset_topics=reset_topics,
+        )
         
         self.btn_start_tg.configure(state="disabled")
         self.btn_pause_tg.configure(state="normal")

@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.10",
+    "version":  "1.0.11",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.10",
-    "asset_name":  "MetodoIG-v1.0.10.zip",
-    "sha256":  "680f34076b7532b5a3730f7d51a4df5140f10488595308bc86fd3d3b75202a33",
-    "notes":  "Captions asignados exclusivamente en Logística por tanda; Telegram los resuelve por __TANDA_ sin caption global. Incluye smoke E2E de trazabilidad y auditoría de distribución.",
+    "github_release_tag":  "v1.0.11",
+    "asset_name":  "MetodoIG-v1.0.11.zip",
+    "sha256":  "02085412c46192e006d3dec907aae57326e5f2ae858e918f4add70c447b2e32f",
+    "notes":  "Telegram: opcion para borrar y recrear topics antes del envio, limitada a las cuentas seleccionadas; limpia TOPIC_ID_INVALID como estado viejo y recrea el topic. Logistica: captions por tanda tambien disponibles en distribucion por cuentas, manteniendo resolucion por __TANDA_.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",
