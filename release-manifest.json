@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.12",
+    "version":  "1.0.13",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.12",
-    "asset_name":  "MetodoIG-v1.0.12.zip",
-    "sha256":  "ef271cb202f3f6f77f6a10ecd31492979670956bb31a9e369c096bdae6dd1719",
-    "notes":  "Logistica: distribucion Por Cuentas ahora guarda los videos calendarizados con marcador __TANDA_ para que Telegram aplique los captions asignados por tanda. Se comparte el constructor de nombres con Por Tandas y se agregan regresiones.",
+    "github_release_tag":  "v1.0.13",
+    "asset_name":  "MetodoIG-v1.0.13.zip",
+    "sha256":  "7b0cf623c55ac659d5df2d86eafb606b565d70181077d7874c765a8f0135a5e8",
+    "notes":  "UI: corrige error Tkinter invalid command name en DropdownMenu al reconstruir pantallas con CTkComboBox/CTkOptionMenu. Se limpia el callback de scaling de CustomTkinter antes de destruir menus dropdown, evitando excepciones al cambiar DPI o refrescar frames.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",

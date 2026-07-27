@@ -37,6 +37,89 @@ from styles.components import (
     SegmentedControl, Stepper, ToggleRow, KeyValueRow, Dropzone, PhonePreview,
 )
 
+
+def _install_customtkinter_dropdown_destroy_safety(
+    *,
+    dropdown_menu_cls=None,
+    scaling_base_cls=None,
+    combo_box_cls=None,
+    option_menu_cls=None,
+    tcl_error_cls=None,
+):
+    """Remove stale CustomTkinter dropdown scaling callbacks on widget teardown."""
+    if (
+        dropdown_menu_cls is None
+        or scaling_base_cls is None
+        or combo_box_cls is None
+        or option_menu_cls is None
+    ):
+        try:
+            from customtkinter.windows.widgets.core_widget_classes.dropdown_menu import DropdownMenu
+            from customtkinter.windows.widgets.scaling.scaling_base_class import CTkScalingBaseClass
+            from customtkinter.windows.widgets.ctk_combobox import CTkComboBox
+            from customtkinter.windows.widgets.ctk_optionmenu import CTkOptionMenu
+        except Exception:
+            return
+        dropdown_menu_cls = dropdown_menu_cls or DropdownMenu
+        scaling_base_cls = scaling_base_cls or CTkScalingBaseClass
+        combo_box_cls = combo_box_cls or CTkComboBox
+        option_menu_cls = option_menu_cls or CTkOptionMenu
+
+    tcl_error_cls = tcl_error_cls or tk.TclError
+
+    def _is_destroyed_tk_command_error(exc):
+        return "invalid command name" in str(exc)
+
+    if not getattr(dropdown_menu_cls, "_metodo_destroy_safety_installed", False):
+        original_dropdown_destroy = dropdown_menu_cls.destroy
+
+        def safe_dropdown_destroy(self, *args, **kwargs):
+            if not getattr(self, "_metodo_scaling_destroy_called", False):
+                try:
+                    scaling_base_cls.destroy(self)
+                except Exception:
+                    pass
+                try:
+                    self._metodo_scaling_destroy_called = True
+                except Exception:
+                    pass
+            try:
+                return original_dropdown_destroy(self, *args, **kwargs)
+            except tcl_error_cls as exc:
+                if _is_destroyed_tk_command_error(exc):
+                    return None
+                raise
+
+        dropdown_menu_cls.destroy = safe_dropdown_destroy
+        dropdown_menu_cls._metodo_original_destroy = original_dropdown_destroy
+        dropdown_menu_cls._metodo_destroy_safety_installed = True
+
+    def _patch_owner_destroy(owner_cls, patch_attr):
+        if getattr(owner_cls, patch_attr, False):
+            return
+
+        original_owner_destroy = owner_cls.destroy
+
+        def safe_owner_destroy(self, *args, **kwargs):
+            dropdown = getattr(self, "_dropdown_menu", None)
+            if dropdown is not None:
+                try:
+                    dropdown.destroy()
+                except tcl_error_cls as exc:
+                    if not _is_destroyed_tk_command_error(exc):
+                        raise
+            return original_owner_destroy(self, *args, **kwargs)
+
+        owner_cls.destroy = safe_owner_destroy
+        setattr(owner_cls, f"{patch_attr}_original", original_owner_destroy)
+        setattr(owner_cls, patch_attr, True)
+
+    _patch_owner_destroy(combo_box_cls, "_metodo_dropdown_destroy_safety_installed")
+    _patch_owner_destroy(option_menu_cls, "_metodo_dropdown_destroy_safety_installed")
+
+
+_install_customtkinter_dropdown_destroy_safety()
+
 # ── Configuración global de CustomTkinter ──────────────────────────────────
 ctk.set_appearance_mode("system")
 ctk.set_default_color_theme("dark-blue")
