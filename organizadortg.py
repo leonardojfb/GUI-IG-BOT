@@ -316,6 +316,86 @@ def get_or_create_topic(chat_id, acc_name, tag_emoji, state, is_admin=False, for
     print(f"❌ createForumTopic falló | chat_id usado: '{chat_id}' | cuenta: {acc_name} | error: {res.get('description')}")
     return None
 
+def _topic_state_chat_id(state_key):
+    if not isinstance(state_key, str) or "_" not in state_key:
+        return None
+    return state_key.split("_", 1)[0]
+
+def _topic_state_account_name(state_key):
+    if not isinstance(state_key, str) or "_" not in state_key:
+        return None
+    return state_key.split("_", 1)[1]
+
+def _normalize_account_name(name):
+    return str(name or "").strip().lstrip("@").lower()
+
+def _topic_id_from_state_value(value):
+    if isinstance(value, dict):
+        value = value.get("id") or value.get("message_thread_id") or value.get("topic_id")
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return value
+
+def _delete_topic_result_status(res):
+    if res.get("ok"):
+        return "deleted"
+    desc = str(res.get("description", "")).lower()
+    not_found_markers = ("not found", "message thread not found", "topic not found", "topic_id_invalid")
+    if any(marker in desc for marker in not_found_markers):
+        return "missing"
+    return "failed"
+
+def _delete_known_topics_from_state(topics_state, should_delete):
+    summary = {"deleted": 0, "missing": 0, "failed": 0, "failures": []}
+
+    for state_key, topic_value in list(topics_state.items()):
+        chat_id = _topic_state_chat_id(state_key)
+        account_name = _topic_state_account_name(state_key)
+        if not chat_id or not account_name or not should_delete(chat_id, account_name):
+            continue
+
+        topic_id = _topic_id_from_state_value(topic_value)
+        if topic_id is None:
+            topics_state.pop(state_key, None)
+            summary["missing"] += 1
+            continue
+
+        res = call_tg(
+            "deleteForumTopic",
+            {"chat_id": chat_id, "message_thread_id": topic_id},
+        )
+        status = _delete_topic_result_status(res)
+        if status in ("deleted", "missing"):
+            topics_state.pop(state_key, None)
+            summary[status] += 1
+        else:
+            summary["failed"] += 1
+            summary["failures"].append({
+                "chat_id": chat_id,
+                "topic_id": topic_id,
+                "state_key": state_key,
+                "error": res.get("description") or str(res),
+            })
+
+    return summary
+
+def delete_known_topics_for_chats(chat_ids, topics_state):
+    target_chat_ids = {str(chat_id) for chat_id in chat_ids if chat_id not in (None, "")}
+    return _delete_known_topics_from_state(
+        topics_state,
+        lambda chat_id, _account_name: chat_id in target_chat_ids,
+    )
+
+def delete_known_topics_for_accounts(account_names, topics_state):
+    target_accounts = {_normalize_account_name(name) for name in account_names if _normalize_account_name(name)}
+    return _delete_known_topics_from_state(
+        topics_state,
+        lambda _chat_id, account_name: _normalize_account_name(account_name) in target_accounts,
+    )
+
 def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, username, tag):
     active_path = video_path
     compressed_tmp = None
@@ -452,7 +532,7 @@ def _account_tag(acc_info):
         return "SUICIDE"
     return category.upper() if category else "GENERAL"
 
-def execute_telegram_plan(start_date, selected_accounts=None, controller=None):
+def execute_telegram_plan(start_date, selected_accounts=None, controller=None, reset_topics=False):
     caption_pools = load_tanda_caption_pools()
 
     accounts = get_accounts_with_va_info()
@@ -465,9 +545,39 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None):
     day_account_videos = defaultdict(lambda: defaultdict(list))
     for vid in all_videos: day_account_videos[vid['day']][vid['username']].append(vid)
 
+    unique_usernames = sorted({vid['username'] for vid in all_videos})
+    if reset_topics:
+        target_account_names = set()
+        for username in unique_usernames:
+            if selected_accounts and username not in selected_accounts:
+                continue
+            acc_info = next((a for a in accounts if a['username'] == username), None)
+            if acc_info and acc_info.get('tg_group_id'):
+                target_account_names.add(username)
+
+        if target_account_names:
+            print(f"🧹 Borrando topics existentes para {len(target_account_names)} cuenta(s) seleccionadas...")
+            reset_summary = delete_known_topics_for_accounts(target_account_names, topics_state)
+            save_json(os.path.join(base_dir, STATE_FILE), topics_state)
+            if reset_summary["failed"]:
+                for failure in reset_summary["failures"]:
+                    print(
+                        f"❌ No se pudo borrar topic {failure['topic_id']} "
+                        f"en chat {failure['chat_id']}: {failure['error']}"
+                    )
+                return (
+                    f"❌ No se pudieron borrar {reset_summary['failed']} topics. "
+                    "Revisa que el bot tenga permiso para administrar topics."
+                )
+            print(
+                f"✅ Topics reseteados: {reset_summary['deleted']} borrados, "
+                f"{reset_summary['missing']} ya no existian."
+            )
+        else:
+            print("⚠️ Reset de topics solicitado, pero no hay cuentas Telegram seleccionadas para resetear.")
+
     # ── FASE 1: Pre-crear todos los topics antes de empezar a enviar ─────────
     print("🔧 Pre-creando topics de Telegram...")
-    unique_usernames = sorted({vid['username'] for vid in all_videos})
     for username in unique_usernames:
         if selected_accounts and username not in selected_accounts:
             continue
@@ -566,9 +676,10 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None):
 
 # --- 4. CONTROLADOR DE HILOS Y MOTOR DE EJECUCIÓN ---
 class TelegramBotController:
-    def __init__(self, start_date_str, selected_accounts=None):
+    def __init__(self, start_date_str, selected_accounts=None, reset_topics=False):
         self.start_date_str = start_date_str
         self.selected_accounts = selected_accounts
+        self.reset_topics = reset_topics
         self._paused = threading.Event()
         self._paused.set()
         self._stopped = False
@@ -588,7 +699,7 @@ class TelegramBotController:
         self._stopped = False
         try:
             start_date = datetime.strptime(self.start_date_str, "%Y-%m-%d")
-            result = execute_telegram_plan(start_date, self.selected_accounts, self)
+            result = execute_telegram_plan(start_date, self.selected_accounts, self, reset_topics=self.reset_topics)
             print(result)
         finally:
             self._running = False
