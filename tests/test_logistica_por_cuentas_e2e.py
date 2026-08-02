@@ -1,0 +1,179 @@
+"""Functional coverage for Logistica's third distribution mode: 'Por Cuentas'.
+
+Organizador.distribute_tanda() (the 'Por Tandas' tab) is exercised end-to-end by
+tests/smoke_e2e_pipeline.py. It is NOT the only live distribution path: gui_premium_v7.py's
+_acct_dist_run() ('Por Cuentas' tab, EJECUTAR POR CUENTAS button) is a second, fully
+independent implementation with its own account selection (manual, cross-category),
+its own videos/day x period model, and its own anti-collision key (Forge-style vid_id,
+stripping a trailing __cNN). Before this test the only coverage for that code path was
+tests/test_logistica_caption_ui.py, which just greps the method source for a string --
+it never actually ran the algorithm. This test drives the real bound method (same
+pattern as tests/test_dashboard_refresh.py) so the file counts, tanda tag, and caption
+routing get checked against real output instead of a string match.
+"""
+import os
+import tempfile
+
+import pytest
+
+ctk = pytest.importorskip("customtkinter")
+
+import database
+
+
+class _SyncWorkerThread:
+    """Runs WorkerThread's task/callback pair synchronously, in-thread.
+
+    The real WorkerThread runs task() on a background OS thread and reports
+    back via self.root.after(0, ...). Tk's after() rejects registration from
+    a non-main thread unless a real mainloop is pumping (RuntimeError: main
+    thread is not in main loop) -- this harness never runs one. Swapping in
+    this synchronous stand-in exercises the exact same production task()
+    closure (the real distribution algorithm) without the cross-thread Tk call.
+    """
+
+    def __init__(self, root, callback, task, *args, **kwargs):
+        self.callback = callback
+        self.task = task
+        self.args = args
+        self.kwargs = kwargs
+
+    def start(self):
+        try:
+            result = self.task(*self.args, **self.kwargs)
+        except Exception as exc:
+            if self.callback:
+                self.callback(False, str(exc))
+            return
+        if self.callback:
+            self.callback(True, result)
+
+
+def _make_app():
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    os.remove(path)
+    original_db_path = database.DB_PATH
+    database.DB_PATH = path
+
+    import gui_premium_v7 as gui
+
+    try:
+        app = gui.InstagramAutoPro()
+    except Exception:
+        database.DB_PATH = original_db_path
+        if os.path.exists(path):
+            os.remove(path)
+        pytest.skip("no display available")
+
+    app.withdraw()
+
+    def _cleanup():
+        app.db.conn.close()
+        # gui_premium_v7 imports organizadortg, which opens its own module-level
+        # DatabaseManager against database.DB_PATH at import time -- a second
+        # handle on the same temp file that Windows will keep locked unless
+        # it's closed too.
+        try:
+            import organizadortg
+
+            organizadortg.db.conn.close()
+        except Exception:
+            pass
+        app.destroy()
+        database.DB_PATH = original_db_path
+        if os.path.exists(path):
+            os.remove(path)
+
+    return app, _cleanup
+
+
+def test_por_cuentas_distributes_manual_cross_category_accounts_without_mixing(tmp_path, monkeypatch):
+    app, cleanup = _make_app()
+    try:
+        import Organizador
+        import gui_premium_v7 as gui
+
+        base_dir = str(tmp_path)
+        monkeypatch.setattr(Organizador, "output_root", os.path.join(base_dir, "CALENDARIO_POSTEO"))
+        monkeypatch.setattr(gui, "_BASE_DIR", base_dir)
+        monkeypatch.setattr(gui, "_ACCT_HIST_FILE", os.path.join(base_dir, "acct_hist.json"))
+        monkeypatch.setattr(gui, "WorkerThread", _SyncWorkerThread)
+        # _SyncWorkerThread runs done() synchronously (see its docstring), which
+        # calls messagebox.showinfo(...) on success. A real modal dialog with no
+        # mainloop pumping events would block forever waiting for a click that
+        # can never come, so these are no-ops for the duration of the test.
+        monkeypatch.setattr(gui.messagebox, "showinfo", lambda *a, **k: None)
+        monkeypatch.setattr(gui.messagebox, "showerror", lambda *a, **k: None)
+        monkeypatch.setattr(gui.messagebox, "showwarning", lambda *a, **k: None)
+        monkeypatch.setattr(gui.messagebox, "askyesno", lambda *a, **k: True)
+
+        app.db.add_category("PC_CAT_X")
+        app.db.add_category("PC_CAT_Y")
+        app.db.add_va("PC_VA_X")
+        app.db.add_va("PC_VA_Y")
+        app.db.add_virtual_account("pc_acc_x", "PC_CAT_X")
+        app.db.update_account("pc_acc_x", assigned_va="PC_VA_X")
+        app.db.add_virtual_account("pc_acc_y", "PC_CAT_Y")
+        app.db.update_account("pc_acc_y", assigned_va="PC_VA_Y")
+
+        tanda_name = "PC_SRC"
+        tanda_dir = os.path.join(base_dir, "videos_finales", tanda_name)
+        os.makedirs(tanda_dir, exist_ok=True)
+        needed = 2 * 1 * 7  # 2 accounts x 1 video/day x "1 semana"
+        for i in range(1, needed + 1):
+            with open(os.path.join(tanda_dir, f"PC_SRC__c{i:02d}.mp4"), "wb") as fh:
+                fh.write(f"fake-video-{i}".encode())
+        app.db.add_tanda(tanda_name, tanda_name, tanda_name, "")
+
+        caption_path = os.path.join(base_dir, "CAP_PC.txt")
+        with open(caption_path, "w", encoding="utf-8") as fh:
+            fh.write("CAPTION_PC_UNIQUE\nSecond line\n#pc_one #pc_two\n")
+        app.db.set_tanda_captions(tanda_name, caption_path)
+
+        app.reload_dist_lists()
+        app.acct_dist_tanda.set(tanda_name)
+        app.acct_dist_list.delete("1.0", "end")
+        app.acct_dist_list.insert("end", "pc_acc_x\npc_acc_y\n")
+        app.acct_dist_vpd.set(1)
+        app.acct_dist_period.set("1 semana")
+
+        app._acct_dist_run(preview_only=False)
+
+        result_text = app.acct_dist_result.get("1.0", "end")
+        assert "❌" not in result_text, f"Por Cuentas run reported an error: {result_text}"
+
+        calendar_root = os.path.join(base_dir, "CALENDARIO_POSTEO")
+        produced = []
+        for day_dir in sorted(os.listdir(calendar_root)):
+            day_path = os.path.join(calendar_root, day_dir)
+            for acc_dir in os.listdir(day_path):
+                acc_path = os.path.join(day_path, acc_dir)
+                for fname in os.listdir(acc_path):
+                    produced.append((day_dir, acc_dir, fname))
+
+        assert len(produced) == needed, (
+            f"expected {needed} calendarized files (2 accounts x 7 days x 1/day), got {len(produced)}"
+        )
+
+        accounts_seen = {acc for (_, acc, _) in produced}
+        assert accounts_seen == {"pc_acc_x", "pc_acc_y"}, (
+            f"Por Cuentas must only write to the manually selected accounts, got {accounts_seen}"
+        )
+
+        for _, _, fname in produced:
+            assert f"__TANDA_{tanda_name}__" in fname, (
+                f"calendar filename lost its tanda tag: {fname}"
+            )
+
+        import organizadortg
+
+        pools = organizadortg.load_tanda_caption_pools(app.db.get_all_tandas())
+        caption_indexes = {}
+        for _, _, fname in produced:
+            caption = organizadortg.caption_for_calendar_video(fname, pools, caption_indexes)
+            assert caption is not None and "CAPTION_PC_UNIQUE" in caption, (
+                f"Por Cuentas file did not receive its own tanda's caption: {fname} -> {caption}"
+            )
+    finally:
+        cleanup()

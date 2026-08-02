@@ -1,7 +1,8 @@
 """Small, defensive updater for the local Instagram GUI.
 
 The updater only writes files explicitly allowed by DEFAULT_UPDATEABLE_FILES.
-User data stays in the application directory and is never part of an update.
+User data stays in the application directory unless a special release manifest
+explicitly includes one of the narrow data files below.
 """
 from __future__ import annotations
 
@@ -33,6 +34,8 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "launch_gui.bat",
         "launcher.py",
         "updater.py",
+        "organizador.db",
+        "organizador.default.db",
         "version.json",
         "requirements.txt",
         "gui_premium_v7.py",
@@ -52,6 +55,7 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "styles/colors.py",
         "styles/components.py",
         "styles/__init__.py",
+        "dist_accounts_history.json",
     }
 )
 

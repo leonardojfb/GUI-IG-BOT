@@ -89,6 +89,64 @@ class UpdaterTest(unittest.TestCase):
         }.items():
             self.assertEqual((self.app_dir / name).read_text(), expected)
 
+    def test_apply_package_can_install_default_database_template_and_history(self):
+        package_path = self.app_dir / "release.zip"
+        package_path.write_bytes(
+            _zip_bytes(
+                {
+                    "version.json": json.dumps({"version": "1.0.1"}),
+                    "database.py": "new code",
+                    "organizador.default.db": b"default database template",
+                    "dist_accounts_history.json": "release history",
+                }
+            )
+        )
+
+        version = updater.apply_package(
+            self.app_dir,
+            package_path,
+            {
+                "version": "1.0.1",
+                "files": [
+                    "version.json",
+                    "database.py",
+                    "organizador.default.db",
+                    "dist_accounts_history.json",
+                ],
+            },
+        )
+
+        self.assertEqual(version, "1.0.1")
+        self.assertEqual((self.app_dir / "database.py").read_text(), "new code")
+        self.assertEqual((self.app_dir / "organizador.default.db").read_bytes(), b"default database template")
+        self.assertEqual((self.app_dir / "dist_accounts_history.json").read_text(), "release history")
+        self.assertEqual((self.app_dir / "organizador.db").read_bytes(), b"user database")
+
+    def test_apply_package_can_replace_database_when_manifest_explicitly_requests_it(self):
+        package_path = self.app_dir / "release.zip"
+        package_path.write_bytes(
+            _zip_bytes(
+                {
+                    "version.json": json.dumps({"version": "1.0.1"}),
+                    "organizador.db": b"release database",
+                    "dist_accounts_history.json": "release history",
+                }
+            )
+        )
+
+        version = updater.apply_package(
+            self.app_dir,
+            package_path,
+            {
+                "version": "1.0.1",
+                "files": ["version.json", "organizador.db", "dist_accounts_history.json"],
+            },
+        )
+
+        self.assertEqual(version, "1.0.1")
+        self.assertEqual((self.app_dir / "organizador.db").read_bytes(), b"release database")
+        self.assertEqual((self.app_dir / "dist_accounts_history.json").read_text(), "release history")
+
     def test_hash_mismatch_does_not_change_installation(self):
         package = self._package()
         manifest = json.dumps(

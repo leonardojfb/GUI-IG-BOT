@@ -11,6 +11,9 @@ from datetime import datetime, timedelta
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from database import DatabaseManager
+from console_encoding import ensure_stdout_utf8
+
+ensure_stdout_utf8()
 
 TG_MAX_BYTES = 49 * 1024 * 1024  # 49MB para dejar margen
 

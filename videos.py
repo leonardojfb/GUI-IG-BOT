@@ -5,6 +5,9 @@ import random
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from database import DatabaseManager
+from console_encoding import ensure_stdout_utf8
+
+ensure_stdout_utf8()
 
 # --- CONFIGURACIÓN ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

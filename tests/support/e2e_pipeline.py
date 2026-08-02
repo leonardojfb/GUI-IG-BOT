@@ -204,7 +204,15 @@ def patched_modules(run_root: Path):
         Organizador.output_root = saved["Organizador.output_root"]
         organizadortg.input_root = saved["organizadortg.input_root"]
         organizadortg.base_dir = saved["organizadortg.base_dir"]
-        organizadortg.db = saved["organizadortg.db"]
+        # NOT `organizadortg.db = saved["organizadortg.db"]`: that object was
+        # already .close()'d a few lines above (it's the same connection this
+        # context manager closed on entry, before swapping in the run_root
+        # one) -- restoring it just hands back a dead connection. Any test
+        # that runs after this context manager in the same process would
+        # inherit a module-level organizadortg.db that raises
+        # "Cannot operate on a closed database." the moment it's queried.
+        # Reopen fresh against the now-restored database.DB_PATH instead.
+        organizadortg.db = database.DatabaseManager()
 
 
 def _db_add_tanda(db_path: Path, name: str, p1: str, p2: str, captions: str | None) -> None:

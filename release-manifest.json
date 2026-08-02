@@ -1,17 +1,18 @@
 {
-    "version":  "1.0.13",
+    "version":  "1.0.14",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.13",
-    "asset_name":  "MetodoIG-v1.0.13.zip",
-    "sha256":  "7b0cf623c55ac659d5df2d86eafb606b565d70181077d7874c765a8f0135a5e8",
-    "notes":  "UI: corrige error Tkinter invalid command name en DropdownMenu al reconstruir pantallas con CTkComboBox/CTkOptionMenu. Se limpia el callback de scaling de CustomTkinter antes de destruir menus dropdown, evitando excepciones al cambiar DPI o refrescar frames.",
+    "github_release_tag":  "v1.0.14",
+    "asset_name":  "MetodoIG-v1.0.14.zip",
+    "sha256":  "2ad798d7dce650c0dbf70e86a78409cf61861510203c05d8b73f3b382199a04a",
+    "notes":  "Logistica: evita reenviar el mismo video a la misma cuenta en redistribuciones de la misma tanda. Windows: evita crashes UnicodeEncodeError por emojis en consola no UTF-8. Release especial: incluye organizador.db e historial dist_accounts_history.json.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",
                   "launch_gui.bat",
                   "launcher.py",
                   "updater.py",
+                  "console_encoding.py",
                   "version.json",
                   "requirements.txt",
                   "gui_premium_v7.py",
@@ -30,6 +31,8 @@
                   "logo_elittisse.svg",
                   "styles/colors.py",
                   "styles/components.py",
-                  "styles/__init__.py"
+                  "styles/__init__.py",
+                  "organizador.db",
+                  "dist_accounts_history.json"
               ]
 }

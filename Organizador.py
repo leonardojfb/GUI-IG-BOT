@@ -6,6 +6,9 @@ import string
 import math
 from collections import defaultdict
 from database import DatabaseManager
+from console_encoding import ensure_stdout_utf8
+
+ensure_stdout_utf8()
 
 # --- CONFIGURACIÓN DE RUTAS ---
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -245,7 +248,7 @@ def get_account_used_combinations(account_id: int) -> set:
         )
         rows = cursor.fetchall()
         db.close()
-        
+
         for row in rows:
             video_path = row['video_path']
             if not video_path:
@@ -256,7 +259,51 @@ def get_account_used_combinations(account_id: int) -> set:
                 used.add((p1, p2))
     except Exception:
         pass
-    
+
+    return used
+
+
+def get_account_used_combinations_for_tandas(account_id: int, tanda_names) -> set:
+    """Combinaciones P1+P2 que una cuenta ya recibió, pero solo de estas tandas.
+
+    A diferencia de get_account_used_combinations (todo el historial, cualquier
+    tanda), esta variante filtra por el tag `__TANDA_<nombre>__` que Logistica
+    graba en cada archivo calendarizado. Es intencional: el nombre de salida de
+    Forge (`source__cNN`) parsea al mismo (p1, p2) que la tanda de Edicion/Tandas
+    de la que salio su fuente, aunque sean tandas distintas con carpetas
+    distintas. Comparar contra *todo* el historial bloquearia una tanda nueva
+    solo porque coincide en p1/p2 con una fuente ya usada en otra tanda; acotar
+    a estas tandas evita ese falso choque y sigue bloqueando lo que se pidio:
+    que una cuenta no reciba el mismo video dos veces si la MISMA tanda se
+    vuelve a distribuir en una corrida separada.
+    """
+    used = set()
+    tags = {str(name or "").strip().replace(" ", "_") for name in tanda_names if name}
+    if not tags:
+        return used
+    try:
+        db = DatabaseManager()
+        cursor = db.conn.cursor()
+        cursor.execute(
+            "SELECT video_path FROM fingerprint_history WHERE account_id = ?",
+            (account_id,)
+        )
+        rows = cursor.fetchall()
+        db.close()
+
+        for row in rows:
+            video_path = row['video_path']
+            if not video_path:
+                continue
+            filename = os.path.basename(video_path)
+            if not any(f"__TANDA_{tag}__" in filename for tag in tags):
+                continue
+            p1, p2 = parse_combination_from_filename(filename)
+            if p1 and p2:
+                used.add((p1, p2))
+    except Exception:
+        pass
+
     return used
 
 
@@ -909,8 +956,15 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
 
     # Lifetime: combos (p1, p2) ya asignados a cada cuenta en todos los días anteriores.
     # Garantiza que fill-up no reutilice el mismo video en la misma cuenta nunca.
+    # Sembrado desde fingerprint_history para que la regla sobreviva entre corridas
+    # separadas de "Distribuir" (re-clicks, reinicios de la app), no solo dentro de
+    # una misma llamada.
     from collections import defaultdict
     account_lifetime_combos = defaultdict(set)  # acc_id -> set of (p1, p2)
+    for acc in accounts:
+        account_lifetime_combos[acc["id"]] |= get_account_used_combinations_for_tandas(
+            acc["id"], tanda_names
+        )
 
     try:
         for day in range(1, target_days + 1):

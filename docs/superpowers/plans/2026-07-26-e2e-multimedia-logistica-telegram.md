@@ -46,7 +46,7 @@
 - `sha256_file(path: pathlib.Path) -> str` devuelve la identidad física de cada archivo.
 - `write_manifest(path: pathlib.Path, data: dict) -> None` guarda entradas append-only para cada etapa.
 
-- [ ] **Step 1: Definir la matriz fija**
+- [x] **Step 1: Definir la matriz fija**
 
 El JSON debe contener estos valores, sin nombres generados al azar:
 
@@ -83,11 +83,11 @@ El JSON debe contener estos valores, sin nombres generados al azar:
 }
 ```
 
-- [ ] **Step 2: Sembrar la DB temporal**
+- [x] **Step 2: Sembrar la DB temporal**
 
 Usar `DatabaseManager` con `database.DB_PATH` apuntando al archivo temporal. Insertar los tres categories, los tres VAs con los `telegram_id` de prueba, las nueve cuentas, y un horario `8:00 AM` para cada combinación VA/categoría en el día 0. Guardar una copia JSON del estado inicial para compararla con el estado final.
 
-- [ ] **Step 3: Aislar las rutas importadas**
+- [x] **Step 3: Aislar las rutas importadas**
 
 Después de crear la DB, recargar los módulos y apuntar sus globales al mismo run root:
 
@@ -118,19 +118,19 @@ El arnés debe cerrar todas las conexiones abiertas y borrar únicamente su prop
 - `create_captions(path: pathlib.Path, label: str) -> None` escribe un caption multilinea con hashtags exclusivos.
 - `record_asset(stage, tanda, source, output, metadata) -> None` registra el vínculo de entrada y salida.
 
-- [ ] **Step 1: Crear tres fixtures de Edición**
+- [x] **Step 1: Crear tres fixtures de Edición**
 
 Crear un video base y una foto por cada tanda, con marcadores únicos `ED_A_SOURCE`, `ED_B_SOURCE`, `ED_C_SOURCE` y `ED_A_PHOTO`, `ED_B_PHOTO`, `ED_C_PHOTO`. Renderizar una salida por tanda con `video_editor.render_video`, usando una posición/frame distintos por tanda. Cada carpeta `videos_finales/ED_*` debe terminar con exactamente tres archivos; para lograrlo, usar tres videos base del mismo grupo y una foto común de ese grupo. Registrar video base, foto, frame, duración, tamaño y hash.
 
-- [ ] **Step 2: Crear tres fixtures de Tandas**
+- [x] **Step 2: Crear tres fixtures de Tandas**
 
 Para cada categoría crear `inputs/TA_A_P1`, `inputs/TA_A_P2`, y equivalentes B/C. Cada tanda tendrá un P1 y tres P2 con marcadores únicos. Registrar el tanda en `batch_tandas` con `videos.DatabaseManager.add_tanda`; dejar el caption vacío en `TA_A` y `TA_C`, y asociar `CAP_TA_B.txt` a `TA_B`. Ejecutar `videos.render_tanda("TA_A")`, `videos.render_tanda("TA_B")` y `videos.render_tanda("TA_C")` con las rutas parcheadas. Cada carpeta debe producir exactamente tres combinaciones. Después de cada etapa, registrar también `ED_*`, `TA_*` y `FO_*` en `batch_tandas`; solo `ED_A`, `TA_B` y `FO_C` deben conservar su ruta de captions.
 
-- [ ] **Step 3: Crear tres fixtures de Forge**
+- [x] **Step 3: Crear tres fixtures de Forge**
 
 Usar una fuente ya procesada de cada grupo para demostrar linaje entre etapas: `FO_A` toma una salida de `ED_A`, `FO_B` toma una salida de `TA_B`, y `FO_C` toma una salida de `ED_C`. Procesar una fuente con tres copias (`c01`, `c02`, `c03`) por tanda. Usar configuraciones distintas: `FO_A` `Default/Default`, `FO_B` `Custom` con `crop` y `mirror`, y `FO_C` `Alto/Light`. Registrar `forge_video_registry`, `metadata_fingerprints`, configuración de efectos, fuerza, source hash y output hash.
 
-- [ ] **Step 4: Crear los tres archivos de captions**
+- [x] **Step 4: Crear los tres archivos de captions**
 
 `CAP_ED_A.txt` debe contener exactamente el texto corporal `CAPTION_ED_A_UNIQUE` y hashtags `#ed_a_one #ed_a_two`. `CAP_TA_B.txt` debe contener `CAPTION_TA_B_UNIQUE` y hashtags `#ta_b_one #ta_b_two`. `CAP_FO_C.txt` debe contener `CAPTION_FO_C_UNIQUE` y hashtags `#fo_c_one #fo_c_two`. Los tres deben tener dos líneas de texto y una línea de hashtags, para comprobar que el parser conserva el párrafo y no separa cada línea en mensajes.
 
@@ -143,19 +143,19 @@ Usar una fuente ya procesada de cada grupo para demostrar linaje entre etapas: `
 - Test: `tests/smoke_e2e_pipeline.py`
 - Reference: `video_editor.py`, `videos.py`, `metadata_pool.py`, `database.py`
 
-- [ ] **Step 1: Auditar Edición**
+- [x] **Step 1: Auditar Edición**
 
 Comparar el manifiesto con cada archivo generado: tres outputs por `ED_*`, hash distinto al video de entrada, duración conservada dentro de la tolerancia de FFmpeg, dimensiones válidas y presencia del overlay en el frame configurado. Un output ausente, un output extra o un output cuyo hash no corresponda al source/photo esperados es FAIL.
 
-- [ ] **Step 2: Auditar Tandas**
+- [x] **Step 2: Auditar Tandas**
 
 Para cada `TA_*`, comprobar que el conjunto de nombres corresponde a la combinación cartesiana P1×P2 y que cada nombre usa el contrato real de `videos.py`: `TA_A__P1ID__P2ID.mp4`, `TA_B__P1ID__P2ID.mp4` o `TA_C__P1ID__P2ID.mp4`. El prefijo es el nombre de la tanda; el comparador usa la categoría del manifiesto por separado. Confirmar que `batch_tandas.captions_file_path` apunta a `CAP_TA_B.txt` para `TA_B` y queda vacío para `TA_A` y `TA_C`. No buscar captions dentro del MP4: en este checkout el caption es un dato de tanda/Telegram, no una pista de video.
 
-- [ ] **Step 3: Auditar Forge**
+- [x] **Step 3: Auditar Forge**
 
 Comprobar tres archivos por `FO_*`, tres filas de `forge_video_registry` por fuente y tres fingerprints únicos. Verificar que cada output remite a la fuente correcta y que las copias no son byte-identical cuando hay micro-edición habilitada. Registrar por separado que el nombre actual `source__cNN.mp4` no contiene necesariamente `CATEGORIA__P1__P2`; esto será una observación para Logística, no una falsa aprobación.
 
-- [ ] **Step 4: Ejecutar las pruebas unitarias existentes**
+- [x] **Step 4: Ejecutar las pruebas unitarias existentes**
 
 ```powershell
 py -m pytest tests/test_video_editor.py tests/test_tanda_sync.py tests/test_forge_ui.py tests/test_forge_presets.py tests/test_variant_strength.py tests/test_telegram_captions.py tests/test_message_format.py -q
@@ -172,17 +172,17 @@ Expected: el resultado se registra con cantidad exacta de tests y fallos; no se 
 - Test: `tests/smoke_e2e_pipeline.py`
 - Reference: `Organizador.py`, `gui_premium_v7.py:2417-2777`
 
-- [ ] **Step 1: Ejecutar preview por tanda**
+- [x] **Step 1: Ejecutar preview por tanda**
 
 Para cada tanda ejecutar `Organizador.preview_distribution_tanda(tanda, category, 1, False, "1")`. El preview debe listar la categoría correcta, tres cuentas destino y tres videos disponibles. Guardar el texto del preview en el reporte y no considerarlo evidencia suficiente sin inspeccionar el filesystem.
 
-- [ ] **Step 2: Ejecutar la distribución real aislada**
+- [x] **Step 2: Ejecutar la distribución real aislada**
 
 Limpiar solo el `CALENDARIO_POSTEO` temporal y llamar a `Organizador.distribute_tanda(tanda, category, 1, False, "1")` para cada pareja `ED_A/TA_A/FO_A → PRUEBA_CAT_A`, `ED_B/TA_B/FO_B → PRUEBA_CAT_B` y `ED_C/TA_C/FO_C → PRUEBA_CAT_C`. Usar `random.seed(260726)` antes de cada llamada y conservar el texto devuelto.
 
 El resultado esperado son 27 archivos, nueve por categoría, ubicados únicamente en `CALENDARIO_POSTEO/Dia_1/<cuenta>`. No activar fill-up; si falta un archivo, se marca FAIL y no se compensa copiándolo manualmente.
 
-- [ ] **Step 3: Comparar distribución contra la matriz**
+- [x] **Step 3: Comparar distribución contra la matriz**
 
 Para cada archivo de calendario comprobar:
 
@@ -196,11 +196,11 @@ assigned_va de la cuenta pertenece a uno de los tres VAs válidos
 
 Un archivo de `ED_A`, `TA_A` o `FO_A` dentro de una cuenta B/C es mezcla de categoría/tanda y debe abrir un FAIL individual con ruta, hash, tanda esperada, cuenta real y VA real.
 
-- [ ] **Step 4: Probar la ruta de dos tandas**
+- [x] **Step 4: Probar la ruta de dos tandas**
 
 En un segundo run root, ejecutar `distribute_tanda("ED_A", "PRUEBA_CAT_A", 1, False, "1", tanda_name_2="FO_A")`. Verificar que el calendario contiene los seis archivos de ambos orígenes y que el campo `TANDA_<nombre>` no se pierde ni se reemplaza. Esta prueba cubre la selección de segunda tanda de la pestaña “Por Tandas”.
 
-- [ ] **Step 5: Revisar anti-colisión y Forge**
+- [x] **Step 5: Revisar anti-colisión y Forge**
 
 Consultar `fingerprint_history` y aplicar `Organizador.parse_combination_from_filename` al nombre fuente antes del sufijo de Logística. Para Tandas, P1/P2 deben ser no nulos. Para Forge, el nombre fuente `source__cNN` no contiene P1/P2 completos; comparar en su lugar con `forge_video_registry` y registrar el riesgo de anti-colisión de Forge, aunque el destino de cuenta haya sido correcto.
 
@@ -220,19 +220,19 @@ Consultar `fingerprint_history` y aplicar `Organizador.parse_combination_from_fi
 - `FakeTelegramSender.fake_send_video(...) -> tuple[bool, str]` reemplaza `_send_video_to_topic`.
 - `run_telegram_capture(start_date, selected_accounts, captions_file) -> list[dict]` ejecuta `execute_telegram_plan` con los parches activos.
 
-- [ ] **Step 1: Interceptar sin red**
+- [x] **Step 1: Interceptar sin red**
 
 Reemplazar `organizadortg.call_tg`, `organizadortg.get_or_create_topic`, `organizadortg._send_video_to_topic` y `organizadortg.time.sleep`. El fake debe devolver topics deterministas `TOPIC::<telegram_id>::<username>`, registrar el `chat_id` derivado del VA y no abrir nunca una URL HTTP.
 
-- [ ] **Step 2: Mandar todo en una sola corrida**
+- [x] **Step 2: Mandar todo en una sola corrida**
 
 Seleccionar las nueve cuentas con videos y ejecutar una sola llamada a `execute_telegram_plan` sobre el `Dia_1` generado. El evento esperado es uno por cada uno de los 27 archivos de calendario. Verificar que el `chat_id` de cada evento corresponde al VA de la cuenta y que el topic incluye la misma cuenta.
 
-- [ ] **Step 3: Ejecutar la corrida con un solo archivo de captions**
+- [x] **Step 3: Ejecutar la corrida con un solo archivo de captions**
 
 Pasar `CAP_ED_A.txt`, que es lo que permite actualmente la GUI mediante `self.acct_cap_file or self.tandas_cap_file`. Guardar el resultado sin corregirlo. La comparación debe exigir que `ED_A` use `CAPTION_ED_A_UNIQUE`, `TA_B` use `CAPTION_TA_B_UNIQUE`, `FO_C` use `CAPTION_FO_C_UNIQUE` y que las otras seis tandas no tengan caption. Si cualquiera de los tres captions aparece en una tanda no propietaria, abrir FAIL por contaminación.
 
-- [ ] **Step 4: Ejecutar la corrida sin archivo de captions**
+- [x] **Step 4: Ejecutar la corrida sin archivo de captions**
 
 Repetir la corrida completa con `captions_file=None`. El resultado esperado del contrato solicitado es: `ED_A`, `TA_B` y `FO_C` conservan sus captions por tanda; las otras seis siguen sin caption. Si alguno se pierde, registrar que la información de caption no viaja de `batch_tandas` a Telegram cuando todo se manda junto.
 
@@ -253,11 +253,11 @@ La expectativa puede fallar con el checkout actual porque `start_tg_bot` selecci
 - `audit_telegram(manifest, events) -> list[dict]` audita chat, topic, archivo y caption.
 - `render_audit_report(findings, output_path) -> None` escribe JSON y Markdown con cada finding.
 
-- [ ] **Step 1: Normalizar captions antes de comparar**
+- [x] **Step 1: Normalizar captions antes de comparar**
 
 Comparar el texto corporal con espacios normalizados y hashtags como conjunto, porque `caption_for_video` puede barajar el orden de hashtags. Mantener el contenido multilinea y comprobar que un caption sin archivo produce `None` o ausencia de la clave `caption`, nunca el texto de otro tanda.
 
-- [ ] **Step 2: Aplicar los invariantes de identidad**
+- [x] **Step 2: Aplicar los invariantes de identidad**
 
 El auditor debe emitir un finding individual para cada incumplimiento de:
 
@@ -275,7 +275,7 @@ I10: el topic de Telegram coincide con la cuenta y el chat del VA.
 I11: Tanda y Forge dejan registro consultable de su fuente.
 ```
 
-- [ ] **Step 3: Generar el informe**
+- [x] **Step 3: Generar el informe**
 
 Escribir `audit.json` y `audit.md` dentro del run root. La tabla Markdown debe incluir `stage`, `tanda`, `source_hash`, `output_hash`, `category_expected`, `account_actual`, `va_actual`, `caption_expected`, `caption_actual` y `status`. El resumen debe diferenciar `PASS`, `FAIL` e `INCONCLUSIVE`; una excepción del entorno no se convertirá en PASS.
 
@@ -290,7 +290,7 @@ Escribir `audit.json` y `audit.md` dentro del run root. La tabla Markdown debe i
 - Test: `tests/test_tanda_sync.py`
 - Test: `tests/test_video_editor.py`
 
-- [ ] **Step 1: Probar captions**
+- [x] **Step 1: Probar captions**
 
 Ejecutar captions multilinea con línea en blanco interna, hashtags exclusivos, archivo vacío, ruta inexistente y tres archivos distintos. Registrar si se agrupa cada párrafo como un caption y si el fallback convierte texto de una tanda en caption de otra.
 
@@ -306,7 +306,7 @@ Ejecutar P1 vacío, P2 vacío, tanda no registrada, carpeta renombrada y segunda
 
 Ejecutar sin preview, copias `0`, source inexistente, re-procesado de la misma tanda y `Custom` con rango invertido. Confirmar que el guardado no pisa las copias anteriores y que cada salida conserva una entrada independiente en `forge_video_registry`.
 
-- [ ] **Step 5: Probar Logística**
+- [x] **Step 5: Probar Logística**
 
 Ejecutar inventario insuficiente, categoría sin cuentas, tanda inexistente, destino existente y fill-up activado/desactivado. Comparar si la operación deja calendario parcial tras un error; cualquier parcial no documentado es un bug de consistencia.
 
@@ -330,7 +330,7 @@ Iniciar con `py launcher.py` usando la copia aislada de la aplicación. Confirma
 
 Abrir Edición, Tandas, Forge, Logística y Telegram. En cada pantalla guardar captura o log del nombre de tanda, cantidad de archivos, preview, cuentas seleccionadas y caption mostrado. El smoke programático sigue siendo la fuente de comparación; la captura solo prueba que la GUI expone el mismo estado.
 
-- [ ] **Step 3: Ejecutar las verificaciones de cierre**
+- [x] **Step 3: Ejecutar las verificaciones de cierre**
 
 ```powershell
 py -m pytest tests -q

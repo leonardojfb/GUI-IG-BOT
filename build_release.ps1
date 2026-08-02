@@ -3,6 +3,8 @@ param(
     [string]$OutputDirectory = "releases",
     [switch]$IncludeClientConfig,
     [switch]$IncludeClientDatabase,
+    [switch]$IncludeRealDatabase,
+    [switch]$IncludeClientHistory,
     [string]$DownloadUrl = "",
     [string]$GitHubRepository = "leonardojfb/GUI-IG-BOT",
     [string]$Notes = ""
@@ -22,6 +24,7 @@ $ReleaseFiles = @(
     "launch_gui.bat",
     "launcher.py",
     "updater.py",
+    "console_encoding.py",
     "version.json",
     "requirements.txt",
     "gui_premium_v7.py",
@@ -54,6 +57,7 @@ $StagePath = Join-Path ([System.IO.Path]::GetTempPath()) ("metodo_ig_release_" +
 $ZipPath = Join-Path $OutputPath ("MetodoIG-v{0}.zip" -f $Version)
 $ManifestPath = Join-Path $OutputPath "release-manifest.json"
 $RepositoryManifestPath = Join-Path $Root "release-manifest.json"
+$PackageFiles = @($ReleaseFiles)
 
 try {
     New-Item -ItemType Directory -Force -Path $OutputPath | Out-Null
@@ -82,6 +86,25 @@ try {
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $DefaultDbDest -PathType Leaf)) {
             throw "No se pudo generar organizador.default.db para la entrega inicial."
         }
+        $PackageFiles += "organizador.default.db"
+    }
+
+    if ($IncludeRealDatabase) {
+        $DatabaseSource = Join-Path $Root "organizador.db"
+        if (-not (Test-Path -LiteralPath $DatabaseSource -PathType Leaf)) {
+            throw "No existe organizador.db para incluir la base de datos real."
+        }
+        Copy-Item -LiteralPath $DatabaseSource -Destination (Join-Path $StagePath "organizador.db")
+        $PackageFiles += "organizador.db"
+    }
+
+    if ($IncludeClientHistory) {
+        $HistorySource = Join-Path $Root "dist_accounts_history.json"
+        if (-not (Test-Path -LiteralPath $HistorySource -PathType Leaf)) {
+            throw "No existe dist_accounts_history.json para incluir historial."
+        }
+        Copy-Item -LiteralPath $HistorySource -Destination (Join-Path $StagePath "dist_accounts_history.json")
+        $PackageFiles += "dist_accounts_history.json"
     }
 
     if (Test-Path -LiteralPath $ZipPath) {
@@ -97,7 +120,7 @@ try {
         asset_name = "MetodoIG-v$Version.zip"
         sha256 = $Hash
         notes = $Notes
-        files = $ReleaseFiles
+        files = $PackageFiles
     }
     $ManifestJson = $Manifest | ConvertTo-Json -Depth 4
     $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)

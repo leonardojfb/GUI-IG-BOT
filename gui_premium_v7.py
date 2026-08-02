@@ -21,6 +21,9 @@ import requests
 
 from database import DatabaseManager
 from updater import APP_DIR as UPDATE_APP_DIR, check_and_apply, load_config, read_local_version
+from console_encoding import ensure_stdout_utf8
+
+ensure_stdout_utf8()
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _ACCT_HIST_FILE = os.path.join(_BASE_DIR, "dist_accounts_history.json")
