@@ -27,6 +27,29 @@ ensure_stdout_utf8()
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _ACCT_HIST_FILE = os.path.join(_BASE_DIR, "dist_accounts_history.json")
+
+
+def _windows_long_path(path):
+    path = os.path.abspath(os.fspath(path))
+    if os.name != "nt" or path.startswith("\\\\?\\"):
+        return path
+    if path.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + path[2:]
+    return "\\\\?\\" + path
+
+
+def _path_exists(path):
+    return os.path.exists(_windows_long_path(path))
+
+
+def _path_isdir(path):
+    return os.path.isdir(_windows_long_path(path))
+
+
+def _copy_calendar_file(src, dst):
+    dst_dir = os.path.dirname(os.path.abspath(os.fspath(dst)))
+    os.makedirs(_windows_long_path(dst_dir), exist_ok=True)
+    shutil.copy2(_windows_long_path(src), _windows_long_path(dst))
 from styles.colors import (
     BG_APP, BG_SIDEBAR, BG_CARD, BG_CARD2, BG_INPUT, BORDER,
     NEON_CYAN, NEON_PURPLE, IG_PINK, SUCCESS, WARNING, DANGER, INFO, TELEGRAM,
@@ -2876,11 +2899,11 @@ class InstagramAutoPro(ctk.CTk):
                         day_path = os.path.join(cal_root, day_folder)
                         for acc in accounts:
                             acc_path = os.path.join(day_path, acc)
-                            if os.path.isdir(acc_path):
-                                shutil.rmtree(acc_path)
+                            if _path_isdir(acc_path):
+                                shutil.rmtree(_windows_long_path(acc_path))
                         try:
-                            if not any(True for _ in os.scandir(day_path)):
-                                shutil.rmtree(day_path)
+                            if not any(True for _ in os.scandir(_windows_long_path(day_path))):
+                                shutil.rmtree(_windows_long_path(day_path))
                         except OSError:
                             pass
 
@@ -2889,7 +2912,6 @@ class InstagramAutoPro(ctk.CTk):
                 for acc, day_lists in plan.items():
                     for day_idx, day_vids in enumerate(day_lists):
                         day_path = os.path.join(cal_root, f"Dia_{day_idx + 1}", acc)
-                        os.makedirs(day_path, exist_ok=True)
                         for slot_idx, vid_name in enumerate(day_vids, 1):
                             src = os.path.join(folder, vid_name)
                             dst_name = build_calendar_video_filename(
@@ -2900,7 +2922,7 @@ class InstagramAutoPro(ctk.CTk):
                                 slot_idx,
                             )
                             dst = os.path.join(day_path, dst_name)
-                            if os.path.exists(dst):
+                            if _path_exists(dst):
                                 dst_name = build_calendar_video_filename(
                                     vid_name,
                                     tanda,
@@ -2910,7 +2932,7 @@ class InstagramAutoPro(ctk.CTk):
                                     collision_suffix=random.randint(1000, 9999),
                                 )
                                 dst = os.path.join(day_path, dst_name)
-                            shutil.copy2(src, dst)
+                            _copy_calendar_file(src, dst)
                             total_copiados += 1
 
                 lines += ["=" * 60,
@@ -3036,6 +3058,15 @@ class InstagramAutoPro(ctk.CTk):
         self.btn_stop_tg = DangerButton(btn_row, text="⏹ DETENER",
                                          state="disabled", command=self.stop_tg_bot)
         self.btn_stop_tg.pack(side="left", expand=True, padx=(5, 0))
+
+        cleanup_row = ctk.CTkFrame(ctrl, fg_color="transparent")
+        cleanup_row.grid(row=8, column=0, sticky="ew", pady=(8, 0))
+        self.btn_delete_calendar_tg = DangerButton(
+            cleanup_row,
+            text="Borrar calendarizaciones",
+            command=self.delete_selected_calendarizations,
+        )
+        self.btn_delete_calendar_tg.pack(side="left", fill="x", expand=True)
 
         # ── Panel Derecho: Live Log ─────────────────────────────────────
         log_card = Card(f, title="Registro de actividad")
@@ -3234,6 +3265,70 @@ class InstagramAutoPro(ctk.CTk):
             self.tg_log.see("end")
         self.after(0, update)
 
+    def _selected_tg_account_names(self) -> list[str]:
+        selected_indices = list(self.list_tg.curselection())
+        return [
+            self._tg_accounts[i]['username']
+            for i in selected_indices
+            if i < len(self._tg_accounts)
+        ]
+
+    def delete_selected_calendarizations(self):
+        if self.tg_controller and self.tg_controller.is_running:
+            return messagebox.showwarning(
+                "Bot en ejecucion",
+                "Deten el bot de Telegram antes de borrar calendarizaciones.",
+                parent=self,
+            )
+
+        selected_accounts = self._selected_tg_account_names()
+        if not selected_accounts:
+            return messagebox.showwarning(
+                "Sin seleccion",
+                "Selecciona al menos una cuenta para borrar sus calendarizaciones.",
+                parent=self,
+            )
+
+        preview = "\n".join(f"@{name}" for name in selected_accounts[:12])
+        if len(selected_accounts) > 12:
+            preview += f"\n... y {len(selected_accounts) - 12} mas"
+        if not messagebox.askyesno(
+            "Borrar calendarizaciones",
+            "Se eliminaran las carpetas CALENDARIO_POSTEO\\Dia_* de estas cuentas.\n"
+            "No se borran cuentas, topics ni videos fuente.\n\n"
+            f"{preview}\n\nContinuar?",
+            parent=self,
+        ):
+            return
+
+        import organizadortg as telegram_bot
+        summary = telegram_bot.delete_calendarizations_for_accounts(selected_accounts)
+        if summary["failed"]:
+            detail = "\n".join(
+                f"{failure['path']}: {failure['error']}"
+                for failure in summary["failures"][:5]
+            )
+            messagebox.showerror(
+                "Error al borrar",
+                f"No se pudieron borrar {summary['failed']} carpeta(s).\n\n{detail}",
+                parent=self,
+            )
+        else:
+            messagebox.showinfo(
+                "Calendarizaciones borradas",
+                f"{summary['deleted_folders']} carpeta(s) eliminadas.\n"
+                f"{summary['deleted_files']} archivo(s) calendarizados eliminados.",
+                parent=self,
+            )
+        self.bot_log(
+            "Borradas calendarizaciones: "
+            f"{summary['deleted_folders']} carpetas, "
+            f"{summary['deleted_files']} archivos, "
+            f"{summary['failed']} fallos.",
+            "WARNING" if summary["failed"] else "SUCCESS",
+        )
+        self.load_organized_accounts()
+
     def start_tg_bot(self):
         date_str = self.e_date_tg.get().strip()
 
@@ -3248,17 +3343,9 @@ class InstagramAutoPro(ctk.CTk):
         if self.tg_controller and self.tg_controller.is_running:
             return messagebox.showinfo("Info", "El bot ya está en ejecución.")
 
-        selected_indices = list(self.list_tg.curselection())
-        if not selected_indices:
-            return messagebox.showwarning("⚠️", "Selecciona al menos una cuenta en la lista antes de iniciar.")
-
-        selected_accounts = [
-            self._tg_accounts[i]['username']
-            for i in selected_indices
-            if i < len(self._tg_accounts)
-        ]
+        selected_accounts = self._selected_tg_account_names()
         if not selected_accounts:
-            return messagebox.showwarning("⚠️", "No se pudieron resolver las cuentas seleccionadas. Recarga la lista.")
+            return messagebox.showwarning("⚠️", "Selecciona al menos una cuenta en la lista antes de iniciar.")
 
         reset_topics_var = getattr(self, "_tg_reset_topics", None)
         reset_topics = bool(reset_topics_var.get()) if reset_topics_var is not None else False

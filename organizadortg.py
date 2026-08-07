@@ -5,9 +5,11 @@ import time
 import json
 import random
 import re
+import shutil
 import subprocess
 import tempfile
 from datetime import datetime, timedelta
+from pathlib import Path
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from database import DatabaseManager
@@ -16,12 +18,14 @@ from console_encoding import ensure_stdout_utf8
 ensure_stdout_utf8()
 
 TG_MAX_BYTES = 49 * 1024 * 1024  # 49MB para dejar margen
+TG_COMPRESS_TARGET_BYTES = 45 * 1024 * 1024
+TG_RECOMPRESS_TARGET_BYTES = 40 * 1024 * 1024
 
 # Windows: suppress the console window each ffmpeg/ffprobe child would otherwise
 # pop when the GUI runs windowless. 0 on non-Windows (flag doesn't exist there).
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-def _compress_video_for_tg(video_path: str) -> str | None:
+def _compress_video_for_tg(video_path: str, target_bytes: int = TG_COMPRESS_TARGET_BYTES) -> str | None:
     """Comprime el video con ffmpeg para que quede bajo TG_MAX_BYTES.
     Devuelve la ruta del archivo temporal comprimido, o None si falla."""
     try:
@@ -43,14 +47,15 @@ def _compress_video_for_tg(video_path: str) -> str | None:
 
         duration = float(probe.stdout.strip())
         # Calcular bitrate objetivo en kbps para quedar bajo el límite
-        target_kbps = int((TG_MAX_BYTES * 8) / duration / 1000 * 0.92)  # 8% de margen extra
+        target_bytes = min(target_bytes, TG_MAX_BYTES)
+        target_kbps = int((target_bytes * 8) / duration / 1000 * 0.92)  # 8% de margen extra
         target_kbps = max(target_kbps, 300)  # mínimo 300kbps para calidad mínima aceptable
 
         suffix = os.path.splitext(video_path)[1] or ".mp4"
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
         tmp.close()
 
-        print(f"🗜️  Comprimiendo video ({size_bytes/1024/1024:.1f}MB → objetivo <{TG_MAX_BYTES/1024/1024:.0f}MB, bitrate {target_kbps}kbps)...")
+        print(f"🗜️  Comprimiendo video ({size_bytes/1024/1024:.1f}MB → objetivo <{target_bytes/1024/1024:.0f}MB, bitrate {target_kbps}kbps)...")
         result = subprocess.run(
             ["ffmpeg", "-y", "-i", video_path,
              "-b:v", f"{target_kbps}k", "-b:a", "128k",
@@ -76,11 +81,95 @@ DEFAULT_CHAT_ID = "-1003749971714"
 STATE_FILE = "telegram_state_v11.json"
 HISTORY_FILE = "fingerprint_history.json"
 ADMIN_TOPIC_NAME = "Admin"
+TRIAL_TOPIC_PREFIX = "TRIALS - "
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
 input_root = os.path.join(base_dir, "CALENDARIO_POSTEO")
 
 db = DatabaseManager()
+
+
+def _windows_long_path(path):
+    path = os.path.abspath(os.fspath(path))
+    if os.name != "nt" or path.startswith("\\\\?\\"):
+        return path
+    if path.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + path[2:]
+    return "\\\\?\\" + path
+
+
+def _count_files_recursive(path):
+    count = 0
+    for _root, _dirs, files in os.walk(_windows_long_path(path)):
+        count += len(files)
+    return count
+
+
+def _safe_calendar_account_name(account_name):
+    account_name = str(account_name or "").strip()
+    if not account_name:
+        return ""
+    if "/" in account_name or "\\" in account_name:
+        return ""
+    if Path(account_name).name != account_name:
+        return ""
+    return account_name
+
+
+def delete_calendarizations_for_accounts(account_names, calendar_root=None):
+    calendar_path = Path(calendar_root or input_root)
+    targets = []
+    seen = set()
+    for account_name in account_names or []:
+        safe_name = _safe_calendar_account_name(account_name)
+        if safe_name and safe_name not in seen:
+            targets.append(safe_name)
+            seen.add(safe_name)
+
+    summary = {
+        "accounts": len(targets),
+        "deleted_folders": 0,
+        "deleted_files": 0,
+        "missing_folders": 0,
+        "failed": 0,
+        "failures": [],
+    }
+
+    if not targets or not calendar_path.exists():
+        return summary
+
+    calendar_root_resolved = calendar_path.resolve()
+    for day_dir in calendar_path.iterdir():
+        if not day_dir.is_dir() or not day_dir.name.lower().startswith("dia_"):
+            continue
+        for account_name in targets:
+            account_dir = day_dir / account_name
+            if not account_dir.exists():
+                summary["missing_folders"] += 1
+                continue
+            if not account_dir.is_dir():
+                summary["failed"] += 1
+                summary["failures"].append({
+                    "account": account_name,
+                    "path": str(account_dir),
+                    "error": "calendar target is not a directory",
+                })
+                continue
+            try:
+                account_dir.resolve().relative_to(calendar_root_resolved)
+                deleted_files = _count_files_recursive(account_dir)
+                shutil.rmtree(_windows_long_path(account_dir))
+                summary["deleted_folders"] += 1
+                summary["deleted_files"] += deleted_files
+            except Exception as exc:
+                summary["failed"] += 1
+                summary["failures"].append({
+                    "account": account_name,
+                    "path": str(account_dir),
+                    "error": str(exc),
+                })
+
+    return summary
 
 # --- 1.5. SCHEDULE DEFAULT (horarios estratégicos en Eastern Time / Nueva York) ---
 DEFAULT_SCHEDULE = {
@@ -307,15 +396,30 @@ def is_video_already_sent(video_path):
     except Exception as e:
         print(f"⚠️ No se pudo verificar estado Telegram: {e}")
         return False
+
+def _is_trials_subaccount(account_name="", account_type=""):
+    return "trial" in f"{account_name or ''} {account_type or ''}".lower()
+
+
+def _topic_display_name(acc_name, tag_emoji, is_admin=False):
+    if is_admin:
+        return acc_name
+    full_name = f"{acc_name} {tag_emoji}"
+    if _is_trials_subaccount(acc_name, tag_emoji) and not full_name.lower().startswith(TRIAL_TOPIC_PREFIX.lower()):
+        return f"{TRIAL_TOPIC_PREFIX}{full_name}"
+    return full_name
+
+
 def get_or_create_topic(chat_id, acc_name, tag_emoji, state, is_admin=False, force_recreate=False):
-    full_name = acc_name if is_admin else f"{acc_name} {tag_emoji}"
+    full_name = _topic_display_name(acc_name, tag_emoji, is_admin=is_admin)
     state_key = f"{chat_id}_{acc_name}"
-    if state_key in state and not force_recreate: return state[state_key]
+    if state_key in state and not force_recreate: return _topic_id_from_state_value(state[state_key])
     if force_recreate: state.pop(state_key, None)
     res = call_tg("createForumTopic", {'chat_id': chat_id, 'name': full_name})
     if res.get("ok"):
-        state[state_key] = res["result"]["message_thread_id"]
-        return state[state_key]
+        topic_id = res["result"]["message_thread_id"]
+        state[state_key] = {"id": topic_id, "name": full_name}
+        return topic_id
     print(f"❌ createForumTopic falló | chat_id usado: '{chat_id}' | cuenta: {acc_name} | error: {res.get('description')}")
     return None
 
@@ -342,6 +446,14 @@ def _topic_id_from_state_value(value):
     except (TypeError, ValueError):
         return value
 
+def _topic_name_from_state_value(value):
+    if isinstance(value, dict):
+        return str(value.get("name") or value.get("topic_name") or "")
+    return ""
+
+def _topic_has_trials_prefix(value):
+    return _topic_name_from_state_value(value).strip().lower().startswith(TRIAL_TOPIC_PREFIX.lower())
+
 def _delete_topic_result_status(res):
     if res.get("ok"):
         return "deleted"
@@ -357,7 +469,7 @@ def _delete_known_topics_from_state(topics_state, should_delete):
     for state_key, topic_value in list(topics_state.items()):
         chat_id = _topic_state_chat_id(state_key)
         account_name = _topic_state_account_name(state_key)
-        if not chat_id or not account_name or not should_delete(chat_id, account_name):
+        if not chat_id or not account_name or not should_delete(chat_id, account_name, topic_value):
             continue
 
         topic_id = _topic_id_from_state_value(topic_value)
@@ -389,24 +501,36 @@ def delete_known_topics_for_chats(chat_ids, topics_state):
     target_chat_ids = {str(chat_id) for chat_id in chat_ids if chat_id not in (None, "")}
     return _delete_known_topics_from_state(
         topics_state,
-        lambda chat_id, _account_name: chat_id in target_chat_ids,
+        lambda chat_id, _account_name, _topic_value: chat_id in target_chat_ids,
     )
 
 def delete_known_topics_for_accounts(account_names, topics_state):
     target_accounts = {_normalize_account_name(name) for name in account_names if _normalize_account_name(name)}
+    trial_targets = {_normalize_account_name(name) for name in account_names if _is_trials_subaccount(name)}
+
+    def should_delete(_chat_id, account_name, topic_value):
+        normalized_name = _normalize_account_name(account_name)
+        if normalized_name not in target_accounts:
+            return False
+        if _topic_has_trials_prefix(topic_value) and normalized_name not in trial_targets:
+            return False
+        return True
+
     return _delete_known_topics_from_state(
         topics_state,
-        lambda _chat_id, account_name: _normalize_account_name(account_name) in target_accounts,
+        should_delete,
     )
 
 def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, username, tag):
-    active_path = video_path
+    readable_video_path = _windows_long_path(video_path)
+    active_path = readable_video_path
     compressed_tmp = None
 
     # Si el archivo ya supera el límite, comprimir antes del primer intento
-    if os.path.getsize(video_path) > TG_MAX_BYTES:
-        print(f"⚠️  Video @{username} pesa {os.path.getsize(video_path)/1024/1024:.1f}MB (> 49MB). Comprimiendo...")
-        compressed_tmp = _compress_video_for_tg(video_path)
+    video_size = os.path.getsize(readable_video_path)
+    if video_size > TG_MAX_BYTES:
+        print(f"⚠️  Video @{username} pesa {video_size/1024/1024:.1f}MB (> 49MB). Comprimiendo...")
+        compressed_tmp = _compress_video_for_tg(readable_video_path, target_bytes=TG_COMPRESS_TARGET_BYTES)
         if compressed_tmp:
             active_path = compressed_tmp
         else:
@@ -432,7 +556,8 @@ def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, usern
                 if compressed_tmp:
                     os.unlink(compressed_tmp)
                     compressed_tmp = None
-                extra_tmp = _compress_video_for_tg(active_path if active_path != video_path else video_path)
+                active_path = readable_video_path
+                extra_tmp = _compress_video_for_tg(readable_video_path, target_bytes=TG_RECOMPRESS_TARGET_BYTES)
                 if extra_tmp:
                     active_path = extra_tmp
                     compressed_tmp = extra_tmp

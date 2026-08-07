@@ -57,6 +57,87 @@ def test_delete_known_topics_for_accounts_only_deletes_matching_account_names(mo
     ]
 
 
+def test_delete_known_topics_for_accounts_does_not_delete_prefixed_trial_topics(monkeypatch):
+    calls = []
+
+    def fake_call_tg(method, data, silent=False):
+        calls.append((method, dict(data), silent))
+        return {"ok": True, "result": True}
+
+    monkeypatch.setattr(organizadortg, "call_tg", fake_call_tg)
+    state = {
+        "-1001_evestarryh": 11,
+        "-1001_evestarryh trials": 22,
+        "-1001_evestarryh trials main": 33,
+        "-1001_evestarryh main trial": 44,
+        "-1001_evestarryhmain": 55,
+    }
+
+    summary = organizadortg.delete_known_topics_for_accounts({"evestarryh"}, state)
+
+    assert summary["deleted"] == 1
+    assert summary["failed"] == 0
+    assert state == {
+        "-1001_evestarryh trials": 22,
+        "-1001_evestarryh trials main": 33,
+        "-1001_evestarryh main trial": 44,
+        "-1001_evestarryhmain": 55,
+    }
+    assert calls == [
+        ("deleteForumTopic", {"chat_id": "-1001", "message_thread_id": 11}, False),
+    ]
+
+
+def test_delete_known_topics_for_accounts_preserves_trials_prefixed_topic_for_base_account(monkeypatch):
+    calls = []
+
+    def fake_call_tg(method, data, silent=False):
+        calls.append((method, dict(data), silent))
+        return {"ok": True, "result": True}
+
+    monkeypatch.setattr(organizadortg, "call_tg", fake_call_tg)
+    state = {
+        "-1001_evestarryh": {"id": 11, "name": "TRIALS - evestarryh TRIALS"},
+        "-1002_evestarryh": {"id": 22, "name": "evestarryh MAIN"},
+    }
+
+    summary = organizadortg.delete_known_topics_for_accounts({"evestarryh"}, state)
+
+    assert summary["deleted"] == 1
+    assert summary["failed"] == 0
+    assert state == {
+        "-1001_evestarryh": {"id": 11, "name": "TRIALS - evestarryh TRIALS"},
+    }
+    assert calls == [
+        ("deleteForumTopic", {"chat_id": "-1002", "message_thread_id": 22}, False),
+    ]
+
+
+def test_trial_subaccount_topics_are_named_with_trials_prefix(monkeypatch):
+    calls = []
+
+    def fake_call_tg(method, data, silent=False):
+        calls.append((method, dict(data), silent))
+        return {"ok": True, "result": {"message_thread_id": 77}}
+
+    monkeypatch.setattr(organizadortg, "call_tg", fake_call_tg)
+    state = {}
+
+    topic_id = organizadortg.get_or_create_topic("-1001", "evestarryh", "TRIALS", state)
+
+    assert topic_id == 77
+    assert state == {
+        "-1001_evestarryh": {"id": 77, "name": "TRIALS - evestarryh TRIALS"},
+    }
+    assert calls == [
+        (
+            "createForumTopic",
+            {"chat_id": "-1001", "name": "TRIALS - evestarryh TRIALS"},
+            False,
+        ),
+    ]
+
+
 def test_topic_id_invalid_is_treated_as_stale_state(monkeypatch):
     calls = []
 
