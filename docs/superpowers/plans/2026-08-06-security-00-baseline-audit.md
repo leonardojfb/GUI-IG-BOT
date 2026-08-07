@@ -16,7 +16,7 @@
 - Do not print, copy, commit or redact-and-replace a real token, cookie, password, private key or session value.
 - Secret reports contain only type, file/component, storage method, readers, risk and recommendation.
 - Preserve \`launcher.py -> gui_premium_v7.py\`, current SQLite files and normal code-only update behavior.
-- Use \`py -m pytest -q\` for the full regression gate; the expected baseline is 144 passing tests at commit \`f74fb5e\`.
+- Use \`py -m pytest -q\` for the full regression gate; the expected baseline is 144 collected tests at commit \`f74fb5e\`: either 144 pass, or a headless Windows runner reports exactly 142 pass and the two display-dependent tests skip with \`no display available\`.
 - Do not publish, package or deploy while an active P0/P1 remains open. A revoked credential in private Git history is documented as residual exposure, not a release blocker; history is not rewritten in this program.
 
 ## File Structure
@@ -97,7 +97,7 @@ Run:
 py -m pytest -q
 \`\`\`
 
-Expected at the audit base: \`144 passed\`. Record the exact count and elapsed time in \`00-baseline.md\`. If the command fails or times out, stop this plan and document the actual failure; do not call the baseline green.
+Expected at the audit base: 144 collected tests. Accept either \`144 passed\`, or exactly \`142 passed, 2 skipped\` when the skips are the display-dependent tests with \`no display available\`. Record the exact count, skip reason and elapsed time in \`00-baseline.md\`. If the command fails, times out, collects a different count or skips anything else, stop this plan and document the actual failure; do not call the baseline green.
 
 - [ ] **Step 5: Self-review documentation and commit the baseline task**
 
@@ -280,7 +280,7 @@ git diff --check
 git status --short
 \`\`\`
 
-Expected: 144 passing tests, no whitespace errors and exactly the three threat model documents staged for this task. Then commit:
+Expected: 144 collected tests with either 144 passing or the documented two headless display skips, no whitespace errors and exactly the three threat model documents staged for this task. Then commit:
 
 \`\`\`powershell
 git add docs/security/threat-model.md docs/security/findings.md docs/security/remediation-plan.md
