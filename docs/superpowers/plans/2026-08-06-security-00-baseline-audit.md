@@ -17,7 +17,7 @@
 - Secret reports contain only type, file/component, storage method, readers, risk and recommendation.
 - Preserve \`launcher.py -> gui_premium_v7.py\`, current SQLite files and normal code-only update behavior.
 - Use \`py -m pytest -q\` for the full regression gate; the expected baseline is 144 passing tests at commit \`f74fb5e\`.
-- Do not publish, package or deploy while a P0/P1 remains open.
+- Do not publish, package or deploy while an active P0/P1 remains open. A revoked credential in private Git history is documented as residual exposure, not a release blocker; history is not rewritten in this program.
 
 ## File Structure
 
@@ -245,11 +245,13 @@ Write this operational decision in \`remediation-plan.md\`:
 
 \`\`\`text
 No new binary, updater package, installer or source distribution may be published
-while a shared permanent Telegram credential is embedded in source, release
-payload, local configuration in plaintext or reachable Git history.
+while a shared active permanent Telegram credential is embedded in source, release
+payload or local configuration in plaintext. A revoked credential that remains
+only in private Git history is recorded as residual exposure and is not a release
+blocker; this program does not rewrite Git history.
 \`\`\`
 
-The remediation plan must require a later dedicated PR to add an injectable credential provider, remove the embedded value from affected modules, protect the local fallback with DPAPI, add redaction tests, and then move the owner token to the future server relay. Do not rotate or request a real secret inside this audit branch; rotating an external production credential requires the owner's separate action and a tested replacement path.
+The remediation plan must require a later dedicated PR to add an injectable credential provider, remove the embedded value from affected modules, protect the local fallback with DPAPI, add redaction tests, and then move the owner token to the future server relay. The owner must revoke or rotate the external production credential only after the replacement path is tested. Record any remaining private Git-history occurrence as residual exposure without its value; do not rewrite Git history in this program.
 
 - [ ] **Step 4: Define follow-on plans with acceptance gates**
 
