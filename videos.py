@@ -6,6 +6,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from database import DatabaseManager
 from console_encoding import ensure_stdout_utf8
+from render_performance import get_render_performance
 
 ensure_stdout_utf8()
 
@@ -100,8 +101,9 @@ def run_render():
     db.close()
 
 
-def process_tandas(db: DatabaseManager, tandas: list):
+def process_tandas(db: DatabaseManager, tandas: list, performance=None):
     """Procesar videos usando Tandas activas haciendo un cruce total (Producto Cartesiano)."""
+    performance = performance or get_render_performance()
     for tanda in tandas:
         tanda_name = tanda['tanda_name']
         p1_folder = tanda['p1_folder']
@@ -154,9 +156,12 @@ def process_tandas(db: DatabaseManager, tandas: list):
             print("✅ Todos los videos ya están renderizados.")
             continue
 
-        print(f"⏳ Pendientes: {len(pending)} — renderizando 2 en paralelo...")
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            futures = {pool.submit(render_video_pair, *args): args for args in pending}
+        print(f"⏳ Pendientes: {len(pending)} — renderizando {performance.workers} en paralelo...")
+        with ThreadPoolExecutor(max_workers=performance.workers) as pool:
+            futures = {
+                pool.submit(render_video_pair, *args, performance.ffmpeg_threads): args
+                for args in pending
+            }
             for fut in as_completed(futures):
                 fut.result()  # re-lanza excepciones si las hay
 
@@ -216,7 +221,7 @@ def process_mix_rules(db: DatabaseManager, rules: list):
             render_video_pair(path_v1, path_v2, out_path, target_cat, p1_id, p2_id)
 
 
-def render_video_pair(path_v1, path_v2, out_path, cat, p1_id, p2_id):
+def render_video_pair(path_v1, path_v2, out_path, cat, p1_id, p2_id, ffmpeg_threads=None):
     """
     Renderiza un par de videos concatenados usando ffmpeg.
     Intenta GPU NVIDIA primero; si falla, usa CPU (libx264) automáticamente.
@@ -247,7 +252,7 @@ def render_video_pair(path_v1, path_v2, out_path, cat, p1_id, p2_id):
     encoders = [
         ('GPU NVIDIA (h264_nvenc)', ['-hwaccel', 'cuda'], ['-c:v', 'h264_nvenc', '-preset', 'p4', '-cq:v', '20']),
         ('Intel QSV (h264_qsv)',    [],                   ['-c:v', 'h264_qsv', '-global_quality', '23']),
-        ('CPU (libx264 fast)',      [],                   ['-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-threads', '4']),
+        ('CPU (libx264 fast)',      [],                   ['-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-threads', str(ffmpeg_threads or 4)]),
     ]
 
     last_stderr = ""
@@ -282,7 +287,7 @@ def render_video_pair(path_v1, path_v2, out_path, cat, p1_id, p2_id):
 
     print(f"❌ ERROR: No se pudo renderizar {name_out} con ningun encoder.")
     print(last_stderr)
-def render_tanda(tanda_name: str) -> str:
+def render_tanda(tanda_name: str, performance=None) -> str:
     """Función puente llamada desde la Interfaz Gráfica (GUI) para procesar una tanda específica."""
     db = DatabaseManager()
     
@@ -297,7 +302,7 @@ def render_tanda(tanda_name: str) -> str:
     try:
         print(f"🎬 Iniciando renderizado desde GUI para la tanda: {tanda_name}")
         # Reutilizamos tu motor de procesamiento que ya funciona perfecto
-        process_tandas(db, [tanda_activa])
+        process_tandas(db, [tanda_activa], performance)
         db.close()
         return f"✅ Tanda '{tanda_name}' procesada y renderizada con éxito."
     except Exception as e:

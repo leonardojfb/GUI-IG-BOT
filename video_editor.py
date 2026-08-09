@@ -126,7 +126,7 @@ def _overlay_filter(info: dict, item: dict, input_index: int) -> str:
             f"enable='between(n,{start},{end})'[v{input_index}]")
 
 
-def render_video(input_path: str, output_path: str, overlays: list[dict]) -> str:
+def render_video(input_path: str, output_path: str, overlays: list[dict], ffmpeg_threads=None) -> str:
     info = probe_video(input_path)
     if not overlays:
         raise ValueError("Agregá al menos una foto.")
@@ -138,7 +138,10 @@ def render_video(input_path: str, output_path: str, overlays: list[dict]) -> str
         filters.append(_overlay_filter(info, item, index))
     cmd += ["-filter_complex", ";".join(filters), "-map", f"[v{len(overlays)}]", "-map", "0:a?",
             "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "192k", "-t", f"{info['duration']:.6f}", output_path]
+            "-c:a", "aac", "-b:a", "192k"]
+    if ffmpeg_threads:
+        cmd += ["-threads", str(ffmpeg_threads)]
+    cmd += ["-t", f"{info['duration']:.6f}", output_path]
     result = _run(cmd)
     if result.returncode:
         stderr = (result.stderr or "")[-1800:]

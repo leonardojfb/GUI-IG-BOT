@@ -36,6 +36,7 @@ $ReleaseFiles = @(
     "organizadortg.py",
     "videos.py",
     "video_editor.py",
+    "render_performance.py",
     "metadata_pool.py",
     "telegram_core.py",
     "cleaner.py",

@@ -13,11 +13,13 @@ import os
 import random
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 import json
 import shutil
 import requests
+import render_performance
 
 from database import DatabaseManager
 from updater import APP_DIR as UPDATE_APP_DIR, check_and_apply, load_config, read_local_version
@@ -2244,10 +2246,11 @@ class InstagramAutoPro(ctk.CTk):
         self.db.add_tanda(name, self.p1_dir, self.p2_dir, existing.get("captions_file_path"))
         self._refresh_tandas_list()
         self.reload_dist_lists()
+        performance = render_performance.get_render_performance()
 
         def task():
             import videos
-            return videos.render_tanda(name)
+            return videos.render_tanda(name, performance)
             
         def done(success, result):
             self.btn_render.configure(text="⚙️ INICIAR RENDER", state="normal")
@@ -4148,13 +4151,17 @@ class InstagramAutoPro(ctk.CTk):
     def _editor_render_batch(self, jobs):
         """Render one job per requested video/photo combination."""
         self.editor_status.configure(text=f"Renderizando {len(jobs)} videos con FFmpeg…", text_color=WARNING)
+        performance = render_performance.get_render_performance()
 
         def task():
             import video_editor
-            completed = []
-            for source, output, job_overlays in jobs:
-                completed.append(video_editor.render_video(source, output, job_overlays))
-            return completed
+            with ThreadPoolExecutor(max_workers=performance.workers) as pool:
+                futures = [
+                    pool.submit(video_editor.render_video, source, output, job_overlays,
+                                performance.ffmpeg_threads)
+                    for source, output, job_overlays in jobs
+                ]
+                return [future.result() for future in futures]
 
         def done(success, result):
             self.editor_status.configure(text="✅ Videos guardados" if success else "❌ Error de render",
