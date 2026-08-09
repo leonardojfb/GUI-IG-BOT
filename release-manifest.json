@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.15",
+    "version":  "1.0.16",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.15",
-    "asset_name":  "MetodoIG-v1.0.15.zip",
-    "sha256":  "02b9fbc28e6fe4e7770279c31a188354f409fc13491f0dcd7c3b5f1715598356",
-    "notes":  "Backup previo a cambios mayores: rutas largas Windows en Logistica y Telegram, recompresion segura tras 413, topics TRIALS protegidos y borrado selectivo de calendarizaciones.",
+    "github_release_tag":  "v1.0.16",
+    "asset_name":  "MetodoIG-v1.0.16.zip",
+    "sha256":  "32cca05fdb2369227bfa2ef0f1752b0d58c82d2a0a74ac49283b4eaf247cdb4d",
+    "notes":  "Actualización puente del updater. Prepara de forma segura la descarga del módulo de rendimiento de la próxima actualización; no modifica el flujo de videos todavía.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",
