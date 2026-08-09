@@ -47,6 +47,9 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "organizadortg.py",
         "videos.py",
         "video_editor.py",
+        # Puente v1.0.16: permite que la siguiente actualización descargue
+        # el módulo de rendimiento compartido sin filtrar su archivo nuevo.
+        "render_performance.py",
         "metadata_pool.py",
         "telegram_core.py",
         "cleaner.py",
