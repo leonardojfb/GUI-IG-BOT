@@ -826,6 +826,8 @@ class InstagramAutoPro(ctk.CTk):
 
         self.db = DatabaseManager()
         self._active_nav = None
+        self._render_worker_controls = []
+        self._render_worker_syncing = False
 
         # Estado de rutas (Tandas)
         self.p1_dir = ""
@@ -2115,6 +2117,59 @@ class InstagramAutoPro(ctk.CTk):
         self.reload_dist_lists()
         messagebox.showinfo("✅", f"Tanda '{name}' guardada correctamente.")
 
+    def _build_render_performance_control(self, parent, context):
+        """Build one compact view of the globally persisted render worker count."""
+        snapshot = render_performance.get_render_performance()
+        control = ctk.CTkFrame(parent, fg_color=BG_CARD2, corner_radius=8)
+        control._render_performance_context = context
+        ctk.CTkLabel(
+            control, text="Videos en paralelo", text_color=TEXT_MUTED,
+            font=ctk.CTkFont(size=11, weight="bold"),
+        ).pack(side="left", padx=(10, 6), pady=6)
+        slider = ctk.CTkSlider(
+            control, from_=1, to=snapshot.max_workers,
+            number_of_steps=max(1, snapshot.max_workers - 1),
+            command=self._on_render_workers_changed,
+            fg_color=BG_INPUT, progress_color=ACCENT, button_color=NEON_CYAN,
+            width=120,
+        )
+        slider.pack(side="left", padx=(0, 6), pady=6)
+        value_label = ctk.CTkLabel(
+            control, text=f"{snapshot.workers} de {snapshot.max_workers}",
+            text_color=TEXT_BODY, font=ctk.CTkFont(size=11), width=42,
+        )
+        value_label.pack(side="left", padx=(0, 10), pady=6)
+
+        self._render_worker_controls = getattr(self, "_render_worker_controls", [])
+        self._render_worker_controls.append((slider, value_label))
+        was_syncing = getattr(self, "_render_worker_syncing", False)
+        self._render_worker_syncing = True
+        try:
+            slider.set(snapshot.workers)
+        finally:
+            self._render_worker_syncing = was_syncing
+        return control
+
+    def _on_render_workers_changed(self, value):
+        if getattr(self, "_render_worker_syncing", False):
+            return
+        snapshot = render_performance.save_render_workers(round(float(value)))
+        self._sync_render_worker_controls(snapshot)
+
+    def _sync_render_worker_controls(self, snapshot):
+        self._render_worker_syncing = True
+        try:
+            for slider, value_label in self._render_worker_controls:
+                slider.configure(
+                    from_=1,
+                    to=snapshot.max_workers,
+                    number_of_steps=max(1, snapshot.max_workers - 1),
+                )
+                slider.set(snapshot.workers)
+                value_label.configure(text=f"{snapshot.workers} de {snapshot.max_workers}")
+        finally:
+            self._render_worker_syncing = False
+
     def _build_mix_frame(self):
         """TAREA 4 — Creador de Tandas."""
         f = self._frames["Tandas"]
@@ -2168,6 +2223,7 @@ class InstagramAutoPro(ctk.CTk):
         ctk.CTkLabel(
             bot_body, text="Los captions se asignan por tanda desde Logística.", text_color=TEXT_MUTED
         ).pack(side="left")
+        self._build_render_performance_control(bot_body, "Tandas").pack(side="right", padx=(0, 12))
         
         self.btn_render = PrimaryButton(bot_body, text="INICIAR RENDER", height=BTN_H_LG,
                                         command=self.process_tanda)
@@ -3674,6 +3730,7 @@ class InstagramAutoPro(ctk.CTk):
         actions.grid(row=4, column=0, sticky="ew", padx=24, pady=(0, 14))
         PrimaryButton(actions, text="👁️  Preview en frame aleatorio", command=self.editor_preview).pack(side="left", padx=(0, 8))
         PrimaryButton(actions, text="Renderizar video", command=self.editor_render).pack(side="left")
+        self._build_render_performance_control(actions, "Edición").pack(side="right")
         self.editor_status = ctk.CTkLabel(actions, text="Configurá el video y las fotos.", text_color=TEXT_MUTED)
         self.editor_status.pack(side="left", padx=16)
 
@@ -4277,6 +4334,9 @@ class InstagramAutoPro(ctk.CTk):
                     widget.insert(0, default)
                 widget.grid(row=row_i, column=1, padx=(0, 18), pady=7, sticky="ew")
                 setattr(self, attr, widget)
+
+        self._build_render_performance_control(card_cfg, "Forge").grid(
+            row=4, column=0, columnspan=2, sticky="ew", padx=18, pady=(4, 2))
 
         # ── Eje Efectos (qué efectos) ────────────────────────────────────
         ctk.CTkLabel(card_cfg, text="Efectos", text_color=TEXT_MUTED,

@@ -46,6 +46,7 @@ Videos en paralelo: [ 1 ────────●────── 8 ]  4 de 
 - El texto muestra valor elegido y máximo; si la preferencia guardada se recorta porque la máquina tiene menos recursos, se persiste el valor válido y se informa de forma no bloqueante.
 - La barra aparece en el bloque de configuración, antes del botón de inicio, en Forge, Tandas y Edición.
 - Cambiar cualquier barra actualiza las otras dos y guarda inmediatamente el valor.
+- `_build_render_performance_control(parent, context)` registra cada slider ya construido; `_on_render_workers_changed` guarda una sola vez y luego reconfigura todos los sliders y etiquetas con el snapshot re-clampado de la máquina, sin volver a disparar el callback.
 - La confirmación de Forge y los estados de proceso indican cuántos videos se ejecutarán en paralelo.
 
 ## Ejecución concurrente
@@ -64,6 +65,7 @@ Si un trabajo falla, el error identifica su archivo de origen. Los resultados ya
 - `videos.py`: el executor recibe el número elegido y el fallback CPU recibe los hilos calculados.
 - `video_editor.py`: el comando FFmpeg incorpora el presupuesto de hilos.
 - `gui_premium_v7.py`: las tres pantallas construyen el control global y cada flujo pasa el mismo snapshot al ejecutor correcto.
+- La UI verifica que una modificación sincroniza controles creados antes, persiste el valor y actualiza máximo/pasos/etiqueta cuando la capacidad cambia.
 - Forge: la colección concurrente produce registros y la escritura SQLite continúa siendo única/secuencial.
 
 ## Compatibilidad y actualización
