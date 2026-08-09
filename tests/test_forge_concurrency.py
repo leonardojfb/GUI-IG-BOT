@@ -1,5 +1,4 @@
 import os
-from concurrent.futures import Future
 from types import SimpleNamespace
 
 import metadata_pool
@@ -99,12 +98,22 @@ def test_forge_records_are_saved_after_all_variants_complete(monkeypatch, tmp_pa
     worker_counts = []
     worker_tasks = []
     snapshot_calls = []
+    submissions = []
     performance = RenderPerformance(4, 2, 4, 8, None)
 
     def apply_variant(_source, output, _meta, **kwargs):
         completed.append(os.path.basename(output))
         variant_kwargs.append(kwargs)
         return {}
+
+    class PendingFuture:
+        def __init__(self, function, args):
+            self.function = function
+            self.args = args
+
+        def result(self):
+            assert len(submissions) == 2, "Forge waited before submitting every copy job"
+            return self.function(*self.args)
 
     class Pool:
         def __init__(self, max_workers):
@@ -117,11 +126,8 @@ def test_forge_records_are_saved_after_all_variants_complete(monkeypatch, tmp_pa
             return False
 
         def submit(self, function, *args):
-            future = Future()
-            try:
-                future.set_result(function(*args))
-            except Exception as error:
-                future.set_exception(error)
+            future = PendingFuture(function, args)
+            submissions.append(future)
             return future
 
     class Worker:
