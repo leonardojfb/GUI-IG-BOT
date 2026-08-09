@@ -287,6 +287,13 @@ def render_video_pair(path_v1, path_v2, out_path, cat, p1_id, p2_id, ffmpeg_thre
 
     print(f"❌ ERROR: No se pudo renderizar {name_out} con ningun encoder.")
     print(last_stderr)
+    stderr = (last_stderr or "")[-1800:]
+    raise RuntimeError(
+        f"FFmpeg no pudo combinar '{path_v1}' y '{path_v2}' en '{out_path}': "
+        f"{stderr or 'sin detalle de stderr.'}"
+    )
+
+
 def render_tanda(tanda_name: str, performance=None) -> str:
     """Función puente llamada desde la Interfaz Gráfica (GUI) para procesar una tanda específica."""
     db = DatabaseManager()

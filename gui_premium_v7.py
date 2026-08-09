@@ -828,6 +828,7 @@ class InstagramAutoPro(ctk.CTk):
         self._active_nav = None
         self._render_worker_controls = []
         self._render_worker_syncing = False
+        self._editor_render_active = False
 
         # Estado de rutas (Tandas)
         self.p1_dir = ""
@@ -2120,6 +2121,9 @@ class InstagramAutoPro(ctk.CTk):
     def _build_render_performance_control(self, parent, context):
         """Build one compact view of the globally persisted render worker count."""
         snapshot = render_performance.get_render_performance()
+        value_text = f"{snapshot.workers} de {snapshot.max_workers}"
+        if snapshot.workers_were_reclamped:
+            value_text += " · ajustado al equipo"
         slider_max = max(2, snapshot.max_workers)
         slider_state = "disabled" if snapshot.max_workers == 1 else "normal"
         control = ctk.CTkFrame(parent, fg_color=BG_CARD2, corner_radius=8)
@@ -2137,7 +2141,7 @@ class InstagramAutoPro(ctk.CTk):
         )
         slider.pack(side="left", padx=(0, 6), pady=6)
         value_label = ctk.CTkLabel(
-            control, text=f"{snapshot.workers} de {snapshot.max_workers}",
+            control, text=value_text,
             text_color=TEXT_BODY, font=ctk.CTkFont(size=11), width=42,
         )
         value_label.pack(side="left", padx=(0, 10), pady=6)
@@ -2163,6 +2167,9 @@ class InstagramAutoPro(ctk.CTk):
     def _sync_render_worker_controls(self, snapshot):
         self._render_worker_syncing = True
         try:
+            value_text = f"{snapshot.workers} de {snapshot.max_workers}"
+            if snapshot.workers_were_reclamped:
+                value_text += " · ajustado al equipo"
             for slider, value_label in self._render_worker_controls:
                 slider_max = max(2, snapshot.max_workers)
                 slider.configure(
@@ -2172,7 +2179,7 @@ class InstagramAutoPro(ctk.CTk):
                     state="disabled" if snapshot.max_workers == 1 else "normal",
                 )
                 slider.set(snapshot.workers)
-                value_label.configure(text=f"{snapshot.workers} de {snapshot.max_workers}")
+                value_label.configure(text=value_text)
         finally:
             self._render_worker_syncing = False
 
@@ -3734,7 +3741,9 @@ class InstagramAutoPro(ctk.CTk):
         actions = ctk.CTkFrame(scroll, fg_color="transparent")
         actions.grid(row=4, column=0, sticky="ew", padx=24, pady=(0, 14))
         PrimaryButton(actions, text="👁️  Preview en frame aleatorio", command=self.editor_preview).pack(side="left", padx=(0, 8))
-        PrimaryButton(actions, text="Renderizar video", command=self.editor_render).pack(side="right")
+        self.btn_editor_render = PrimaryButton(
+            actions, text="Renderizar video", command=self.editor_render)
+        self.btn_editor_render.pack(side="right")
         self._build_render_performance_control(actions, "Edición").pack(side="right", padx=(0, 8))
         self.editor_status = ctk.CTkLabel(actions, text="Configurá el video y las fotos.", text_color=TEXT_MUTED)
         self.editor_status.pack(side="left", padx=16)
@@ -4168,6 +4177,8 @@ class InstagramAutoPro(ctk.CTk):
         WorkerThread(self, done, task).start()
 
     def editor_render(self):
+        if getattr(self, "_editor_render_active", False):
+            return
         try:
             videos, overlays = self._editor_collect()
         except Exception as exc:
@@ -4198,22 +4209,39 @@ class InstagramAutoPro(ctk.CTk):
                                               filetypes=[("MP4", "*.mp4")], initialfile="video_editado.mp4")
         if not output:
             return
+        performance = render_performance.get_render_performance()
+        InstagramAutoPro._set_editor_render_active(self, True)
         self.editor_status.configure(text="Renderizando con FFmpeg…", text_color=WARNING)
         def task():
             import video_editor
-            return video_editor.render_video(video, output, overlays)
+            return video_editor.render_video(
+                video, output, overlays, performance.ffmpeg_threads)
         def done(success, result):
+            InstagramAutoPro._set_editor_render_active(self, False)
             self.editor_status.configure(text="✅ Video guardado" if success else "❌ Error de render", text_color=SUCCESS if success else DANGER)
             if success:
                 messagebox.showinfo("Edición completada", f"Video guardado en:\n{result}")
             else:
                 messagebox.showerror("Renderizar", result)
-        WorkerThread(self, done, task).start()
+        try:
+            WorkerThread(self, done, task).start()
+        except Exception:
+            InstagramAutoPro._set_editor_render_active(self, False)
+            raise
+
+    def _set_editor_render_active(self, active):
+        self._editor_render_active = active
+        button = getattr(self, "btn_editor_render", None)
+        if button is not None:
+            button.configure(state="disabled" if active else "normal")
 
     def _editor_render_batch(self, jobs):
         """Render one job per requested video/photo combination."""
-        self.editor_status.configure(text=f"Renderizando {len(jobs)} videos con FFmpeg…", text_color=WARNING)
+        if getattr(self, "_editor_render_active", False):
+            return
         performance = render_performance.get_render_performance()
+        InstagramAutoPro._set_editor_render_active(self, True)
+        self.editor_status.configure(text=f"Renderizando {len(jobs)} videos con FFmpeg…", text_color=WARNING)
 
         def task():
             import video_editor
@@ -4226,6 +4254,7 @@ class InstagramAutoPro(ctk.CTk):
                 return [future.result() for future in futures]
 
         def done(success, result):
+            InstagramAutoPro._set_editor_render_active(self, False)
             self.editor_status.configure(text="✅ Videos guardados" if success else "❌ Error de render",
                                          text_color=SUCCESS if success else DANGER)
             if success:
@@ -4234,7 +4263,11 @@ class InstagramAutoPro(ctk.CTk):
             else:
                 messagebox.showerror("Renderizar lote", result)
 
-        WorkerThread(self, done, task).start()
+        try:
+            WorkerThread(self, done, task).start()
+        except Exception:
+            InstagramAutoPro._set_editor_render_active(self, False)
+            raise
 
 
     # FORGE DE METADATA
@@ -4610,6 +4643,7 @@ class InstagramAutoPro(ctk.CTk):
         if not messagebox.askyesno("Confirmar Forge", (
             f"¿Generar {len(self.forge_video_paths)} vídeos × {copies} copias = {n_total} archivos con metadata iPhone única?\n\n"
             f"Tanda: {tanda_name}\n"
+            f"Rendimiento: {performance.workers} videos en paralelo\n"
             f"Micro-ediciones: {fx_desc}"
         )):
             return
@@ -4624,7 +4658,10 @@ class InstagramAutoPro(ctk.CTk):
         self.btn_forge_reshuffle.configure(state="disabled")
         self.forge_pb.configure(mode="indeterminate")
         self.forge_pb.start()
-        self.forge_pb_lbl.configure(text="Procesando con FFmpeg...", text_color=WARNING)
+        self.forge_pb_lbl.configure(
+            text=f"Procesando con FFmpeg ({performance.workers} videos en paralelo)...",
+            text_color=WARNING,
+        )
 
         def task():
             import re

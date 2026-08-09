@@ -153,6 +153,47 @@ def test_single_worker_control_uses_a_disabled_safe_range_and_clamps_callbacks(m
     assert saved == [1]
 
 
+def test_control_surfaces_a_non_blocking_hardware_reclamp_notice(monkeypatch):
+    class Widget:
+        def __init__(self, *_args, **kwargs):
+            self.options = kwargs
+            self.value = None
+
+        def set(self, value):
+            self.value = value
+
+        def pack(self, **_kwargs):
+            pass
+
+    fake_ctk = SimpleNamespace(
+        CTkFrame=Widget,
+        CTkLabel=Widget,
+        CTkSlider=Widget,
+        CTkFont=lambda **kwargs: kwargs,
+    )
+    reclamped = RenderPerformance(2, 2, 4, 8, 8 << 30, workers_were_reclamped=True)
+    monkeypatch.setattr(gui_premium_v7, "ctk", fake_ctk)
+    monkeypatch.setattr(
+        gui_premium_v7.render_performance,
+        "get_render_performance",
+        lambda: reclamped,
+    )
+
+    class Harness:
+        _build_render_performance_control = InstagramAutoPro._build_render_performance_control
+        _on_render_workers_changed = InstagramAutoPro._on_render_workers_changed
+
+        def __init__(self):
+            self._render_worker_controls = []
+            self._render_worker_syncing = False
+
+    app = Harness()
+    app._build_render_performance_control(Widget(), "Edición")
+
+    _slider, value_label = app._render_worker_controls[0]
+    assert "ajustado" in value_label.options["text"].lower()
+
+
 def test_render_controls_are_immediately_before_their_primary_actions():
     source = SOURCE.read_text(encoding="utf-8")
     tandas = extract_method(source, "_build_mix_frame")
@@ -161,13 +202,15 @@ def test_render_controls_are_immediately_before_their_primary_actions():
 
     tandas_button_pack = 'self.btn_render.pack(side="right")'
     tandas_control_pack = '_build_render_performance_control(bot_body, "Tandas").pack(side="right"'
-    editor_button_pack = 'PrimaryButton(actions, text="Renderizar video", command=self.editor_render).pack(side="right")'
+    editor_button_pack = 'self.btn_editor_render.pack(side="right")'
     editor_control_pack = '_build_render_performance_control(actions, "Edición").pack(side="right"'
 
     # Tk packs successive right-side widgets from the edge inward. The button
     # must therefore be packed first, then the adjacent control to its left.
     assert tandas.index(tandas_button_pack) < tandas.index(tandas_control_pack)
     assert editor.index(editor_button_pack) < editor.index(editor_control_pack)
+    assert "self.btn_editor_render = PrimaryButton(" in editor
+    assert 'actions, text="Renderizar video", command=self.editor_render)' in editor
     assert forge.index('_build_render_performance_control(bot, "Forge")') < forge.index("self.btn_forge_process = PrimaryButton")
     assert 'row=0, column=2' in forge[forge.index('_build_render_performance_control(bot, "Forge")'):]
     assert 'row=0, column=3' in forge[forge.index("self.btn_forge_process = PrimaryButton"):]

@@ -3,6 +3,7 @@
 import ctypes
 import json
 import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +19,7 @@ class RenderPerformance:
     ffmpeg_threads: int
     logical_cpus: int
     available_memory_bytes: int | None
+    workers_were_reclamped: bool = False
 
 
 class _MemoryStatus(ctypes.Structure):
@@ -39,7 +41,11 @@ def get_available_memory_bytes() -> int | None:
         return None
     status = _MemoryStatus()
     status.dwLength = ctypes.sizeof(status)
-    if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+    try:
+        query_succeeded = ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
+    except Exception:
+        return None
+    if not query_succeeded:
         return None
     return status.ullAvailPhys
 
@@ -57,30 +63,59 @@ def clamp_workers(workers: int | None, max_workers: int) -> int:
 def load_workers() -> int | None:
     try:
         with get_render_performance_path().open(encoding="utf-8") as file:
-            return json.load(file).get("workers")
+            workers = json.load(file).get("workers")
     except (FileNotFoundError, OSError, ValueError, AttributeError):
         return None
+    if isinstance(workers, bool) or not isinstance(workers, int) or workers <= 0:
+        return None
+    return workers
+
+
+def _persist_workers(workers: int) -> None:
+    path = get_render_performance_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            json.dump({"workers": workers}, temporary)
+            temporary_path = Path(temporary.name)
+        os.replace(temporary_path, path)
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
 
 
 def get_render_performance(requested_workers: int | None = None) -> RenderPerformance:
     logical_cpus = max(1, os.cpu_count() or 1)
     available_memory = get_available_memory_bytes()
-    memory_max = max(1, available_memory // MEMORY_PER_WORKER_BYTES) if available_memory else logical_cpus
+    memory_max = (
+        logical_cpus if available_memory is None
+        else max(1, available_memory // MEMORY_PER_WORKER_BYTES)
+    )
     max_workers = max(1, min(logical_cpus, memory_max))
-    workers = clamp_workers(
-        requested_workers if requested_workers is not None else load_workers(), max_workers)
+    selected_workers = requested_workers if requested_workers is not None else load_workers()
+    workers = clamp_workers(selected_workers, max_workers)
+    workers_were_reclamped = selected_workers is not None and workers != selected_workers
+    if requested_workers is None and workers_were_reclamped:
+        _persist_workers(workers)
     return RenderPerformance(
         max_workers=max_workers,
         workers=workers,
         ffmpeg_threads=max(1, logical_cpus // workers),
         logical_cpus=logical_cpus,
         available_memory_bytes=available_memory,
+        workers_were_reclamped=workers_were_reclamped,
     )
 
 
 def save_render_workers(workers: int) -> RenderPerformance:
     snapshot = get_render_performance(workers)
-    path = get_render_performance_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"workers": snapshot.workers}), encoding="utf-8")
+    _persist_workers(snapshot.workers)
     return snapshot

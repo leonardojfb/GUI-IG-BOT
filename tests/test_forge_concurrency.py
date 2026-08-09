@@ -16,8 +16,11 @@ class _Value:
 
 
 class _Widget:
-    def configure(self, **_kwargs):
-        pass
+    def __init__(self):
+        self.configurations = []
+
+    def configure(self, **kwargs):
+        self.configurations.append(kwargs)
 
     def start(self):
         pass
@@ -99,6 +102,7 @@ def test_forge_records_are_saved_after_all_variants_complete(monkeypatch, tmp_pa
     worker_tasks = []
     snapshot_calls = []
     submissions = []
+    confirmation_messages = []
     performance = RenderPerformance(4, 2, 4, 8, None)
 
     def apply_variant(_source, output, _meta, **kwargs):
@@ -146,7 +150,11 @@ def test_forge_records_are_saved_after_all_variants_complete(monkeypatch, tmp_pa
     )
     monkeypatch.setattr(gui_premium_v7, "ThreadPoolExecutor", Pool)
     monkeypatch.setattr(gui_premium_v7, "WorkerThread", Worker)
-    monkeypatch.setattr(gui_premium_v7.messagebox, "askyesno", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        gui_premium_v7.messagebox,
+        "askyesno",
+        lambda _title, message: confirmation_messages.append(message) or True,
+    )
     monkeypatch.setattr(gui_premium_v7, "__file__", str(tmp_path / "gui_premium_v7.py"))
     app = _forge_app(tmp_path, completed)
 
@@ -155,6 +163,11 @@ def test_forge_records_are_saved_after_all_variants_complete(monkeypatch, tmp_pa
 
     assert snapshot_calls == [True]
     assert worker_counts == [2]
+    assert "2 videos en paralelo" in confirmation_messages[0]
+    assert any(
+        "2 videos en paralelo" in configuration.get("text", "")
+        for configuration in app.forge_pb_lbl.configurations
+    )
     assert completed == ["one__c01.mp4", "two__c01.mp4"]
     assert [kwargs["ffmpeg_threads"] for kwargs in variant_kwargs] == [4, 4]
     assert app.db.saved_forge_rows == [
