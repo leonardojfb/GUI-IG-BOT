@@ -4506,6 +4506,7 @@ class InstagramAutoPro(ctk.CTk):
         self.forge_preview_metadata()
 
     def forge_process(self):
+        performance = render_performance.get_render_performance()
         if not self.forge_video_paths:
             return messagebox.showwarning("⚠️", "No hay videos en la lista.")
         if not self.forge_meta_assignments:
@@ -4564,8 +4565,9 @@ class InstagramAutoPro(ctk.CTk):
             import re
             import metadata_pool
             os.makedirs(output_dir, exist_ok=True)
-            fingerprints = []
+            copy_jobs = []
             meta_idx = 0
+            reserved_max = {}
             for vid_path in videos:
                 filename = os.path.basename(vid_path)
                 base, ext = os.path.splitext(filename)
@@ -4577,18 +4579,40 @@ class InstagramAutoPro(ctk.CTk):
                     m = copy_pattern.match(fname)
                     if m:
                         existing_max = max(existing_max, int(m.group(1)))
+                reservation_key = (vid_id, ext)
+                existing_max = max(existing_max, reserved_max.get(reservation_key, 0))
                 for offset in range(1, copies + 1):
                     copy_num = existing_max + offset
                     meta = meta_list[meta_idx]
                     out_name = f"{vid_id}__c{copy_num:02d}{ext}"
                     out_path = os.path.join(output_dir, out_name)
-                    metadata_pool.apply_variant_and_metadata(vid_path, out_path, meta,
-                                                             enabled=fx_enabled, strength=forge_strength,
-                                                             overrides=forge_overrides)
-                    db_ref.save_forge_video(tanda_name, filename, out_name, vh)
-                    fingerprints.append({"video_hash": f"{vh}_{copy_num}", **meta})
+                    fingerprint = {"video_hash": f"{vh}_{copy_num}", **meta}
+                    copy_jobs.append((vid_path, out_path, filename, out_name, vh, meta, fingerprint))
                     meta_idx += 1
-            db_ref.save_metadata_fingerprints(fingerprints)
+                reserved_max[reservation_key] = existing_max + copies
+
+            def process_copy(copy_job):
+                vid_path, out_path, filename, out_name, vh, meta, fingerprint = copy_job
+                try:
+                    metadata_pool.apply_variant_and_metadata(
+                        vid_path, out_path, meta,
+                        enabled=fx_enabled, strength=forge_strength,
+                        overrides=forge_overrides,
+                        ffmpeg_threads=performance.ffmpeg_threads,
+                    )
+                except Exception as error:
+                    raise RuntimeError(f"Forge falló en '{filename}': {error}") from error
+                return filename, out_name, vh, fingerprint
+
+            with ThreadPoolExecutor(max_workers=performance.workers) as pool:
+                futures = [pool.submit(process_copy, copy_job) for copy_job in copy_jobs]
+                completed = [future.result() for future in futures]
+
+            for filename, out_name, vh, _fingerprint in completed:
+                db_ref.save_forge_video(tanda_name, filename, out_name, vh)
+            db_ref.save_metadata_fingerprints([
+                fingerprint for *_row, fingerprint in completed
+            ])
             existing_tanda = db_ref.get_tanda_by_name(tanda_name) or {}
             db_ref.add_tanda(
                 tanda_name, tanda_name, tanda_name, existing_tanda.get("captions_file_path")
