@@ -2120,6 +2120,8 @@ class InstagramAutoPro(ctk.CTk):
     def _build_render_performance_control(self, parent, context):
         """Build one compact view of the globally persisted render worker count."""
         snapshot = render_performance.get_render_performance()
+        slider_max = max(2, snapshot.max_workers)
+        slider_state = "disabled" if snapshot.max_workers == 1 else "normal"
         control = ctk.CTkFrame(parent, fg_color=BG_CARD2, corner_radius=8)
         control._render_performance_context = context
         ctk.CTkLabel(
@@ -2127,8 +2129,8 @@ class InstagramAutoPro(ctk.CTk):
             font=ctk.CTkFont(size=11, weight="bold"),
         ).pack(side="left", padx=(10, 6), pady=6)
         slider = ctk.CTkSlider(
-            control, from_=1, to=snapshot.max_workers,
-            number_of_steps=max(1, snapshot.max_workers - 1),
+            control, from_=1, to=slider_max,
+            number_of_steps=max(1, slider_max - 1), state=slider_state,
             command=self._on_render_workers_changed,
             fg_color=BG_INPUT, progress_color=ACCENT, button_color=NEON_CYAN,
             width=120,
@@ -2153,17 +2155,21 @@ class InstagramAutoPro(ctk.CTk):
     def _on_render_workers_changed(self, value):
         if getattr(self, "_render_worker_syncing", False):
             return
-        snapshot = render_performance.save_render_workers(round(float(value)))
+        current = render_performance.get_render_performance()
+        workers = max(1, min(round(float(value)), current.max_workers))
+        snapshot = render_performance.save_render_workers(workers)
         self._sync_render_worker_controls(snapshot)
 
     def _sync_render_worker_controls(self, snapshot):
         self._render_worker_syncing = True
         try:
             for slider, value_label in self._render_worker_controls:
+                slider_max = max(2, snapshot.max_workers)
                 slider.configure(
                     from_=1,
-                    to=snapshot.max_workers,
-                    number_of_steps=max(1, snapshot.max_workers - 1),
+                    to=slider_max,
+                    number_of_steps=max(1, slider_max - 1),
+                    state="disabled" if snapshot.max_workers == 1 else "normal",
                 )
                 slider.set(snapshot.workers)
                 value_label.configure(text=f"{snapshot.workers} de {snapshot.max_workers}")
@@ -2223,11 +2229,10 @@ class InstagramAutoPro(ctk.CTk):
         ctk.CTkLabel(
             bot_body, text="Los captions se asignan por tanda desde Logística.", text_color=TEXT_MUTED
         ).pack(side="left")
-        self._build_render_performance_control(bot_body, "Tandas").pack(side="right", padx=(0, 12))
-        
         self.btn_render = PrimaryButton(bot_body, text="INICIAR RENDER", height=BTN_H_LG,
                                         command=self.process_tanda)
         self.btn_render.pack(side="right")
+        self._build_render_performance_control(bot_body, "Tandas").pack(side="right", padx=(0, 12))
 
         # ── Lista de Tandas registradas ─────────────────────────────────
         tandas_card = Card(f, title="Tandas registradas")
@@ -3729,8 +3734,8 @@ class InstagramAutoPro(ctk.CTk):
         actions = ctk.CTkFrame(scroll, fg_color="transparent")
         actions.grid(row=4, column=0, sticky="ew", padx=24, pady=(0, 14))
         PrimaryButton(actions, text="👁️  Preview en frame aleatorio", command=self.editor_preview).pack(side="left", padx=(0, 8))
-        PrimaryButton(actions, text="Renderizar video", command=self.editor_render).pack(side="left")
-        self._build_render_performance_control(actions, "Edición").pack(side="right")
+        PrimaryButton(actions, text="Renderizar video", command=self.editor_render).pack(side="right")
+        self._build_render_performance_control(actions, "Edición").pack(side="right", padx=(0, 8))
         self.editor_status = ctk.CTkLabel(actions, text="Configurá el video y las fotos.", text_color=TEXT_MUTED)
         self.editor_status.pack(side="left", padx=16)
 
@@ -4335,9 +4340,6 @@ class InstagramAutoPro(ctk.CTk):
                 widget.grid(row=row_i, column=1, padx=(0, 18), pady=7, sticky="ew")
                 setattr(self, attr, widget)
 
-        self._build_render_performance_control(card_cfg, "Forge").grid(
-            row=4, column=0, columnspan=2, sticky="ew", padx=18, pady=(4, 2))
-
         # ── Eje Efectos (qué efectos) ────────────────────────────────────
         ctk.CTkLabel(card_cfg, text="Efectos", text_color=TEXT_MUTED,
                      font=ctk.CTkFont(size=11, weight="bold")).grid(
@@ -4460,7 +4462,7 @@ class InstagramAutoPro(ctk.CTk):
         # ── Botonera + Progreso ──────────────────────────────────────────
         bot = ctk.CTkFrame(scroll, fg_color="transparent")
         bot.grid(row=3, column=0, sticky="ew", padx=24, pady=(14, 20))
-        bot.grid_columnconfigure(3, weight=1)
+        bot.grid_columnconfigure(0, weight=1)
 
         GhostButton(bot, text="👁  Preview Metadata", height=BTN_H_LG,
                     command=self.forge_preview_metadata).grid(row=0, column=0, padx=(0, 8))
@@ -4469,12 +4471,15 @@ class InstagramAutoPro(ctk.CTk):
                     height=BTN_H_LG, state="disabled", command=self.forge_reshuffle)
         self.btn_forge_reshuffle.grid(row=0, column=1, padx=(0, 8))
 
+        self._build_render_performance_control(bot, "Forge").grid(
+            row=0, column=2, padx=(0, 8))
+
         self.btn_forge_process = PrimaryButton(bot, text="⚡  Procesar Ahora",
                     height=BTN_H_LG, state="disabled", command=self.forge_process)
-        self.btn_forge_process.grid(row=0, column=2, padx=(0, 20))
+        self.btn_forge_process.grid(row=0, column=3)
 
         prog_wrap = ctk.CTkFrame(bot, fg_color="transparent")
-        prog_wrap.grid(row=0, column=3, sticky="ew")
+        prog_wrap.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(8, 0))
         prog_wrap.grid_columnconfigure(0, weight=1)
 
         self.forge_pb = ctk.CTkProgressBar(prog_wrap, fg_color=BG_INPUT,

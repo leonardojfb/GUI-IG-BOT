@@ -77,8 +77,97 @@ def test_performance_change_persists_and_synchronizes_built_controls(monkeypatch
 
     first_slider.command(99)
 
-    assert saved == [99]
+    assert saved == [6]
     assert [slider.value for slider, _label in app._render_worker_controls] == [2, 2]
     assert [slider.options["to"] for slider, _label in app._render_worker_controls] == [2, 2]
     assert [slider.options["number_of_steps"] for slider, _label in app._render_worker_controls] == [1, 1]
     assert [label.options["text"] for label in (first_label, second_label)] == ["2 de 2", "2 de 2"]
+
+
+def test_single_worker_control_uses_a_disabled_safe_range_and_clamps_callbacks(monkeypatch):
+    class Widget:
+        def __init__(self, *_args, **kwargs):
+            self.options = kwargs
+            self.value = None
+
+        def configure(self, **kwargs):
+            self.options.update(kwargs)
+
+        def pack(self, **_kwargs):
+            pass
+
+    class StrictSlider(Widget):
+        def __init__(self, *_args, **kwargs):
+            if kwargs["from_"] >= kwargs["to"]:
+                raise ZeroDivisionError("CustomTkinter slider endpoints must differ")
+            super().__init__(_args, **kwargs)
+            self.command = kwargs["command"]
+
+        def configure(self, **kwargs):
+            options = self.options | kwargs
+            if options["from_"] >= options["to"]:
+                raise ZeroDivisionError("CustomTkinter slider endpoints must differ")
+            super().configure(**kwargs)
+
+        def set(self, value):
+            if value != 1:
+                raise AssertionError("one-choice slider may only show 1")
+            self.value = value
+
+    fake_ctk = SimpleNamespace(
+        CTkFrame=Widget,
+        CTkLabel=Widget,
+        CTkSlider=StrictSlider,
+        CTkFont=lambda **kwargs: kwargs,
+    )
+    one = RenderPerformance(1, 1, 1, 1, None)
+    saved = []
+    monkeypatch.setattr(gui_premium_v7, "ctk", fake_ctk)
+    monkeypatch.setattr(gui_premium_v7.render_performance, "get_render_performance", lambda: one)
+    monkeypatch.setattr(
+        gui_premium_v7.render_performance,
+        "save_render_workers",
+        lambda workers: saved.append(workers) or one,
+    )
+
+    class Harness:
+        _build_render_performance_control = InstagramAutoPro._build_render_performance_control
+        _on_render_workers_changed = InstagramAutoPro._on_render_workers_changed
+        _sync_render_worker_controls = InstagramAutoPro._sync_render_worker_controls
+
+        def __init__(self):
+            self._render_worker_controls = []
+            self._render_worker_syncing = False
+
+    app = Harness()
+    app._build_render_performance_control(Widget(), "Forge")
+    slider, label = app._render_worker_controls[0]
+    app._sync_render_worker_controls(one)
+    slider.command(2)
+
+    assert slider.options["from_"] == 1
+    assert slider.options["to"] == 2
+    assert slider.options["state"] == "disabled"
+    assert slider.value == 1
+    assert label.options["text"] == "1 de 1"
+    assert saved == [1]
+
+
+def test_render_controls_are_immediately_before_their_primary_actions():
+    source = SOURCE.read_text(encoding="utf-8")
+    tandas = extract_method(source, "_build_mix_frame")
+    editor = extract_method(source, "_build_video_editor_frame")
+    forge = extract_method(source, "_build_forge_frame")
+
+    tandas_button_pack = 'self.btn_render.pack(side="right")'
+    tandas_control_pack = '_build_render_performance_control(bot_body, "Tandas").pack(side="right"'
+    editor_button_pack = 'PrimaryButton(actions, text="Renderizar video", command=self.editor_render).pack(side="right")'
+    editor_control_pack = '_build_render_performance_control(actions, "Edición").pack(side="right"'
+
+    # Tk packs successive right-side widgets from the edge inward. The button
+    # must therefore be packed first, then the adjacent control to its left.
+    assert tandas.index(tandas_button_pack) < tandas.index(tandas_control_pack)
+    assert editor.index(editor_button_pack) < editor.index(editor_control_pack)
+    assert forge.index('_build_render_performance_control(bot, "Forge")') < forge.index("self.btn_forge_process = PrimaryButton")
+    assert 'row=0, column=2' in forge[forge.index('_build_render_performance_control(bot, "Forge")'):]
+    assert 'row=0, column=3' in forge[forge.index("self.btn_forge_process = PrimaryButton"):]
