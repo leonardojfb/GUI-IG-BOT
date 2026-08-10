@@ -2121,9 +2121,7 @@ class InstagramAutoPro(ctk.CTk):
     def _build_render_performance_control(self, parent, context):
         """Build one compact view of the globally persisted render worker count."""
         snapshot = render_performance.get_render_performance()
-        value_text = f"{snapshot.workers} de {snapshot.max_workers}"
-        if snapshot.workers_were_reclamped:
-            value_text += " · ajustado al equipo"
+        value_text = self._render_performance_value_text(snapshot)
         slider_max = max(2, snapshot.max_workers)
         slider_state = "disabled" if snapshot.max_workers == 1 else "normal"
         control = ctk.CTkFrame(parent, fg_color=BG_CARD2, corner_radius=8)
@@ -2142,7 +2140,7 @@ class InstagramAutoPro(ctk.CTk):
         slider.pack(side="left", padx=(0, 6), pady=6)
         value_label = ctk.CTkLabel(
             control, text=value_text,
-            text_color=TEXT_BODY, font=ctk.CTkFont(size=11), width=42,
+            text_color=TEXT_BODY, font=ctk.CTkFont(size=11), width=142,
         )
         value_label.pack(side="left", padx=(0, 10), pady=6)
 
@@ -2156,20 +2154,42 @@ class InstagramAutoPro(ctk.CTk):
             self._render_worker_syncing = was_syncing
         return control
 
+    def _render_performance_value_text(self, snapshot):
+        value_text = f"{snapshot.workers} de {snapshot.max_workers} equipo"
+        available_workers = snapshot.available_workers or snapshot.max_workers
+        if available_workers < snapshot.max_workers:
+            value_text += f" - RAM actual: {available_workers}"
+        if snapshot.workers_were_reclamped:
+            value_text += " - ajustado"
+        return value_text
+
     def _on_render_workers_changed(self, value):
         if getattr(self, "_render_worker_syncing", False):
             return
         current = render_performance.get_render_performance()
         workers = max(1, min(round(float(value)), current.max_workers))
+        available_workers = current.available_workers or current.max_workers
+        if workers > available_workers:
+            self._sync_render_worker_controls(current)
+            warning_key = (workers, available_workers, current.max_workers)
+            if getattr(self, "_render_memory_warning_key", None) != warning_key:
+                self._render_memory_warning_key = warning_key
+                messagebox.showwarning(
+                    "Rendimiento",
+                    (
+                        f"Ahora hay memoria para {available_workers} videos en paralelo.\n\n"
+                        f"Cerra mas programas para poder usar {workers}."
+                    ),
+                )
+            return
+        self._render_memory_warning_key = None
         snapshot = render_performance.save_render_workers(workers)
         self._sync_render_worker_controls(snapshot)
 
     def _sync_render_worker_controls(self, snapshot):
         self._render_worker_syncing = True
         try:
-            value_text = f"{snapshot.workers} de {snapshot.max_workers}"
-            if snapshot.workers_were_reclamped:
-                value_text += " · ajustado al equipo"
+            value_text = self._render_performance_value_text(snapshot)
             for slider, value_label in self._render_worker_controls:
                 slider_max = max(2, snapshot.max_workers)
                 slider.configure(

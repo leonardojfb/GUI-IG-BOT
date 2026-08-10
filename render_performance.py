@@ -14,12 +14,15 @@ MEMORY_PER_WORKER_BYTES = 2 * GIB
 
 @dataclass(frozen=True)
 class RenderPerformance:
+    # max_workers is the hardware ceiling shown by the UI. available_workers is
+    # the current RAM-limited ceiling used to keep active renders safe.
     max_workers: int
     workers: int
     ffmpeg_threads: int
     logical_cpus: int
     available_memory_bytes: int | None
     workers_were_reclamped: bool = False
+    available_workers: int | None = None
 
 
 class _MemoryStatus(ctypes.Structure):
@@ -99,12 +102,18 @@ def get_render_performance(requested_workers: int | None = None) -> RenderPerfor
         logical_cpus if available_memory is None
         else max(1, available_memory // MEMORY_PER_WORKER_BYTES)
     )
-    max_workers = max(1, min(logical_cpus, memory_max))
+    max_workers = logical_cpus
+    available_workers = max(1, min(max_workers, memory_max))
     selected_workers = requested_workers if requested_workers is not None else load_workers()
-    workers = clamp_workers(selected_workers, max_workers)
+    hardware_clamped_workers = clamp_workers(selected_workers, max_workers)
+    workers = clamp_workers(selected_workers, available_workers)
     workers_were_reclamped = selected_workers is not None and workers != selected_workers
-    if requested_workers is None and workers_were_reclamped:
-        _persist_workers(workers)
+    if (
+        requested_workers is None
+        and selected_workers is not None
+        and hardware_clamped_workers != selected_workers
+    ):
+        _persist_workers(hardware_clamped_workers)
     return RenderPerformance(
         max_workers=max_workers,
         workers=workers,
@@ -112,10 +121,12 @@ def get_render_performance(requested_workers: int | None = None) -> RenderPerfor
         logical_cpus=logical_cpus,
         available_memory_bytes=available_memory,
         workers_were_reclamped=workers_were_reclamped,
+        available_workers=available_workers,
     )
 
 
 def save_render_workers(workers: int) -> RenderPerformance:
-    snapshot = get_render_performance(workers)
-    _persist_workers(snapshot.workers)
-    return snapshot
+    max_workers = max(1, os.cpu_count() or 1)
+    selected_workers = clamp_workers(workers, max_workers)
+    _persist_workers(selected_workers)
+    return get_render_performance(selected_workers)

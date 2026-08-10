@@ -47,20 +47,21 @@ def test_performance_change_persists_and_synchronizes_built_controls(monkeypatch
         CTkSlider=Widget,
         CTkFont=lambda **kwargs: kwargs,
     )
-    initial = RenderPerformance(6, 3, 4, 12, None)
-    reclamped = RenderPerformance(2, 2, 6, 12, None)
+    initial = RenderPerformance(6, 3, 4, 12, None, available_workers=6)
+    saved_snapshot = RenderPerformance(6, 5, 2, 12, None, available_workers=6)
     saved = []
     monkeypatch.setattr(gui_premium_v7, "ctk", fake_ctk)
     monkeypatch.setattr(gui_premium_v7.render_performance, "get_render_performance", lambda: initial)
     monkeypatch.setattr(
         gui_premium_v7.render_performance,
         "save_render_workers",
-        lambda workers: saved.append(workers) or reclamped,
+        lambda workers: saved.append(workers) or saved_snapshot,
     )
 
     class Harness:
         _build_render_performance_control = InstagramAutoPro._build_render_performance_control
         _on_render_workers_changed = InstagramAutoPro._on_render_workers_changed
+        _render_performance_value_text = InstagramAutoPro._render_performance_value_text
         _sync_render_worker_controls = InstagramAutoPro._sync_render_worker_controls
 
         def __init__(self):
@@ -75,13 +76,74 @@ def test_performance_change_persists_and_synchronizes_built_controls(monkeypatch
     first_slider.emit_on_set = True
     second_slider.emit_on_set = True
 
-    first_slider.command(99)
+    first_slider.command(5)
 
-    assert saved == [6]
-    assert [slider.value for slider, _label in app._render_worker_controls] == [2, 2]
-    assert [slider.options["to"] for slider, _label in app._render_worker_controls] == [2, 2]
-    assert [slider.options["number_of_steps"] for slider, _label in app._render_worker_controls] == [1, 1]
-    assert [label.options["text"] for label in (first_label, second_label)] == ["2 de 2", "2 de 2"]
+    assert saved == [5]
+    assert [slider.value for slider, _label in app._render_worker_controls] == [5, 5]
+    assert [slider.options["to"] for slider, _label in app._render_worker_controls] == [6, 6]
+    assert [slider.options["number_of_steps"] for slider, _label in app._render_worker_controls] == [5, 5]
+    assert [label.options["text"] for label in (first_label, second_label)] == [
+        "5 de 6 equipo",
+        "5 de 6 equipo",
+    ]
+
+
+def test_performance_change_above_current_memory_limit_warns_and_keeps_safe_value(monkeypatch):
+    class Widget:
+        def __init__(self, *_args, **kwargs):
+            self.command = kwargs.get("command")
+            self.options = kwargs
+            self.value = None
+
+        def configure(self, **kwargs):
+            self.options.update(kwargs)
+
+        def set(self, value):
+            self.value = value
+
+        def pack(self, **_kwargs):
+            pass
+
+    fake_ctk = SimpleNamespace(
+        CTkFrame=Widget,
+        CTkLabel=Widget,
+        CTkSlider=Widget,
+        CTkFont=lambda **kwargs: kwargs,
+    )
+    limited = RenderPerformance(8, 2, 4, 8, 4 << 30, available_workers=2)
+    saved = []
+    warnings = []
+    monkeypatch.setattr(gui_premium_v7, "ctk", fake_ctk)
+    monkeypatch.setattr(gui_premium_v7.render_performance, "get_render_performance", lambda: limited)
+    monkeypatch.setattr(
+        gui_premium_v7.render_performance,
+        "save_render_workers",
+        lambda workers: saved.append(workers) or limited,
+    )
+    monkeypatch.setattr(gui_premium_v7.messagebox, "showwarning", lambda title, text: warnings.append((title, text)))
+
+    class Harness:
+        _build_render_performance_control = InstagramAutoPro._build_render_performance_control
+        _on_render_workers_changed = InstagramAutoPro._on_render_workers_changed
+        _render_performance_value_text = InstagramAutoPro._render_performance_value_text
+        _sync_render_worker_controls = InstagramAutoPro._sync_render_worker_controls
+
+        def __init__(self):
+            self._render_worker_controls = []
+            self._render_worker_syncing = False
+
+    app = Harness()
+    app._build_render_performance_control(Widget(), "Edicion")
+    slider, label = app._render_worker_controls[0]
+
+    slider.command(3)
+
+    assert saved == []
+    assert slider.value == 2
+    assert label.options["text"] == "2 de 8 equipo - RAM actual: 2"
+    assert len(warnings) == 1
+    assert "cerr" in warnings[0][1].lower()
+    assert "programas" in warnings[0][1].lower()
 
 
 def test_single_worker_control_uses_a_disabled_safe_range_and_clamps_callbacks(monkeypatch):
@@ -120,7 +182,7 @@ def test_single_worker_control_uses_a_disabled_safe_range_and_clamps_callbacks(m
         CTkSlider=StrictSlider,
         CTkFont=lambda **kwargs: kwargs,
     )
-    one = RenderPerformance(1, 1, 1, 1, None)
+    one = RenderPerformance(1, 1, 1, 1, None, available_workers=1)
     saved = []
     monkeypatch.setattr(gui_premium_v7, "ctk", fake_ctk)
     monkeypatch.setattr(gui_premium_v7.render_performance, "get_render_performance", lambda: one)
@@ -133,6 +195,7 @@ def test_single_worker_control_uses_a_disabled_safe_range_and_clamps_callbacks(m
     class Harness:
         _build_render_performance_control = InstagramAutoPro._build_render_performance_control
         _on_render_workers_changed = InstagramAutoPro._on_render_workers_changed
+        _render_performance_value_text = InstagramAutoPro._render_performance_value_text
         _sync_render_worker_controls = InstagramAutoPro._sync_render_worker_controls
 
         def __init__(self):
@@ -149,7 +212,7 @@ def test_single_worker_control_uses_a_disabled_safe_range_and_clamps_callbacks(m
     assert slider.options["to"] == 2
     assert slider.options["state"] == "disabled"
     assert slider.value == 1
-    assert label.options["text"] == "1 de 1"
+    assert label.options["text"] == "1 de 1 equipo"
     assert saved == [1]
 
 
@@ -171,7 +234,7 @@ def test_control_surfaces_a_non_blocking_hardware_reclamp_notice(monkeypatch):
         CTkSlider=Widget,
         CTkFont=lambda **kwargs: kwargs,
     )
-    reclamped = RenderPerformance(2, 2, 4, 8, 8 << 30, workers_were_reclamped=True)
+    reclamped = RenderPerformance(8, 2, 4, 8, 4 << 30, workers_were_reclamped=True, available_workers=2)
     monkeypatch.setattr(gui_premium_v7, "ctk", fake_ctk)
     monkeypatch.setattr(
         gui_premium_v7.render_performance,
@@ -182,6 +245,7 @@ def test_control_surfaces_a_non_blocking_hardware_reclamp_notice(monkeypatch):
     class Harness:
         _build_render_performance_control = InstagramAutoPro._build_render_performance_control
         _on_render_workers_changed = InstagramAutoPro._on_render_workers_changed
+        _render_performance_value_text = InstagramAutoPro._render_performance_value_text
 
         def __init__(self):
             self._render_worker_controls = []
@@ -191,7 +255,9 @@ def test_control_surfaces_a_non_blocking_hardware_reclamp_notice(monkeypatch):
     app._build_render_performance_control(Widget(), "Edición")
 
     _slider, value_label = app._render_worker_controls[0]
-    assert "ajustado" in value_label.options["text"].lower()
+    text = value_label.options["text"].lower()
+    assert "ajustado" in text
+    assert "ram actual" in text
 
 
 def test_render_controls_are_immediately_before_their_primary_actions():

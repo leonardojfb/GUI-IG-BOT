@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.21",
+    "version":  "1.0.22",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.21",
-    "asset_name":  "MetodoIG-v1.0.21.zip",
-    "sha256":  "7e873fc86d9a90e160aabda1b32ee6b9ef1f913a24b55acf46970257543c017f",
-    "notes":  "Hotfix Preview: launcher.py instala Pillow automaticamente si PIL falta tras una actualizacion por GUI. Mantiene FFmpeg/FFprobe locales y compatibilidad con PCs sin GPU.",
+    "github_release_tag":  "v1.0.22",
+    "asset_name":  "MetodoIG-v1.0.22.zip",
+    "sha256":  "8c24c8ebfa06e01e362423df33cf209fcdb79f61cf1c2854e18a80368cee907e",
+    "notes":  "Barra de videos paralelos mas user friendly: muestra maximo real del equipo y avisa si la RAM actual no alcanza para el valor elegido.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",
