@@ -4,6 +4,37 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+LEGACY_UPDATEABLE_FILES = {
+    "Abrir GUI.bat",
+    "Instalar GUI.bat",
+    "launch_gui.bat",
+    "launcher.py",
+    "updater.py",
+    "console_encoding.py",
+    "organizador.db",
+    "organizador.default.db",
+    "version.json",
+    "requirements.txt",
+    "gui_premium_v7.py",
+    "gui_unificada.py",
+    "gui_organizador.py",
+    "organizador_simple.py",
+    "Organizador.py",
+    "database.py",
+    "organizadortg.py",
+    "videos.py",
+    "video_editor.py",
+    "render_performance.py",
+    "metadata_pool.py",
+    "telegram_core.py",
+    "cleaner.py",
+    "vercuentas.py",
+    "logo_elittisse.svg",
+    "styles/colors.py",
+    "styles/components.py",
+    "styles/__init__.py",
+    "dist_accounts_history.json",
+}
 
 
 def _release_files_from_build_script():
@@ -52,7 +83,24 @@ def test_release_packages_clean_pc_video_dependencies():
     assert "tools\\ffmpeg\\bin\\ffmpeg.exe" in installer
     assert "tools\\ffmpeg\\bin\\ffprobe.exe" in installer
     assert {
-        "ffmpeg_tools.py",
         "tools/ffmpeg/bin/ffmpeg.exe",
         "tools/ffmpeg/bin/ffprobe.exe",
     }.issubset(release_files)
+    assert "ffmpeg_tools.py" not in release_files
+
+
+def test_legacy_updater_can_apply_import_compatible_python_files():
+    release_files = _release_files_from_build_script()
+    legacy_python = [
+        REPO_ROOT / file
+        for file in release_files
+        if file.endswith(".py") and file in LEGACY_UPDATEABLE_FILES
+    ]
+
+    missing = {}
+    for path in legacy_python:
+        required = _imported_local_modules(path)
+        missing[path.name] = sorted(required - LEGACY_UPDATEABLE_FILES)
+
+    missing = {file: modules for file, modules in missing.items() if modules}
+    assert missing == {}

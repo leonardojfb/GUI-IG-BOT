@@ -34,7 +34,6 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "launch_gui.bat",
         "launcher.py",
         "updater.py",
-        "ffmpeg_tools.py",
         "organizador.db",
         "organizador.default.db",
         "version.json",

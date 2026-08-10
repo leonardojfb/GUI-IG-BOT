@@ -25,7 +25,6 @@ $ReleaseFiles = @(
     "launcher.py",
     "updater.py",
     "console_encoding.py",
-    "ffmpeg_tools.py",
     "version.json",
     "requirements.txt",
     "gui_premium_v7.py",
