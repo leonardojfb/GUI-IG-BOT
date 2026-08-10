@@ -7,6 +7,7 @@ that the GUI reads to show a friendly in-app notice instead of a console error.
 from __future__ import annotations
 
 import json
+import importlib.util
 import shutil
 import subprocess
 import sys
@@ -61,6 +62,43 @@ def _ensure_timezone_data() -> str:
     return ""
 
 
+def _ensure_pillow() -> str:
+    """Install Pillow once when an updated installation lacks PIL.
+
+    Automatic updates copy requirements.txt but do not execute the installer
+    batch file. This repairs existing environments before the preview code
+    imports PIL.
+    """
+    if importlib.util.find_spec("PIL") is not None:
+        return ""
+
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--disable-pip-version-check",
+                "Pillow==12.2.0",
+            ],
+            cwd=str(APP_DIR),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=120,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"No se pudo instalar Pillow, requerido para Preview: {exc}"
+
+    if result.returncode:
+        return "No se pudo instalar Pillow, requerido para Preview."
+
+    if importlib.util.find_spec("PIL") is None:
+        return "Pillow se instalo, pero PIL no quedo disponible para Preview."
+    return ""
+
+
 def _run_update_check() -> None:
     """Check for updates in-process (no console) and record the outcome.
 
@@ -111,9 +149,10 @@ def _windowless_python() -> str:
 
 def main() -> int:
     timezone_error = _ensure_timezone_data()
-    if timezone_error:
+    dependency_error = timezone_error or _ensure_pillow()
+    if dependency_error:
         try:
-            STATUS_FILE.write_text(json.dumps({"error": timezone_error}), encoding="utf-8")
+            STATUS_FILE.write_text(json.dumps({"error": dependency_error}), encoding="utf-8")
         except OSError:
             pass
         return 1
