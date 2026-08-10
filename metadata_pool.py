@@ -14,14 +14,21 @@ import math
 import os
 import random
 import subprocess
-
-from console_encoding import ffmpeg_tool_command
+from pathlib import Path
 
 # Windows: the GUI runs windowless (pythonw), so every ffmpeg/ffprobe child would
 # otherwise pop its own console window and steal focus. On a big Forge batch that
 # means hundreds of flashing consoles that freeze the machine. Suppress it.
 # 0 on non-Windows platforms, where CREATE_NO_WINDOW does not exist.
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def _ffmpeg_tool_command(tool_name: str) -> str:
+    executable_name = f"{tool_name}.exe" if os.name == "nt" else tool_name
+    bundled = Path(__file__).resolve().parent / "tools" / "ffmpeg" / "bin" / executable_name
+    if bundled.is_file():
+        return str(bundled)
+    return tool_name
 
 IPHONE_MODELS = [
     "iPhone 12",
@@ -214,7 +221,7 @@ def apply_metadata_to_video(input_path: str, output_path: str, meta: dict) -> No
     meta = {iphone_model, lat, lon, carrier, ios_version}
     """
     cmd = [
-        ffmpeg_tool_command("ffmpeg"), "-y", "-i", input_path,
+        _ffmpeg_tool_command("ffmpeg"), "-y", "-i", input_path,
         "-c", "copy",
         "-movflags", "use_metadata_tags",
         "-metadata", "make=Apple",
@@ -240,7 +247,7 @@ def apply_metadata_to_video(input_path: str, output_path: str, meta: dict) -> No
 def _probe_video_info(path: str) -> tuple:
     """Devuelve (width, height, duration_seg, has_audio) del video vía ffprobe."""
     cmd = [
-        ffmpeg_tool_command("ffprobe"), "-v", "error",
+        _ffmpeg_tool_command("ffprobe"), "-v", "error",
         "-show_entries", "stream=codec_type,width,height",
         "-show_entries", "format=duration",
         "-of", "json",
@@ -476,7 +483,7 @@ def apply_variant_and_metadata(
     even_guard = "crop=trunc(iw/2)*2:trunc(ih/2)*2"
     vf = f"{vf},{even_guard}" if vf else even_guard
 
-    cmd = [ffmpeg_tool_command("ffmpeg"), "-y"]
+    cmd = [_ffmpeg_tool_command("ffmpeg"), "-y"]
     if start > 0:
         cmd += ["-ss", f"{start:.3f}"]
     cmd += ["-i", input_path]

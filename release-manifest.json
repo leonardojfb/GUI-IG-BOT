@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.19",
+    "version":  "1.0.20",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.19",
-    "asset_name":  "MetodoIG-v1.0.19.zip",
-    "sha256":  "170c21b80c08fbfae5751f3bfb8e2e54c4d6cdd40652fb3164a3b38b646a479c",
-    "notes":  "Hotfix de compatibilidad del updater: elimina la dependencia obligatoria de ffmpeg_tools.py, mantiene Pillow declarado y FFmpeg/FFprobe locales para PCs nuevas sin GPU ni FFmpeg en PATH.",
+    "github_release_tag":  "v1.0.20",
+    "asset_name":  "MetodoIG-v1.0.20.zip",
+    "sha256":  "668d9ab67d4fcb173e09d95842a8ee44511976d70f764b4717f651ba25687b5d",
+    "notes":  "Hotfix de actualización parcial: los módulos de video ya no importan helpers nuevos desde console_encoding.py; cada módulo resuelve FFmpeg/FFprobe localmente y conserva fallback al PATH. Mantiene Pillow y FFmpeg/FFprobe para instalaciones limpias.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",

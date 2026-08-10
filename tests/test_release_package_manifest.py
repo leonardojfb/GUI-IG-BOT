@@ -104,3 +104,24 @@ def test_legacy_updater_can_apply_import_compatible_python_files():
 
     missing = {file: modules for file, modules in missing.items() if modules}
     assert missing == {}
+
+
+def test_legacy_updater_python_files_do_not_require_new_console_encoding_names():
+    release_files = _release_files_from_build_script()
+    legacy_python = [
+        REPO_ROOT / file
+        for file in release_files
+        if file.endswith(".py") and file in LEGACY_UPDATEABLE_FILES and file != "console_encoding.py"
+    ]
+
+    offenders = {}
+    for path in legacy_python:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        imports = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module == "console_encoding":
+                imports.extend(alias.name for alias in node.names if alias.name.startswith("ffmpeg_tool_"))
+        if imports:
+            offenders[path.name] = sorted(imports)
+
+    assert offenders == {}
