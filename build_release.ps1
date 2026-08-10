@@ -25,6 +25,7 @@ $ReleaseFiles = @(
     "launcher.py",
     "updater.py",
     "console_encoding.py",
+    "ffmpeg_tools.py",
     "version.json",
     "requirements.txt",
     "gui_premium_v7.py",
@@ -42,10 +43,33 @@ $ReleaseFiles = @(
     "cleaner.py",
     "vercuentas.py",
     "logo_elittisse.svg",
+    "tools/ffmpeg/bin/ffmpeg.exe",
+    "tools/ffmpeg/bin/ffprobe.exe",
     "styles/colors.py",
     "styles/components.py",
     "styles/__init__.py"
 )
+
+function Ensure-BundledFfmpegTool {
+    param(
+        [Parameter(Mandatory=$true)][string]$ExecutableName
+    )
+    $Target = Join-Path $Root ("tools/ffmpeg/bin/{0}" -f $ExecutableName)
+    if (Test-Path -LiteralPath $Target -PathType Leaf) {
+        return
+    }
+
+    $Command = Get-Command $ExecutableName -ErrorAction SilentlyContinue
+    if (-not $Command -or -not (Test-Path -LiteralPath $Command.Source -PathType Leaf)) {
+        throw "Falta $ExecutableName. Instala FFmpeg en PATH o coloca $Target antes de generar la release."
+    }
+
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Target) | Out-Null
+    Copy-Item -LiteralPath $Command.Source -Destination $Target -Force
+}
+
+Ensure-BundledFfmpegTool "ffmpeg.exe"
+Ensure-BundledFfmpegTool "ffprobe.exe"
 
 foreach ($File in $ReleaseFiles) {
     if (-not (Test-Path -LiteralPath (Join-Path $Root $File) -PathType Leaf)) {

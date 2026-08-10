@@ -14,6 +14,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from database import DatabaseManager
 from console_encoding import ensure_stdout_utf8
+import ffmpeg_tools
 
 ensure_stdout_utf8()
 
@@ -29,15 +30,14 @@ def _compress_video_for_tg(video_path: str, target_bytes: int = TG_COMPRESS_TARG
     """Comprime el video con ffmpeg para que quede bajo TG_MAX_BYTES.
     Devuelve la ruta del archivo temporal comprimido, o None si falla."""
     try:
-        import shutil
-        if not shutil.which("ffmpeg"):
-            print("⚠️  ffmpeg no encontrado en PATH. No se puede comprimir el video.")
+        if not ffmpeg_tools.tool_exists("ffmpeg") or not ffmpeg_tools.tool_exists("ffprobe"):
+            print("⚠️  FFmpeg/FFprobe no encontrados. No se puede comprimir el video.")
             return None
 
         size_bytes = os.path.getsize(video_path)
         # Obtener duración con ffprobe
         probe = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+            [ffmpeg_tools.ffprobe_command(), "-v", "error", "-show_entries", "format=duration",
              "-of", "default=noprint_wrappers=1:nokey=1", video_path],
             capture_output=True, text=True, creationflags=_NO_WINDOW
         )
@@ -57,7 +57,7 @@ def _compress_video_for_tg(video_path: str, target_bytes: int = TG_COMPRESS_TARG
 
         print(f"🗜️  Comprimiendo video ({size_bytes/1024/1024:.1f}MB → objetivo <{target_bytes/1024/1024:.0f}MB, bitrate {target_kbps}kbps)...")
         result = subprocess.run(
-            ["ffmpeg", "-y", "-i", video_path,
+            [ffmpeg_tools.ffmpeg_command(), "-y", "-i", video_path,
              "-b:v", f"{target_kbps}k", "-b:a", "128k",
              "-vcodec", "libx264", "-acodec", "aac",
              "-preset", "fast", tmp.name],

@@ -22,5 +22,15 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
+if not exist "tools\ffmpeg\bin\ffmpeg.exe" (
+    echo Falta tools\ffmpeg\bin\ffmpeg.exe. Descarga el ZIP completo de la release.
+    pause
+    exit /b 1
+)
+if not exist "tools\ffmpeg\bin\ffprobe.exe" (
+    echo Falta tools\ffmpeg\bin\ffprobe.exe. Descarga el ZIP completo de la release.
+    pause
+    exit /b 1
+)
 echo Instalacion terminada. Ya puedes abrir Abrir GUI.bat.
 pause

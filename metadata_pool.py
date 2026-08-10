@@ -15,6 +15,8 @@ import os
 import random
 import subprocess
 
+import ffmpeg_tools
+
 # Windows: the GUI runs windowless (pythonw), so every ffmpeg/ffprobe child would
 # otherwise pop its own console window and steal focus. On a big Forge batch that
 # means hundreds of flashing consoles that freeze the machine. Suppress it.
@@ -212,7 +214,7 @@ def apply_metadata_to_video(input_path: str, output_path: str, meta: dict) -> No
     meta = {iphone_model, lat, lon, carrier, ios_version}
     """
     cmd = [
-        "ffmpeg", "-y", "-i", input_path,
+        ffmpeg_tools.ffmpeg_command(), "-y", "-i", input_path,
         "-c", "copy",
         "-movflags", "use_metadata_tags",
         "-metadata", "make=Apple",
@@ -238,7 +240,7 @@ def apply_metadata_to_video(input_path: str, output_path: str, meta: dict) -> No
 def _probe_video_info(path: str) -> tuple:
     """Devuelve (width, height, duration_seg, has_audio) del video vía ffprobe."""
     cmd = [
-        "ffprobe", "-v", "error",
+        ffmpeg_tools.ffprobe_command(), "-v", "error",
         "-show_entries", "stream=codec_type,width,height",
         "-show_entries", "format=duration",
         "-of", "json",
@@ -474,7 +476,7 @@ def apply_variant_and_metadata(
     even_guard = "crop=trunc(iw/2)*2:trunc(ih/2)*2"
     vf = f"{vf},{even_guard}" if vf else even_guard
 
-    cmd = ["ffmpeg", "-y"]
+    cmd = [ffmpeg_tools.ffmpeg_command(), "-y"]
     if start > 0:
         cmd += ["-ss", f"{start:.3f}"]
     cmd += ["-i", input_path]

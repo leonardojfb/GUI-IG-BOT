@@ -6,6 +6,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from database import DatabaseManager
 from console_encoding import ensure_stdout_utf8
+import ffmpeg_tools
 from render_performance import get_render_performance
 
 ensure_stdout_utf8()
@@ -76,7 +77,7 @@ def get_caption_for_video(tanda: dict) -> str:
 def get_audio(file_path):
     """Verifica si un archivo de video contiene stream de audio."""
     cmd = [
-        'ffprobe', '-v', 'error', '-select_streams', 'a',
+        ffmpeg_tools.ffprobe_command(), '-v', 'error', '-select_streams', 'a',
         '-show_entries', 'stream=codec_type', '-of', 'json', file_path
     ]
     try:
@@ -260,7 +261,7 @@ def render_video_pair(path_v1, path_v2, out_path, cat, p1_id, p2_id, ffmpeg_thre
         print(f"🎬 Renderizando con {label}: {name_out}...")
 
         cmd = (
-            ['ffmpeg', '-y']
+            [ffmpeg_tools.ffmpeg_command(), '-y']
             + hw_args
             + ['-i', path_v1, '-i', path_v2,
                '-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',

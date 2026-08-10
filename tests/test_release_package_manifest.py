@@ -41,3 +41,18 @@ def test_release_allowlist_includes_local_modules_imported_by_shipped_files():
 
     missing = {file: modules for file, modules in missing.items() if modules}
     assert missing == {}
+
+
+def test_release_packages_clean_pc_video_dependencies():
+    release_files = _release_files_from_build_script()
+    requirements = (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
+    installer = (REPO_ROOT / "Instalar GUI.bat").read_text(encoding="utf-8")
+
+    assert "Pillow" in requirements
+    assert "tools\\ffmpeg\\bin\\ffmpeg.exe" in installer
+    assert "tools\\ffmpeg\\bin\\ffprobe.exe" in installer
+    assert {
+        "ffmpeg_tools.py",
+        "tools/ffmpeg/bin/ffmpeg.exe",
+        "tools/ffmpeg/bin/ffprobe.exe",
+    }.issubset(release_files)

@@ -12,6 +12,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import ffmpeg_tools
+
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 EXTERNAL_PROCESS_TIMEOUT_SECONDS = 300
 
@@ -53,7 +55,7 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
 
 def probe_video(path: str) -> dict:
     result = _run([
-        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        ffmpeg_tools.ffprobe_command(), "-v", "error", "-select_streams", "v:0",
         "-show_entries", "stream=width,height,r_frame_rate,avg_frame_rate,duration",
         "-show_entries", "format=duration", "-of", "json", path,
     ])
@@ -130,7 +132,7 @@ def render_video(input_path: str, output_path: str, overlays: list[dict], ffmpeg
     info = probe_video(input_path)
     if not overlays:
         raise ValueError("Agregá al menos una foto.")
-    cmd = ["ffmpeg", "-y", "-i", input_path]
+    cmd = [ffmpeg_tools.ffmpeg_command(), "-y", "-i", input_path]
     for item in overlays:
         cmd += ["-loop", "1", "-i", item["photo"]]
     filters = [f"[0:v]format=yuv420p[v0]"]
@@ -178,7 +180,7 @@ def render_preview(
     if output_path is None:
         handle, output_path = tempfile.mkstemp(prefix="ig_preview_", suffix=".png")
         os.close(handle)
-    result = _run(["ffmpeg", "-y", "-ss", str(timestamp), "-i", input_path, "-frames:v", "1", output_path])
+    result = _run([ffmpeg_tools.ffmpeg_command(), "-y", "-ss", str(timestamp), "-i", input_path, "-frames:v", "1", output_path])
     if result.returncode:
         stderr = (result.stderr or "")[-1800:]
         raise RuntimeError(
