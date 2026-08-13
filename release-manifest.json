@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.24",
+    "version":  "1.0.25",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.24",
-    "asset_name":  "MetodoIG-v1.0.24.zip",
-    "sha256":  "d0b73be8052b93d43e20d0a0bb725e578fd2cba40d40e734443bf64ec4921a49",
-    "notes":  "Airtable: renombra las primeras 9 columnas por posicion al conectar, sin buscar nombres ni crear columnas nuevas. Incluye sincronizacion de cuentas, trials y captions individuales.",
+    "github_release_tag":  "v1.0.25",
+    "asset_name":  "MetodoIG-v1.0.25.zip",
+    "sha256":  "b7e81e37150844cf22862dd7a570eed1f0c42ce20b384bb544095f77d93bffee",
+    "notes":  "Espejo completo GUI hacia Airtable: vista previa y confirmacion para crear, actualizar y eliminar cuentas. Mantiene separado el flujo Airtable hacia GUI.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",
