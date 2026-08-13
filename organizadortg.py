@@ -13,6 +13,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from database import DatabaseManager
+from trial_content import source_key_from_filename
 from console_encoding import ensure_stdout_utf8
 
 ensure_stdout_utf8()
@@ -85,6 +86,7 @@ TRIAL_TOPIC_PREFIX = "TRIALS - "
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
 input_root = os.path.join(base_dir, "CALENDARIO_POSTEO")
+trial_input_root = os.path.join(base_dir, "CALENDARIO_TRIALS")
 
 db = DatabaseManager()
 
@@ -321,6 +323,25 @@ def caption_for_calendar_video(filename, pools, caption_indexes):
     caption_indexes[tanda_tag] = index + 1
     return caption_for_video(pool, index)
 
+
+def extract_source_key_from_calendar_filename(filename):
+    """Recover the Forge source key from a calendarized Trial filename."""
+    stem = os.path.splitext(os.path.basename(filename))[0]
+    source_name = re.sub(r"__TANDA_.+$", "", stem)
+    return source_key_from_filename(source_name)
+
+
+def caption_for_trial_calendar_video(filename, captions):
+    """Return the saved Trial caption literally, never shuffled or rotated."""
+    return captions.get(extract_source_key_from_calendar_filename(filename))
+
+
+def load_trial_caption_maps():
+    return {
+        _tanda_tag(tanda): db.get_trial_source_captions(tanda)
+        for tanda in db.get_trial_tandas()
+    }
+
 history_db = load_json(os.path.join(base_dir, HISTORY_FILE))
 
 # --- 3. BASE DE DATOS Y ENRUTAMIENTO ---
@@ -342,6 +363,7 @@ def get_accounts_with_va_info():
                     va_timezone = row['timezone']
         result.append({
             'username': acc['username'], 'account_type': acc['account_type'],
+            'trials_active': bool(acc.get('trials_active')),
             'assigned_va': va_name, 'tg_group_id': tg_group_id,
             'va_timezone': va_timezone,
         })
@@ -401,18 +423,23 @@ def _is_trials_subaccount(account_name="", account_type=""):
     return "trial" in f"{account_name or ''} {account_type or ''}".lower()
 
 
-def _topic_display_name(acc_name, tag_emoji, is_admin=False):
+def topic_state_key(chat_id, acc_name, delivery_kind="normal"):
+    suffix = "_trials" if delivery_kind == "trial" else ""
+    return f"{chat_id}_{acc_name}{suffix}"
+
+
+def _topic_display_name(acc_name, tag_emoji, is_admin=False, delivery_kind="normal"):
     if is_admin:
         return acc_name
     full_name = f"{acc_name} {tag_emoji}"
-    if _is_trials_subaccount(acc_name, tag_emoji) and not full_name.lower().startswith(TRIAL_TOPIC_PREFIX.lower()):
+    if (delivery_kind == "trial" or _is_trials_subaccount(acc_name, tag_emoji)) and not full_name.lower().startswith(TRIAL_TOPIC_PREFIX.lower()):
         return f"{TRIAL_TOPIC_PREFIX}{full_name}"
     return full_name
 
 
-def get_or_create_topic(chat_id, acc_name, tag_emoji, state, is_admin=False, force_recreate=False):
-    full_name = _topic_display_name(acc_name, tag_emoji, is_admin=is_admin)
-    state_key = f"{chat_id}_{acc_name}"
+def get_or_create_topic(chat_id, acc_name, tag_emoji, state, is_admin=False, force_recreate=False, delivery_kind="normal"):
+    full_name = _topic_display_name(acc_name, tag_emoji, is_admin=is_admin, delivery_kind=delivery_kind)
+    state_key = topic_state_key(chat_id, acc_name, delivery_kind)
     if state_key in state and not force_recreate: return _topic_id_from_state_value(state[state_key])
     if force_recreate: state.pop(state_key, None)
     res = call_tg("createForumTopic", {'chat_id': chat_id, 'name': full_name})
@@ -592,8 +619,6 @@ def scan_calendar_structure():
 
     if not os.path.exists(input_root):
         print("❌ No existe CALENDARIO_POSTEO")
-        return []
-
     accounts = get_accounts_with_va_info()
     account_type_map = {
         acc["username"]: acc["account_type"].strip().lower()
@@ -639,7 +664,8 @@ def scan_calendar_structure():
                 "filename": f,
                 "category": category,
                 "day": dia_folder,
-                "username": username_folder
+                "username": username_folder,
+                "delivery_kind": "normal",
             })
 
     print(f"✅ Escaneo completado: {len(all_videos)} videos encontrados.")
@@ -649,7 +675,35 @@ def scan_calendar_structure():
         for v in all_videos:
             print(v)
 
+    all_videos.extend(scan_trial_calendar_structure(accounts))
     return all_videos
+
+def scan_trial_calendar_structure(accounts):
+    """Scan the isolated Trial root and reject inactive/missing accounts."""
+    if not os.path.exists(trial_input_root):
+        return []
+    accounts_by_name = {account["username"]: account for account in accounts}
+    all_videos = []
+    for root, _dirs, files in os.walk(trial_input_root):
+        parts = os.path.relpath(root, trial_input_root).split(os.sep)
+        if len(parts) < 2 or not parts[0].lower().startswith("dia_"):
+            continue
+        username = parts[1]
+        account = accounts_by_name.get(username)
+        if not account or not account.get("trials_active"):
+            continue
+        for filename in files:
+            if filename.lower().endswith((".mp4", ".mov")):
+                all_videos.append({
+                    "path": os.path.join(root, filename),
+                    "filename": filename,
+                    "category": account["account_type"].strip().lower(),
+                    "day": parts[0],
+                    "username": username,
+                    "delivery_kind": "trial",
+                })
+    return all_videos
+
 
 def _account_tag(acc_info):
     """Devuelve el tag (PROMO / SUICIDE / etc.) basado en account_type de la DB."""
@@ -662,6 +716,7 @@ def _account_tag(acc_info):
 
 def execute_telegram_plan(start_date, selected_accounts=None, controller=None, reset_topics=False):
     caption_pools = load_tanda_caption_pools()
+    trial_caption_maps = load_trial_caption_maps()
 
     accounts = get_accounts_with_va_info()
     all_videos = scan_calendar_structure()
@@ -759,6 +814,14 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                 if controller and controller.stopped: return f"🛑 Abortado. Enviados: {global_sent}"
                 if controller: controller.paused.wait()
 
+                delivery_kind = vid.get("delivery_kind", "normal")
+                video_topic_id = t_id if delivery_kind == "normal" else get_or_create_topic(
+                    chat_id, username, tag, topics_state, delivery_kind="trial"
+                )
+                if not video_topic_id:
+                    print(f"Topic Trial no encontrado para @{username}; se omite el video.")
+                    continue
+
                 hora_et = tiempos[i % len(tiempos)]
                 et_label, local_label = convert_et_to_va_tz(hora_et, va_tz)
                 meta = (
@@ -770,26 +833,35 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                 )
 
                 print(f"📤 Enviando a @{username} [{tag}] (Día {dia_str} - {hora_et} ET)...")
-                msg_res = call_tg("sendMessage", {'chat_id': chat_id, 'text': meta, 'message_thread_id': t_id}, silent=True)
+                msg_res = call_tg("sendMessage", {'chat_id': chat_id, 'text': meta, 'message_thread_id': video_topic_id}, silent=True)
                 if not msg_res.get("ok"):
                     desc = str(msg_res.get("description", ""))
                     if "thread not found" in desc:
                         print(f"⚠️ Topic expirado para @{username}, recreando...")
-                        t_id = get_or_create_topic(chat_id, username, tag, topics_state, force_recreate=True)
+                        video_topic_id = get_or_create_topic(
+                            chat_id, username, tag, topics_state,
+                            force_recreate=True, delivery_kind=delivery_kind,
+                        )
                         save_json(os.path.join(base_dir, STATE_FILE), topics_state)
-                        if not t_id:
+                        if not video_topic_id:
                             print(f"❌ No se pudo recrear topic para @{username} — saltando cuenta.")
                             break
-                        retry_res = call_tg("sendMessage", {'chat_id': chat_id, 'text': meta, 'message_thread_id': t_id})
+                        retry_res = call_tg("sendMessage", {'chat_id': chat_id, 'text': meta, 'message_thread_id': video_topic_id})
                         if not retry_res.get("ok"):
                             print(f"❌ Falló el reintento de metadata para @{username} [{hora_et}] — saltando video.")
                             continue
                     else:
                         print(f"⚠️ Error en Telegram API (sendMessage) para @{username}: {msg_res}")
 
-                cap = caption_for_calendar_video(vid['filename'], caption_pools, caption_indexes)
+                if delivery_kind == "trial":
+                    trial_map = trial_caption_maps.get(
+                        extract_tanda_tag_from_calendar_filename(vid["filename"]), {}
+                    )
+                    cap = caption_for_trial_calendar_video(vid["filename"], trial_map)
+                else:
+                    cap = caption_for_calendar_video(vid['filename'], caption_pools, caption_indexes)
                 try:
-                    ok, t_id = _send_video_to_topic(chat_id, t_id, cap, vid['path'], topics_state, username, tag)
+                    ok, video_topic_id = _send_video_to_topic(chat_id, video_topic_id, cap, vid['path'], topics_state, username, tag)
                     if ok:
                         global_sent += 1
                     if t_id:
