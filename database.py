@@ -169,6 +169,11 @@ class DatabaseManager:
             "ALTER TABLE virtual_accounts ADD COLUMN notes TEXT DEFAULT ''",
             "ALTER TABLE virtual_accounts ADD COLUMN limitations TEXT DEFAULT '[]'",
             "ALTER TABLE virtual_accounts ADD COLUMN trials_active INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE virtual_accounts ADD COLUMN two_factor TEXT DEFAULT ''",
+            "ALTER TABLE virtual_accounts ADD COLUMN account_day TEXT DEFAULT ''",
+            "ALTER TABLE virtual_accounts ADD COLUMN social_network TEXT DEFAULT ''",
+            "ALTER TABLE virtual_accounts ADD COLUMN vpn_proxy TEXT DEFAULT ''",
+            "ALTER TABLE virtual_accounts ADD COLUMN account_link TEXT DEFAULT ''",
             "ALTER TABLE virtual_assistants ADD COLUMN timezone TEXT DEFAULT 'America/Argentina/Buenos_Aires'",
         ]
         cur = self.conn.cursor()
@@ -314,6 +319,60 @@ class DatabaseManager:
         cur = self.conn.cursor()
         cur.execute("DELETE FROM virtual_accounts WHERE username = ?", (username,))
         self.conn.commit()
+
+    def apply_airtable_account_plan(self, plan):
+        """Aplica un plan Airtable completo sin tocar los datos locales no compartidos."""
+        from airtable_sync import MANAGED_FIELDS
+
+        categories = [str(name or "").strip() for name in plan.categories_to_add]
+        if any(not name for name in categories):
+            raise ValueError("El plan contiene una categoría vacía.")
+
+        rows = [*plan.create, *plan.update]
+        for row in rows:
+            if set(row) != set(MANAGED_FIELDS):
+                raise ValueError("El plan de Airtable contiene campos inválidos.")
+            if not str(row["username"] or "").strip() or not str(row["account_type"] or "").strip():
+                raise ValueError("El plan de Airtable contiene una cuenta inválida.")
+
+        usernames_to_delete = [str(username or "").strip() for username in plan.delete_usernames]
+        if any(not username for username in usernames_to_delete):
+            raise ValueError("El plan contiene un username vacío para eliminar.")
+
+        cur = self.conn.cursor()
+        try:
+            cur.execute("BEGIN IMMEDIATE")
+            for category in categories:
+                cur.execute("INSERT OR IGNORE INTO account_categories (name) VALUES (?)", (category,))
+
+            columns = ", ".join(MANAGED_FIELDS)
+            placeholders = ", ".join("?" for _ in MANAGED_FIELDS)
+            for row in plan.create:
+                cur.execute(
+                    f"INSERT INTO virtual_accounts ({columns}) VALUES ({placeholders})",
+                    [row[name] for name in MANAGED_FIELDS],
+                )
+
+            update_fields = [name for name in MANAGED_FIELDS if name != "username"]
+            assignments = ", ".join(f"{name} = ?" for name in update_fields)
+            for row in plan.update:
+                cur.execute(
+                    f"UPDATE virtual_accounts SET {assignments} WHERE lower(username) = lower(?)",
+                    [row[name] for name in update_fields] + [row["username"]],
+                )
+
+            for username in usernames_to_delete:
+                cur.execute("DELETE FROM virtual_accounts WHERE lower(username) = lower(?)", (username,))
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+
+        return {
+            "created": len(plan.create),
+            "updated": len(plan.update),
+            "deleted": len(usernames_to_delete),
+        }
 
     def get_accounts_by_type(self, account_type: str) -> list[str]:
         cur = self.conn.cursor()
