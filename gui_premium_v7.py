@@ -22,6 +22,14 @@ import requests
 import render_performance
 
 from database import DatabaseManager
+from airtable_sync import (
+    AirtableConfig,
+    AirtableSyncError,
+    build_account_sync_plan,
+    fetch_airtable_accounts,
+    load_airtable_config,
+    save_airtable_config,
+)
 from trial_content import (
     group_trial_sources, missing_trial_caption_sources,
     selected_trial_usernames, trial_calendar_root, build_trial_account_plan,
@@ -758,6 +766,30 @@ def build_bulk_account_updates(category: str, assigned_va: str) -> dict:
     if assigned_va and assigned_va != "Sin cambios":
         updates["assigned_va"] = assigned_va
     return updates
+
+
+def airtable_sync_review_text(plan) -> str:
+    """Resumen seguro: incluye cuentas afectadas, nunca credenciales ni secretos."""
+    lines = [
+        "Cambios detectados desde Airtable:",
+        f"• {len(plan.create)} creadas",
+        f"• {len(plan.update)} actualizadas",
+        f"• {len(plan.delete_usernames)} eliminadas",
+    ]
+    for title, usernames in (
+        ("Crear", [row["username"] for row in plan.create]),
+        ("Actualizar", [row["username"] for row in plan.update]),
+        ("Eliminar", plan.delete_usernames),
+    ):
+        if usernames:
+            preview = ", ".join(f"@{name}" for name in usernames[:10])
+            extra = f" y {len(usernames) - 10} más" if len(usernames) > 10 else ""
+            lines.append(f"{title}: {preview}{extra}")
+    if plan.delete_usernames:
+        lines.append(
+            "Las eliminadas salen solo de la tabla local; no se borran videos, calendarios ni historial."
+        )
+    return "\n".join(lines)
 
 
 def resolve_selected_account_ids(accounts: list[dict], usernames: list[str]) -> list[int]:
@@ -3840,8 +3872,18 @@ class InstagramAutoPro(ctk.CTk):
             text_color=TEXT_BODY,
         )
         self._acc_header_lbl.grid(row=0, column=0, sticky="w")
+        self.btn_airtable_config = GhostButton(
+            accounts_header, text="Configurar Airtable", width=145,
+            command=self.configure_airtable,
+        )
+        self.btn_airtable_config.grid(row=0, column=1, padx=(0, 8), sticky="e")
+        self.btn_airtable_sync = PrimaryButton(
+            accounts_header, text="Sincronizar Airtable", width=155,
+            command=self.sync_airtable_accounts,
+        )
+        self.btn_airtable_sync.grid(row=0, column=2, padx=(0, 8), sticky="e")
         GhostButton(accounts_header, text="Actualizar", width=110,
-                    command=self._admin_load_accounts).grid(row=0, column=1, sticky="e")
+                    command=self._admin_load_accounts).grid(row=0, column=3, sticky="e")
 
         columns = ctk.CTkFrame(accounts_body, fg_color=BG_CARD2, corner_radius=BTN_RADIUS)
         columns.grid(row=1, column=0, sticky="ew", pady=(0, 6))
@@ -3860,6 +3902,83 @@ class InstagramAutoPro(ctk.CTk):
         self._acc_scroll.grid(row=2, column=0, sticky="nsew")
         self._acc_scroll.grid_columnconfigure(0, weight=1)
         self._admin_refresh()
+
+    def configure_airtable(self):
+        """Guarda la configuración local de lectura para esta instalación."""
+        try:
+            current = load_airtable_config()
+        except AirtableSyncError:
+            current = AirtableConfig("", "", "Cuentas")
+
+        token = simpledialog.askstring(
+            "Airtable", "Personal Access Token (solo lectura):",
+            initialvalue=current.personal_access_token, show="*", parent=self,
+        )
+        if token is None:
+            return
+        base_id = simpledialog.askstring(
+            "Airtable", "Base ID (empieza por app):",
+            initialvalue=current.base_id, parent=self,
+        )
+        if base_id is None:
+            return
+        table_name = simpledialog.askstring(
+            "Airtable", "Nombre exacto de la tabla:",
+            initialvalue=current.table_name, parent=self,
+        )
+        if table_name is None:
+            return
+        try:
+            save_airtable_config(AirtableConfig(token, base_id, table_name))
+        except AirtableSyncError as exc:
+            messagebox.showerror("Airtable", str(exc), parent=self)
+            return
+        messagebox.showinfo("Airtable", "Configuración guardada en esta GUI.", parent=self)
+
+    def sync_airtable_accounts(self):
+        """Descarga Airtable y pide confirmación antes de modificar SQLite local."""
+        self.btn_airtable_sync.configure(state="disabled", text="Sincronizando...")
+
+        def task():
+            config = load_airtable_config()
+            remote_rows = fetch_airtable_accounts(config)
+            return build_account_sync_plan(remote_rows, self.db.get_all_accounts())
+
+        def done(success, result):
+            self.btn_airtable_sync.configure(state="normal", text="Sincronizar Airtable")
+            if not success:
+                messagebox.showerror("Airtable", result, parent=self)
+                return
+            plan = result
+            if not plan.changed:
+                messagebox.showinfo("Airtable", "No hay cambios desde Airtable.", parent=self)
+                return
+            if not messagebox.askyesno(
+                "Revisar sincronización", airtable_sync_review_text(plan), parent=self,
+            ):
+                return
+            try:
+                counts = self.db.apply_airtable_account_plan(plan)
+            except Exception:
+                messagebox.showerror(
+                    "Airtable",
+                    "No se pudo aplicar la sincronización local. Cierra otras GUIs y vuelve a intentarlo.",
+                    parent=self,
+                )
+                return
+            self.refresh_dashboard()
+            self._admin_load_accounts()
+            if hasattr(self, "reload_dist_lists"):
+                self.reload_dist_lists()
+            messagebox.showinfo(
+                "Airtable",
+                "Sincronización completada: "
+                f"{counts['created']} creadas, {counts['updated']} actualizadas, "
+                f"{counts['deleted']} eliminadas.",
+                parent=self,
+            )
+
+        WorkerThread(self, done, task).start()
 
     def _build_verify_legacy_frame(self):
         """Aísla el verificador HTTP heredado de la gestión operativa de cuentas."""
