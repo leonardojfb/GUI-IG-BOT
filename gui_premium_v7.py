@@ -795,7 +795,16 @@ def airtable_sync_review_text(plan) -> str:
 
 def airtable_schema_preparation_text(result) -> str:
     """Resume cambios de esquema sin incluir el token local."""
-    if result.added_fields:
+    if result.source_renames:
+        lines = [
+            "Se reutilizaron las primeras columnas Field 1–Field 8 con los nombres correctos.",
+            "Orden: Username, 2FA, VA, Categoria, Trials desbloqueados, Dia, Red social, VPN / Proxy, Link.",
+        ]
+        if result.backup_renames:
+            lines.append(
+                "Las columnas duplicadas se renombraron como respaldo y no se borraron."
+            )
+    elif result.added_fields:
         lines = [f"Columnas agregadas: {', '.join(result.added_fields)}."]
     else:
         lines = ["La tabla ya tenía todas las columnas requeridas."]

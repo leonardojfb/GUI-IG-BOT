@@ -11,6 +11,7 @@ from airtable_sync import (
     AirtableSchemaPreparation,
     AirtableSyncError,
     build_legacy_field_migration_plan,
+    build_legacy_column_repair_plan,
     build_account_sync_plan,
     fetch_airtable_accounts,
     load_airtable_config,
@@ -94,6 +95,72 @@ class AirtableFetchTest(unittest.TestCase):
 
 
 class AirtableSchemaPreparationTest(unittest.TestCase):
+    def test_repairs_first_columns_and_moves_existing_duplicates_to_backup_names(self):
+        schema = {
+            "id": "tblAccounts",
+            "name": "Cuentas",
+            "fields": [
+                {"id": "fldUsername", "name": "Username", "type": "multilineText"},
+                *[
+                    {"id": f"fld{i}", "name": f"Field {i}", "type": "singleSelect"}
+                    for i in range(1, 9)
+                ],
+                {"id": "fld2fa", "name": "2FA", "type": "multilineText"},
+                {"id": "fldCategoria", "name": "Categoria", "type": "singleLineText"},
+                {"id": "fldTrials", "name": "Trials desbloqueados", "type": "checkbox"},
+            ],
+        }
+
+        plan = build_legacy_column_repair_plan(schema)
+
+        self.assertEqual(
+            plan.source_renames,
+            (
+                ("fld1", "2FA"), ("fld2", "VA"), ("fld3", "Categoria"),
+                ("fld4", "Trials desbloqueados"), ("fld5", "Dia"),
+                ("fld6", "Red social"), ("fld7", "VPN / Proxy"), ("fld8", "Link"),
+            ),
+        )
+        self.assertEqual(
+            plan.backup_renames,
+            (
+                ("fld2fa", "__backup__2FA"),
+                ("fldCategoria", "__backup__Categoria"),
+                ("fldTrials", "__backup__Trials desbloqueados"),
+            ),
+        )
+
+    def test_preparation_renames_existing_first_columns_in_place(self):
+        schema = {"tables": [{
+            "id": "tblAccounts", "name": "Cuentas", "fields": [
+                {"id": "fldUsername", "name": "Username", "type": "multilineText"},
+                *[
+                    {"id": f"fld{i}", "name": f"Field {i}", "type": "singleSelect"}
+                    for i in range(1, 9)
+                ],
+                {"id": "fld2fa", "name": "2FA", "type": "multilineText"},
+            ],
+        }]}
+        calls = []
+
+        def fake_get(_url, *, headers, timeout):
+            return FakeResponse(schema)
+
+        def fake_patch(url, *, headers, json, timeout):
+            calls.append((url, json))
+            return FakeResponse({"id": "field"})
+
+        result = prepare_airtable_account_table(
+            AirtableConfig("pat_secret", "app123", "Cuentas"),
+            fake_get,
+            requests_patch=fake_patch,
+        )
+
+        self.assertEqual(result.added_fields, ())
+        self.assertEqual(calls[0][1], {"name": "__backup__2FA"})
+        self.assertEqual(calls[1][1], {"name": "2FA"})
+        self.assertEqual(calls[-1][1], {"name": "Link"})
+
     def test_adds_only_missing_required_fields_to_existing_table(self):
         calls = []
 
@@ -188,6 +255,18 @@ class AirtableSchemaPreparationTest(unittest.TestCase):
 
 
 class AirtableGuiConnectionTest(unittest.TestCase):
+    def test_connection_feedback_reports_reused_first_columns(self):
+        text = airtable_schema_preparation_text(AirtableSchemaPreparation(
+            added_fields=(),
+            incompatible_fields=(),
+            source_renames=(("fld1", "2FA"), ("fld8", "Link")),
+            backup_renames=(("fldOld", "__backup__2FA"),),
+        ))
+
+        self.assertIn("Field 1–Field 8", text)
+        self.assertIn("2FA", text)
+        self.assertIn("respaldo", text)
+
     def test_connection_feedback_reports_added_and_untouched_fields(self):
         text = airtable_schema_preparation_text(AirtableSchemaPreparation(
             added_fields=("Username", "Link"),

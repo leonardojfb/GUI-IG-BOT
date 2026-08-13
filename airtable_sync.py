@@ -61,6 +61,14 @@ class AirtableConfig:
 class AirtableSchemaPreparation:
     added_fields: tuple[str, ...]
     incompatible_fields: tuple[tuple[str, str, str], ...]
+    source_renames: tuple[tuple[str, str], ...] = ()
+    backup_renames: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class AirtableColumnRepairPlan:
+    source_renames: tuple[tuple[str, str], ...]
+    backup_renames: tuple[tuple[str, str], ...]
 
 
 @dataclass(frozen=True)
@@ -122,6 +130,8 @@ def _checkbox(fields: dict[str, Any], name: str) -> bool:
         return value
     if value in (None, ""):
         return False
+    if isinstance(value, str):
+        return value.strip().casefold() in {"si", "sí", "true", "1"}
     raise AirtableSyncError(f"'{name}' debe ser un checkbox.")
 
 
@@ -254,6 +264,46 @@ def _legacy_link_value(value: Any) -> str:
     return link
 
 
+LEGACY_COLUMN_RENAMES = (
+    ("Field 1", "2FA"),
+    ("Field 2", "VA"),
+    ("Field 3", "Categoria"),
+    ("Field 4", "Trials desbloqueados"),
+    ("Field 5", "Dia"),
+    ("Field 6", "Red social"),
+    ("Field 7", "VPN / Proxy"),
+    ("Field 8", "Link"),
+)
+
+
+def build_legacy_column_repair_plan(table: dict[str, Any]) -> AirtableColumnRepairPlan:
+    fields = table.get("fields") if isinstance(table, dict) else None
+    if not isinstance(fields, list):
+        raise AirtableSyncError("Airtable devolvió una tabla inválida.")
+    by_name = {
+        field.get("name"): field
+        for field in fields
+        if isinstance(field, dict) and isinstance(field.get("name"), str)
+    }
+    if not all(source in by_name for source, _target in LEGACY_COLUMN_RENAMES):
+        return AirtableColumnRepairPlan((), ())
+    source_names = {source for source, _target in LEGACY_COLUMN_RENAMES}
+    backups: list[tuple[str, str]] = []
+    for _source, target in LEGACY_COLUMN_RENAMES:
+        existing = by_name.get(target)
+        if existing is None or target in source_names:
+            continue
+        backup_name = f"__backup__{target}"
+        suffix = 2
+        while backup_name in by_name:
+            backup_name = f"__backup__{target}_{suffix}"
+            suffix += 1
+        backups.append((str(existing["id"]), backup_name))
+        by_name[backup_name] = existing
+    sources = tuple((str(by_name[source]["id"]), target) for source, target in LEGACY_COLUMN_RENAMES)
+    return AirtableColumnRepairPlan(sources, tuple(backups))
+
+
 def build_legacy_field_migration_plan(records: list[dict[str, Any]]) -> AirtableLegacyMigrationPlan:
     """Copia el formato genérico legado sin borrar ni sobrescribir datos de Airtable."""
     updates: list[dict[str, Any]] = []
@@ -287,9 +337,36 @@ def prepare_airtable_account_table(
     config: AirtableConfig,
     requests_get: Callable[..., Any] = requests.get,
     requests_post: Callable[..., Any] = requests.post,
+    requests_patch: Callable[..., Any] = requests.patch,
 ) -> AirtableSchemaPreparation:
-    """Agrega solamente los campos requeridos que aún no existen en la tabla."""
+    """Prepara una tabla existente, reutilizando Field 1-8 cuando están presentes."""
     table = _configured_table_schema(config, requests_get)
+    repair = build_legacy_column_repair_plan(table)
+    if repair.source_renames:
+        fields_url = "https://api.airtable.com/v0/meta/bases/{}/tables/{}/fields/{}"
+        ordered_renames = [*repair.backup_renames, *repair.source_renames]
+        for field_id, new_name in ordered_renames:
+            url = fields_url.format(
+                quote(config.base_id, safe=""), quote(table["id"], safe=""), quote(field_id, safe="")
+            )
+            try:
+                response = requests_patch(
+                    url,
+                    headers={**_airtable_headers(config), "Content-Type": "application/json"},
+                    json={"name": new_name},
+                    timeout=20,
+                )
+                response.raise_for_status()
+            except Exception as exc:
+                raise AirtableSyncError(
+                    f"No se pudo renombrar la columna a '{new_name}'. Airtable rechazó el cambio."
+                ) from exc
+        return AirtableSchemaPreparation(
+            added_fields=(),
+            incompatible_fields=(),
+            source_renames=repair.source_renames,
+            backup_renames=repair.backup_renames,
+        )
     existing_types = {
         field.get("name"): field.get("type")
         for field in table["fields"]
