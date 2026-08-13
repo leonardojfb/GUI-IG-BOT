@@ -3,6 +3,31 @@ from datetime import datetime
 import organizadortg
 
 
+def test_call_tg_prints_clear_message_for_missing_forum_topic(monkeypatch, capsys):
+    class FakeResponse:
+        def json(self):
+            return {
+                "ok": False,
+                "error_code": 400,
+                "description": "Bad Request: TOPIC_ID_INVALID",
+            }
+
+    def fake_post(url, json):
+        return FakeResponse()
+
+    monkeypatch.setattr(organizadortg.requests, "post", fake_post)
+
+    res = organizadortg.call_tg(
+        "deleteForumTopic",
+        {"chat_id": "-1001", "message_thread_id": 11},
+    )
+
+    out = capsys.readouterr().out
+    assert res["description"] == "Bad Request: TOPIC_ID_INVALID"
+    assert "se intento borrar un topic que ya no existe" in out.lower()
+    assert "Error en Telegram API" not in out
+
+
 def test_delete_known_topics_for_chats_deletes_topics_and_clears_state(monkeypatch):
     calls = []
 

@@ -13,11 +13,13 @@ import os
 import random
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 import json
 import shutil
 import requests
+import render_performance
 
 from database import DatabaseManager
 from trial_content import (
@@ -829,6 +831,9 @@ class InstagramAutoPro(ctk.CTk):
 
         self.db = DatabaseManager()
         self._active_nav = None
+        self._render_worker_controls = []
+        self._render_worker_syncing = False
+        self._editor_render_active = False
 
         # Estado de rutas (Tandas)
         self.p1_dir = ""
@@ -2128,6 +2133,71 @@ class InstagramAutoPro(ctk.CTk):
         self.reload_dist_lists()
         messagebox.showinfo("✅", f"Tanda '{name}' guardada correctamente.")
 
+    def _build_render_performance_control(self, parent, context):
+        """Build one compact view of the globally persisted render worker count."""
+        snapshot = render_performance.get_render_performance()
+        value_text = f"{snapshot.workers} de {snapshot.max_workers}"
+        if snapshot.workers_were_reclamped:
+            value_text += " · ajustado al equipo"
+        slider_max = max(2, snapshot.max_workers)
+        slider_state = "disabled" if snapshot.max_workers == 1 else "normal"
+        control = ctk.CTkFrame(parent, fg_color=BG_CARD2, corner_radius=8)
+        control._render_performance_context = context
+        ctk.CTkLabel(
+            control, text="Videos en paralelo", text_color=TEXT_MUTED,
+            font=ctk.CTkFont(size=11, weight="bold"),
+        ).pack(side="left", padx=(10, 6), pady=6)
+        slider = ctk.CTkSlider(
+            control, from_=1, to=slider_max,
+            number_of_steps=max(1, slider_max - 1), state=slider_state,
+            command=self._on_render_workers_changed,
+            fg_color=BG_INPUT, progress_color=ACCENT, button_color=NEON_CYAN,
+            width=120,
+        )
+        slider.pack(side="left", padx=(0, 6), pady=6)
+        value_label = ctk.CTkLabel(
+            control, text=value_text,
+            text_color=TEXT_BODY, font=ctk.CTkFont(size=11), width=42,
+        )
+        value_label.pack(side="left", padx=(0, 10), pady=6)
+
+        self._render_worker_controls = getattr(self, "_render_worker_controls", [])
+        self._render_worker_controls.append((slider, value_label))
+        was_syncing = getattr(self, "_render_worker_syncing", False)
+        self._render_worker_syncing = True
+        try:
+            slider.set(snapshot.workers)
+        finally:
+            self._render_worker_syncing = was_syncing
+        return control
+
+    def _on_render_workers_changed(self, value):
+        if getattr(self, "_render_worker_syncing", False):
+            return
+        current = render_performance.get_render_performance()
+        workers = max(1, min(round(float(value)), current.max_workers))
+        snapshot = render_performance.save_render_workers(workers)
+        self._sync_render_worker_controls(snapshot)
+
+    def _sync_render_worker_controls(self, snapshot):
+        self._render_worker_syncing = True
+        try:
+            value_text = f"{snapshot.workers} de {snapshot.max_workers}"
+            if snapshot.workers_were_reclamped:
+                value_text += " · ajustado al equipo"
+            for slider, value_label in self._render_worker_controls:
+                slider_max = max(2, snapshot.max_workers)
+                slider.configure(
+                    from_=1,
+                    to=slider_max,
+                    number_of_steps=max(1, slider_max - 1),
+                    state="disabled" if snapshot.max_workers == 1 else "normal",
+                )
+                slider.set(snapshot.workers)
+                value_label.configure(text=value_text)
+        finally:
+            self._render_worker_syncing = False
+
     def _build_mix_frame(self):
         """TAREA 4 — Creador de Tandas."""
         f = self._frames["Tandas"]
@@ -2181,10 +2251,10 @@ class InstagramAutoPro(ctk.CTk):
         ctk.CTkLabel(
             bot_body, text="Los captions se asignan por tanda desde Logística.", text_color=TEXT_MUTED
         ).pack(side="left")
-        
         self.btn_render = PrimaryButton(bot_body, text="INICIAR RENDER", height=BTN_H_LG,
                                         command=self.process_tanda)
         self.btn_render.pack(side="right")
+        self._build_render_performance_control(bot_body, "Tandas").pack(side="right", padx=(0, 12))
 
         # ── Lista de Tandas registradas ─────────────────────────────────
         tandas_card = Card(f, title="Tandas registradas")
@@ -2259,10 +2329,11 @@ class InstagramAutoPro(ctk.CTk):
         self.db.add_tanda(name, self.p1_dir, self.p2_dir, existing.get("captions_file_path"))
         self._refresh_tandas_list()
         self.reload_dist_lists()
+        performance = render_performance.get_render_performance()
 
         def task():
             import videos
-            return videos.render_tanda(name)
+            return videos.render_tanda(name, performance)
             
         def done(success, result):
             self.btn_render.configure(text="⚙️ INICIAR RENDER", state="normal")
@@ -3946,7 +4017,10 @@ class InstagramAutoPro(ctk.CTk):
         actions = ctk.CTkFrame(scroll, fg_color="transparent")
         actions.grid(row=4, column=0, sticky="ew", padx=24, pady=(0, 14))
         PrimaryButton(actions, text="👁️  Preview en frame aleatorio", command=self.editor_preview).pack(side="left", padx=(0, 8))
-        PrimaryButton(actions, text="Renderizar video", command=self.editor_render).pack(side="left")
+        self.btn_editor_render = PrimaryButton(
+            actions, text="Renderizar video", command=self.editor_render)
+        self.btn_editor_render.pack(side="right")
+        self._build_render_performance_control(actions, "Edición").pack(side="right", padx=(0, 8))
         self.editor_status = ctk.CTkLabel(actions, text="Configurá el video y las fotos.", text_color=TEXT_MUTED)
         self.editor_status.pack(side="left", padx=16)
 
@@ -4379,6 +4453,8 @@ class InstagramAutoPro(ctk.CTk):
         WorkerThread(self, done, task).start()
 
     def editor_render(self):
+        if getattr(self, "_editor_render_active", False):
+            return
         try:
             videos, overlays = self._editor_collect()
         except Exception as exc:
@@ -4409,30 +4485,52 @@ class InstagramAutoPro(ctk.CTk):
                                               filetypes=[("MP4", "*.mp4")], initialfile="video_editado.mp4")
         if not output:
             return
+        performance = render_performance.get_render_performance()
+        InstagramAutoPro._set_editor_render_active(self, True)
         self.editor_status.configure(text="Renderizando con FFmpeg…", text_color=WARNING)
         def task():
             import video_editor
-            return video_editor.render_video(video, output, overlays)
+            return video_editor.render_video(
+                video, output, overlays, performance.ffmpeg_threads)
         def done(success, result):
+            InstagramAutoPro._set_editor_render_active(self, False)
             self.editor_status.configure(text="✅ Video guardado" if success else "❌ Error de render", text_color=SUCCESS if success else DANGER)
             if success:
                 messagebox.showinfo("Edición completada", f"Video guardado en:\n{result}")
             else:
                 messagebox.showerror("Renderizar", result)
-        WorkerThread(self, done, task).start()
+        try:
+            WorkerThread(self, done, task).start()
+        except Exception:
+            InstagramAutoPro._set_editor_render_active(self, False)
+            raise
+
+    def _set_editor_render_active(self, active):
+        self._editor_render_active = active
+        button = getattr(self, "btn_editor_render", None)
+        if button is not None:
+            button.configure(state="disabled" if active else "normal")
 
     def _editor_render_batch(self, jobs):
         """Render one job per requested video/photo combination."""
+        if getattr(self, "_editor_render_active", False):
+            return
+        performance = render_performance.get_render_performance()
+        InstagramAutoPro._set_editor_render_active(self, True)
         self.editor_status.configure(text=f"Renderizando {len(jobs)} videos con FFmpeg…", text_color=WARNING)
 
         def task():
             import video_editor
-            completed = []
-            for source, output, job_overlays in jobs:
-                completed.append(video_editor.render_video(source, output, job_overlays))
-            return completed
+            with ThreadPoolExecutor(max_workers=performance.workers) as pool:
+                futures = [
+                    pool.submit(video_editor.render_video, source, output, job_overlays,
+                                performance.ffmpeg_threads)
+                    for source, output, job_overlays in jobs
+                ]
+                return [future.result() for future in futures]
 
         def done(success, result):
+            InstagramAutoPro._set_editor_render_active(self, False)
             self.editor_status.configure(text="✅ Videos guardados" if success else "❌ Error de render",
                                          text_color=SUCCESS if success else DANGER)
             if success:
@@ -4441,7 +4539,11 @@ class InstagramAutoPro(ctk.CTk):
             else:
                 messagebox.showerror("Renderizar lote", result)
 
-        WorkerThread(self, done, task).start()
+        try:
+            WorkerThread(self, done, task).start()
+        except Exception:
+            InstagramAutoPro._set_editor_render_active(self, False)
+            raise
 
 
     # FORGE DE METADATA
@@ -4679,7 +4781,7 @@ class InstagramAutoPro(ctk.CTk):
         # ── Botonera + Progreso ──────────────────────────────────────────
         bot = ctk.CTkFrame(scroll, fg_color="transparent")
         bot.grid(row=3, column=0, sticky="ew", padx=24, pady=(14, 20))
-        bot.grid_columnconfigure(3, weight=1)
+        bot.grid_columnconfigure(0, weight=1)
 
         GhostButton(bot, text="👁  Preview Metadata", height=BTN_H_LG,
                     command=self.forge_preview_metadata).grid(row=0, column=0, padx=(0, 8))
@@ -4688,12 +4790,15 @@ class InstagramAutoPro(ctk.CTk):
                     height=BTN_H_LG, state="disabled", command=self.forge_reshuffle)
         self.btn_forge_reshuffle.grid(row=0, column=1, padx=(0, 8))
 
+        self._build_render_performance_control(bot, "Forge").grid(
+            row=0, column=2, padx=(0, 8))
+
         self.btn_forge_process = PrimaryButton(bot, text="⚡  Procesar Ahora",
                     height=BTN_H_LG, state="disabled", command=self.forge_process)
-        self.btn_forge_process.grid(row=0, column=2, padx=(0, 20))
+        self.btn_forge_process.grid(row=0, column=3)
 
         prog_wrap = ctk.CTkFrame(bot, fg_color="transparent")
-        prog_wrap.grid(row=0, column=3, sticky="ew")
+        prog_wrap.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(8, 0))
         prog_wrap.grid_columnconfigure(0, weight=1)
 
         self.forge_pb = ctk.CTkProgressBar(prog_wrap, fg_color=BG_INPUT,
@@ -4785,6 +4890,7 @@ class InstagramAutoPro(ctk.CTk):
         self.forge_preview_metadata()
 
     def forge_process(self):
+        performance = render_performance.get_render_performance()
         if not self.forge_video_paths:
             return messagebox.showwarning("⚠️", "No hay videos en la lista.")
         if not self.forge_meta_assignments:
@@ -4824,6 +4930,7 @@ class InstagramAutoPro(ctk.CTk):
         if not messagebox.askyesno("Confirmar Forge", (
             f"¿Generar {len(self.forge_video_paths)} vídeos × {copies} copias = {n_total} archivos con metadata iPhone única?\n\n"
             f"Tanda: {tanda_name}{' (TRIALS)' if is_trial_tanda else ''}\n"
+            f"Rendimiento: {performance.workers} videos en paralelo\n"
             f"Micro-ediciones: {fx_desc}"
         )):
             return
@@ -4838,14 +4945,18 @@ class InstagramAutoPro(ctk.CTk):
         self.btn_forge_reshuffle.configure(state="disabled")
         self.forge_pb.configure(mode="indeterminate")
         self.forge_pb.start()
-        self.forge_pb_lbl.configure(text="Procesando con FFmpeg...", text_color=WARNING)
+        self.forge_pb_lbl.configure(
+            text=f"Procesando con FFmpeg ({performance.workers} videos en paralelo)...",
+            text_color=WARNING,
+        )
 
         def task():
             import re
             import metadata_pool
             os.makedirs(output_dir, exist_ok=True)
-            fingerprints = []
+            copy_jobs = []
             meta_idx = 0
+            reserved_max = {}
             for vid_path in videos:
                 filename = os.path.basename(vid_path)
                 base, ext = os.path.splitext(filename)
@@ -4857,18 +4968,40 @@ class InstagramAutoPro(ctk.CTk):
                     m = copy_pattern.match(fname)
                     if m:
                         existing_max = max(existing_max, int(m.group(1)))
+                reservation_key = (vid_id, ext)
+                existing_max = max(existing_max, reserved_max.get(reservation_key, 0))
                 for offset in range(1, copies + 1):
                     copy_num = existing_max + offset
                     meta = meta_list[meta_idx]
                     out_name = f"{vid_id}__c{copy_num:02d}{ext}"
                     out_path = os.path.join(output_dir, out_name)
-                    metadata_pool.apply_variant_and_metadata(vid_path, out_path, meta,
-                                                             enabled=fx_enabled, strength=forge_strength,
-                                                             overrides=forge_overrides)
-                    db_ref.save_forge_video(tanda_name, filename, out_name, vh)
-                    fingerprints.append({"video_hash": f"{vh}_{copy_num}", **meta})
+                    fingerprint = {"video_hash": f"{vh}_{copy_num}", **meta}
+                    copy_jobs.append((vid_path, out_path, filename, out_name, vh, meta, fingerprint))
                     meta_idx += 1
-            db_ref.save_metadata_fingerprints(fingerprints)
+                reserved_max[reservation_key] = existing_max + copies
+
+            def process_copy(copy_job):
+                vid_path, out_path, filename, out_name, vh, meta, fingerprint = copy_job
+                try:
+                    metadata_pool.apply_variant_and_metadata(
+                        vid_path, out_path, meta,
+                        enabled=fx_enabled, strength=forge_strength,
+                        overrides=forge_overrides,
+                        ffmpeg_threads=performance.ffmpeg_threads,
+                    )
+                except Exception as error:
+                    raise RuntimeError(f"Forge falló en '{filename}': {error}") from error
+                return filename, out_name, vh, fingerprint
+
+            with ThreadPoolExecutor(max_workers=performance.workers) as pool:
+                futures = [pool.submit(process_copy, copy_job) for copy_job in copy_jobs]
+                completed = [future.result() for future in futures]
+
+            for filename, out_name, vh, _fingerprint in completed:
+                db_ref.save_forge_video(tanda_name, filename, out_name, vh)
+            db_ref.save_metadata_fingerprints([
+                fingerprint for *_row, fingerprint in completed
+            ])
             existing_tanda = db_ref.get_tanda_by_name(tanda_name) or {}
             db_ref.add_tanda(
                 tanda_name, tanda_name, tanda_name, existing_tanda.get("captions_file_path")

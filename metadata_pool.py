@@ -440,6 +440,7 @@ def apply_variant_and_metadata(
     enabled: "dict | None" = None,
     strength: float = 1.0,
     overrides: "dict | None" = None,
+    ffmpeg_threads: "int | None" = None,
 ) -> dict:
     """
     Genera una copia realmente distinta a nivel de píxeles (recorte de bordes,
@@ -483,8 +484,11 @@ def apply_variant_and_metadata(
         cmd += ["-vf", vf]
     if af:
         cmd += ["-af", af]
+    cmd += ["-c:v", "libx264"]
+    if ffmpeg_threads:
+        cmd += ["-threads", str(ffmpeg_threads)]
     cmd += [
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-preset", "veryfast", "-crf", "20",
         "-c:a", "aac", "-b:a", "128k",
         "-movflags", "use_metadata_tags",
         "-metadata", "make=Apple",
