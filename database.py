@@ -98,6 +98,15 @@ CREATE TABLE IF NOT EXISTS trial_source_captions (
     PRIMARY KEY (tanda_name, source_key),
     FOREIGN KEY (tanda_name) REFERENCES trial_tandas(tanda_name)
 );
+
+CREATE TABLE IF NOT EXISTS normal_source_captions (
+    tanda_name TEXT NOT NULL,
+    source_key TEXT NOT NULL,
+    caption_text TEXT NOT NULL,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (tanda_name, source_key),
+    FOREIGN KEY (tanda_name) REFERENCES batch_tandas(tanda_name)
+);
 """
 
 class DatabaseManager:
@@ -382,6 +391,27 @@ class DatabaseManager:
             "SELECT source_key, caption_text FROM trial_source_captions "
             "WHERE tanda_name = ? ORDER BY source_key",
             (tanda_name,),
+        )
+        return {row["source_key"]: row["caption_text"] for row in cur.fetchall()}
+
+    def set_normal_source_caption(self, tanda_name: str, source_key: str, caption_text: str):
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO normal_source_captions (tanda_name, source_key, caption_text)
+            VALUES (?, ?, ?)
+            ON CONFLICT(tanda_name, source_key) DO UPDATE SET
+                caption_text=excluded.caption_text, updated_at=CURRENT_TIMESTAMP
+            """,
+            (tanda_name, source_key, caption_text),
+        )
+        self.conn.commit()
+
+    def get_normal_source_captions(self, tanda_name: str) -> dict[str, str]:
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT source_key, caption_text FROM normal_source_captions "
+            "WHERE tanda_name = ? ORDER BY source_key", (tanda_name,)
         )
         return {row["source_key"]: row["caption_text"] for row in cur.fetchall()}
 
