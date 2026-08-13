@@ -83,6 +83,21 @@ CREATE TABLE IF NOT EXISTS forge_video_registry (
     processed_at TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(tanda_name, source_name, output_name)
 );
+
+CREATE TABLE IF NOT EXISTS trial_tandas (
+    tanda_name TEXT PRIMARY KEY,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (tanda_name) REFERENCES batch_tandas(tanda_name)
+);
+
+CREATE TABLE IF NOT EXISTS trial_source_captions (
+    tanda_name TEXT NOT NULL,
+    source_key TEXT NOT NULL,
+    caption_text TEXT NOT NULL,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (tanda_name, source_key),
+    FOREIGN KEY (tanda_name) REFERENCES trial_tandas(tanda_name)
+);
 """
 
 class DatabaseManager:
@@ -144,6 +159,7 @@ class DatabaseManager:
             "ALTER TABLE virtual_accounts ADD COLUMN followers INTEGER DEFAULT 0",
             "ALTER TABLE virtual_accounts ADD COLUMN notes TEXT DEFAULT ''",
             "ALTER TABLE virtual_accounts ADD COLUMN limitations TEXT DEFAULT '[]'",
+            "ALTER TABLE virtual_accounts ADD COLUMN trials_active INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE virtual_assistants ADD COLUMN timezone TEXT DEFAULT 'America/Argentina/Buenos_Aires'",
         ]
         cur = self.conn.cursor()
@@ -248,6 +264,23 @@ class DatabaseManager:
         cur.execute("SELECT * FROM virtual_accounts ORDER BY account_type, username")
         return [dict(row) for row in cur.fetchall()]
 
+    def set_account_trials_active(self, username: str, active: bool) -> bool:
+        cur = self.conn.cursor()
+        cur.execute(
+            "UPDATE virtual_accounts SET trials_active = ? WHERE username = ?",
+            (int(bool(active)), username),
+        )
+        self.conn.commit()
+        return bool(cur.rowcount)
+
+    def get_trials_active_accounts(self):
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT * FROM virtual_accounts WHERE trials_active = 1 "
+            "ORDER BY account_type, username"
+        )
+        return [dict(row) for row in cur.fetchall()]
+
     def add_virtual_account(self, username, account_type):
         cur = self.conn.cursor()
         cur.execute("INSERT INTO virtual_accounts (username, account_type) VALUES (?, ?)", (username, account_type))
@@ -304,6 +337,53 @@ class DatabaseManager:
         )
         self.conn.commit()
         return cur.rowcount
+
+    def set_tanda_trial(self, name: str, is_trial: bool) -> bool:
+        cur = self.conn.cursor()
+        if is_trial:
+            cur.execute(
+                "INSERT OR IGNORE INTO trial_tandas (tanda_name) VALUES (?)",
+                (name,),
+            )
+        else:
+            cur.execute("DELETE FROM trial_tandas WHERE tanda_name = ?", (name,))
+        self.conn.commit()
+        return bool(cur.rowcount)
+
+    def get_trial_tandas(self) -> list[str]:
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT tanda_name FROM trial_tandas ORDER BY created_at DESC, tanda_name"
+        )
+        return [row["tanda_name"] for row in cur.fetchall()]
+
+    def is_trial_tanda(self, name: str) -> bool:
+        cur = self.conn.cursor()
+        cur.execute("SELECT 1 FROM trial_tandas WHERE tanda_name = ?", (name,))
+        return cur.fetchone() is not None
+
+    def set_trial_source_caption(self, tanda_name: str, source_key: str, caption_text: str):
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO trial_source_captions (tanda_name, source_key, caption_text)
+            VALUES (?, ?, ?)
+            ON CONFLICT(tanda_name, source_key) DO UPDATE SET
+                caption_text=excluded.caption_text,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (tanda_name, source_key, caption_text),
+        )
+        self.conn.commit()
+
+    def get_trial_source_captions(self, tanda_name: str) -> dict[str, str]:
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT source_key, caption_text FROM trial_source_captions "
+            "WHERE tanda_name = ? ORDER BY source_key",
+            (tanda_name,),
+        )
+        return {row["source_key"]: row["caption_text"] for row in cur.fetchall()}
 
     def get_tandas(self, active_only=False):
         """Alias de get_all_tandas para compatibilidad."""
