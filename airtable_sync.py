@@ -304,6 +304,54 @@ def build_legacy_column_repair_plan(table: dict[str, Any]) -> AirtableColumnRepa
     return AirtableColumnRepairPlan(sources, tuple(backups))
 
 
+def build_positional_column_repair_plan(table: dict[str, Any]) -> AirtableColumnRepairPlan:
+    """Renombra las primeras nueve columnas, sin inspeccionar sus nombres actuales."""
+    fields = table.get("fields") if isinstance(table, dict) else None
+    if not isinstance(fields, list):
+        raise AirtableSyncError("Airtable devolvió una tabla inválida.")
+    targets = tuple(required.name for required in AIRTABLE_ACCOUNT_COLUMNS)
+    if len(fields) < len(targets):
+        raise AirtableSyncError(
+            f"La tabla debe tener al menos {len(targets)} columnas para aplicar el formato de cuentas."
+        )
+    first_fields = fields[: len(targets)]
+    for field_item in first_fields:
+        if not isinstance(field_item, dict) or not field_item.get("id"):
+            raise AirtableSyncError("Airtable devolvió una columna inválida.")
+
+    # Airtable exige nombres únicos durante cada PATCH. Si una columna fuera
+    # de las primeras nueve ya usa uno de los nombres destino, la apartamos
+    # temporalmente para que el renombrado posicional no falle.
+    desired_ids = {str(field_item["id"]): index for index, field_item in enumerate(first_fields)}
+    used_names = {
+        str(field_item.get("name"))
+        for field_item in fields
+        if isinstance(field_item, dict) and isinstance(field_item.get("name"), str)
+    }
+    backups: list[tuple[str, str]] = []
+    for index, field_item in enumerate(fields):
+        if not isinstance(field_item, dict):
+            continue
+        current_name = field_item.get("name")
+        field_id = str(field_item.get("id") or "")
+        if current_name not in targets or desired_ids.get(field_id) == targets.index(current_name):
+            continue
+        backup_name = f"__backup__{current_name}"
+        suffix = 2
+        while backup_name in used_names:
+            backup_name = f"__backup__{current_name}_{suffix}"
+            suffix += 1
+        backups.append((field_id, backup_name))
+        used_names.add(backup_name)
+
+    source_renames = tuple(
+        (str(field_item["id"]), target)
+        for field_item, target in zip(first_fields, targets)
+        if field_item.get("name") != target
+    )
+    return AirtableColumnRepairPlan(source_renames, tuple(backups))
+
+
 def build_legacy_field_migration_plan(records: list[dict[str, Any]]) -> AirtableLegacyMigrationPlan:
     """Copia el formato genérico legado sin borrar ni sobrescribir datos de Airtable."""
     updates: list[dict[str, Any]] = []
@@ -339,73 +387,20 @@ def prepare_airtable_account_table(
     requests_post: Callable[..., Any] = requests.post,
     requests_patch: Callable[..., Any] = requests.patch,
 ) -> AirtableSchemaPreparation:
-    """Prepara una tabla existente, reutilizando Field 1-8 cuando están presentes."""
+    """Renombra por posición las primeras nueve columnas de una tabla existente."""
     table = _configured_table_schema(config, requests_get)
-    field_names = {
-        field.get("name")
-        for field in table.get("fields", [])
-        if isinstance(field, dict)
-    }
-    has_legacy_columns = all(
-        source in field_names for source, _target in LEGACY_COLUMN_RENAMES
-    )
-    if "Username" not in field_names and not has_legacy_columns:
-        raise AirtableSyncError(
-            "La tabla configurada no parece una tabla de cuentas. "
-            "Selecciona la tabla que contiene Username o Field 1–Field 8. "
-            "No se crearon columnas."
+    repair = build_positional_column_repair_plan(table)
+    fields_url = "https://api.airtable.com/v0/meta/bases/{}/tables/{}/fields/{}"
+    for field_id, new_name in [*repair.backup_renames, *repair.source_renames]:
+        url = fields_url.format(
+            quote(config.base_id, safe=""), quote(table["id"], safe=""), quote(field_id, safe="")
         )
-    repair = build_legacy_column_repair_plan(table)
-    if repair.source_renames:
-        fields_url = "https://api.airtable.com/v0/meta/bases/{}/tables/{}/fields/{}"
-        ordered_renames = [*repair.backup_renames, *repair.source_renames]
-        for field_id, new_name in ordered_renames:
-            url = fields_url.format(
-                quote(config.base_id, safe=""), quote(table["id"], safe=""), quote(field_id, safe="")
-            )
-            try:
-                response = requests_patch(
-                    url,
-                    headers={**_airtable_headers(config), "Content-Type": "application/json"},
-                    json={"name": new_name},
-                    timeout=20,
-                )
-                response.raise_for_status()
-            except Exception as exc:
-                raise AirtableSyncError(
-                    f"No se pudo renombrar la columna a '{new_name}'. Airtable rechazó el cambio."
-                ) from exc
-        return AirtableSchemaPreparation(
-            added_fields=(),
-            incompatible_fields=(),
-            source_renames=repair.source_renames,
-            backup_renames=repair.backup_renames,
-        )
-    existing_types = {
-        field.get("name"): field.get("type")
-        for field in table["fields"]
-        if isinstance(field, dict) and isinstance(field.get("name"), str)
-    }
-    fields_url = "https://api.airtable.com/v0/meta/bases/{}/tables/{}/fields".format(
-        quote(config.base_id, safe=""), quote(table["id"], safe="")
-    )
-    added: list[str] = []
-    incompatible: list[tuple[str, str, str]] = []
-    for required in AIRTABLE_ACCOUNT_COLUMNS:
-        existing_type = existing_types.get(required.name)
-        if existing_type is not None:
-            if existing_type != required.field_type:
-                incompatible.append((required.name, str(existing_type), required.field_type))
-            continue
         response = None
         try:
-            payload = {"name": required.name, "type": required.field_type}
-            if required.name in AIRTABLE_FIELD_OPTIONS:
-                payload["options"] = AIRTABLE_FIELD_OPTIONS[required.name]
-            response = requests_post(
-                fields_url,
-                headers=_airtable_headers(config),
-                json=payload,
+            response = requests_patch(
+                url,
+                headers={**_airtable_headers(config), "Content-Type": "application/json"},
+                json={"name": new_name},
                 timeout=20,
             )
             response.raise_for_status()
@@ -415,24 +410,15 @@ def prepare_airtable_account_table(
             error_code = _airtable_error_code(response) if response is not None else ""
             if error_code:
                 diagnostic = f"{diagnostic}: {error_code}"
-            if status_code == 401:
-                message = f"El token de Airtable es inválido o fue revocado ({diagnostic})."
-            elif status_code in (403, 404):
-                message = (
-                    "El token fue aceptado, pero no tiene permiso para editar la estructura de esta base. "
-                    "Confirma acceso a esta base y schema.bases:write. "
-                    f"Airtable rechazó '{required.name}' ({diagnostic})."
-                )
-            else:
-                message = (
-                    "No se pudo crear una columna en Airtable. "
-                    f"Airtable rechazó '{required.name}' ({diagnostic})."
-                )
             raise AirtableSyncError(
-                message
+                f"No se pudo renombrar la columna a '{new_name}'. Airtable rechazó el cambio ({diagnostic})."
             ) from exc
-        added.append(required.name)
-    return AirtableSchemaPreparation(tuple(added), tuple(incompatible))
+    return AirtableSchemaPreparation(
+        added_fields=(),
+        incompatible_fields=(),
+        source_renames=repair.source_renames,
+        backup_renames=repair.backup_renames,
+    )
 
 
 def fetch_airtable_accounts(

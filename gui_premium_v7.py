@@ -797,7 +797,7 @@ def airtable_schema_preparation_text(result) -> str:
     """Resume cambios de esquema sin incluir el token local."""
     if result.source_renames:
         lines = [
-            "Se reutilizaron las primeras columnas Field 1–Field 8 con los nombres correctos.",
+            "Se renombraron las primeras 9 columnas por posición, sin buscar nombres.",
             "Orden: Username, 2FA, VA, Categoria, Trials desbloqueados, Dia, Red social, VPN / Proxy, Link.",
         ]
         if result.backup_renames:
