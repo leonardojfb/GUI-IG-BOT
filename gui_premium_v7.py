@@ -5056,9 +5056,6 @@ class InstagramAutoPro(ctk.CTk):
 # ══════════════════════════════════════════════════════════════════════════════
 # ENTRYPOINT
 # ══════════════════════════════════════════════════════════════════════════════
-if __name__ == "__main__":
-    app = InstagramAutoPro()
-    app.mainloop()
     def _trial_refresh_account_rows(self):
         for widget in self.trial_account_scroll.winfo_children():
             widget.destroy()
@@ -5196,3 +5193,8 @@ if __name__ == "__main__":
     def _acct_missing_individual_captions(self, tanda):
         captions = self.db.get_normal_source_captions(tanda)
         return missing_trial_caption_sources(self._acct_normal_tanda_files(tanda), captions)
+
+
+if __name__ == "__main__":
+    app = InstagramAutoPro()
+    app.mainloop()
