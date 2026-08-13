@@ -33,6 +33,7 @@ $ReleaseFiles = @(
     "organizador_simple.py",
     "Organizador.py",
     "database.py",
+    "airtable_sync.py",
     "organizadortg.py",
     "videos.py",
     "video_editor.py",

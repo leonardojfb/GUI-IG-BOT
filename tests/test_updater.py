@@ -89,6 +89,27 @@ class UpdaterTest(unittest.TestCase):
         }.items():
             self.assertEqual((self.app_dir / name).read_text(), expected)
 
+    def test_apply_package_can_install_airtable_sync_module_without_local_config(self):
+        package_path = self.app_dir / "release.zip"
+        package_path.write_bytes(
+            _zip_bytes(
+                {
+                    "version.json": json.dumps({"version": "1.0.1"}),
+                    "airtable_sync.py": "new airtable sync code",
+                }
+            )
+        )
+
+        version = updater.apply_package(
+            self.app_dir,
+            package_path,
+            {"version": "1.0.1", "files": ["version.json", "airtable_sync.py"]},
+        )
+
+        self.assertEqual(version, "1.0.1")
+        self.assertEqual((self.app_dir / "airtable_sync.py").read_text(), "new airtable sync code")
+        self.assertFalse((self.app_dir / "airtable_config.json").exists())
+
     def test_apply_package_can_install_default_database_template_and_history(self):
         package_path = self.app_dir / "release.zip"
         package_path.write_bytes(
