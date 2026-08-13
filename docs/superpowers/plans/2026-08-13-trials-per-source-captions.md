@@ -321,3 +321,64 @@ git add README.txt tests
 git commit -m "test: verify active trials delivery flow"
 ```
 
+
+### Task 6: Selección individual, pools no reutilizables y miniaturas
+
+**Files:**
+
+- Modify: `trial_content.py: per-account planning and preview-cache helpers`
+- Modify: `gui_premium_v7.py: Logística > Trials controls and run`
+- Create: `tests/test_trial_account_selection.py`
+
+**Interfaces:**
+
+- Produces: `build_trial_account_plan(assignments, files_by_tanda, videos_per_day, days) -> TrialPlan`.
+- Produces: `reused_trial_tanda_warnings(plan) -> list[str]`.
+- Produces: `trial_preview_path(video_path: str) -> str`.
+
+- [ ] **Step 1: Write the failing planner tests**
+
+```python
+def test_duplicate_tanda_uses_each_output_only_once():
+    plan = build_trial_account_plan(
+        {"eve": "T1", "luna": "T1"}, {"T1": ["a.mp4", "b.mp4", "c.mp4"]}, 2, 1
+    )
+    assert plan.assigned["eve"] == ["a.mp4", "b.mp4"]
+    assert plan.assigned["luna"] == ["c.mp4"]
+    assert plan.shortfalls == {"luna": 1}
+    assert "T1" in reused_trial_tanda_warnings(plan)[0]
+```
+
+- [ ] **Step 2: Verify it fails**
+
+Run: `py -m pytest tests/test_trial_account_selection.py -q`  
+Expected: FAIL because the planner does not exist.
+
+- [ ] **Step 3: Implement one shared pool per tanda**
+
+The planner consumes each tanda's sorted output list once across all accounts
+that selected it. It reports selected accounts, available, requested, assigned
+and shortfall; it never cycles/reuses an output name.
+
+- [ ] **Step 4: Add UI and async thumbnail loading**
+
+Render one row per active account (`@user [category]` plus Trial tanda combo).
+When selection changes, rebuild `(tanda, source)` caption cards. Each card has
+the source name, copy count, a 120x68 first-frame thumbnail and its editor.
+Generate/copy thumbnails in a worker using existing FFmpeg/Pillow support,
+cache them under the local temp directory keyed by absolute source path plus
+mtime, then apply the `CTkImage` on the GUI thread.
+
+Before distribution, show repeated-tanda warnings with selected accounts,
+available/requested/shortfall. Confirmation is allowed; execute the planner's
+assigned unique files only and render every shortfall in the result text.
+
+- [ ] **Step 5: Verify and commit**
+
+Run: `py -m pytest tests/test_trial_account_selection.py tests/test_logistica_trials.py tests/test_trial_content.py -q`  
+Expected: PASS.
+
+```powershell
+git add trial_content.py gui_premium_v7.py tests/test_trial_account_selection.py
+git commit -m "feat: select trial tanda per account"
+```
