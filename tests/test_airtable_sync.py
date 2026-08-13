@@ -14,12 +14,19 @@ from airtable_sync import (
     build_legacy_column_repair_plan,
     build_positional_column_repair_plan,
     build_account_sync_plan,
+    build_airtable_mirror_plan,
+    apply_airtable_mirror_plan,
+    fetch_airtable_records,
     fetch_airtable_accounts,
     load_airtable_config,
     prepare_airtable_account_table,
     save_airtable_config,
 )
-from gui_premium_v7 import airtable_schema_preparation_text, airtable_sync_review_text
+from gui_premium_v7 import (
+    airtable_schema_preparation_text,
+    airtable_sync_review_text,
+    airtable_mirror_review_text,
+)
 
 
 class FakeResponse:
@@ -49,6 +56,19 @@ class AirtableConfigTest(unittest.TestCase):
 
 
 class AirtableFetchTest(unittest.TestCase):
+    def test_fetch_airtable_records_keeps_record_ids_across_pages(self):
+        calls = []
+
+        def fake_get(_url, *, headers, params, timeout):
+            calls.append(params.copy())
+            if params.get("offset"):
+                return FakeResponse({"records": [{"id": "rec2", "fields": {"Username": "two"}}]})
+            return FakeResponse({"records": [{"id": "rec1", "fields": {"Username": "one"}}], "offset": "next"})
+
+        records = fetch_airtable_records(AirtableConfig("pat_secret", "app123", "Cuentas"), fake_get)
+        self.assertEqual([record["id"] for record in records], ["rec1", "rec2"])
+        self.assertEqual(calls[1]["offset"], "next")
+
     def test_fetches_every_page_and_normalizes_username(self):
         calls = []
 
@@ -292,7 +312,92 @@ class AirtableSchemaPreparationTest(unittest.TestCase):
         self.assertNotIn("pat_secret", message)
 
 
+class AirtableMirrorTest(unittest.TestCase):
+    def test_builds_complete_local_mirror_plan(self):
+        local = [
+            {
+                "username": "keep",
+                "two_factor": "new-secret",
+                "assigned_va": "Ana",
+                "account_type": "MAIN",
+                "trials_active": True,
+                "account_day": "Dia 2",
+                "social_network": "IG",
+                "vpn_proxy": "proxy",
+                "account_link": "https://example.com/keep",
+            },
+            {
+                "username": "new",
+                "account_type": "TRIALS",
+            },
+        ]
+        remote = [
+            {"id": "recKeep", "fields": {"Username": "keep", "2FA": "old", "Categoria": "MAIN"}},
+            {"id": "recGone", "fields": {"Username": "gone", "Categoria": "SPAM"}},
+        ]
+
+        plan = build_airtable_mirror_plan(local, remote)
+
+        self.assertEqual([row["Username"] for row in plan.create], ["new"])
+        self.assertEqual(plan.update[0]["record_id"], "recKeep")
+        self.assertEqual(plan.update[0]["fields"]["2FA"], "new-secret")
+        self.assertEqual(plan.delete, [{"record_id": "recGone", "username": "gone"}])
+
+    def test_applies_create_update_and_delete_without_extra_fields(self):
+        calls = []
+
+        def fake_post(url, *, headers, json, timeout):
+            calls.append(("POST", url, json))
+            return FakeResponse({"records": [{"id": "recNew"}]})
+
+        def fake_patch(url, *, headers, json, timeout):
+            calls.append(("PATCH", url, json))
+            return FakeResponse({"records": [{"id": "recKeep"}]})
+
+        def fake_delete(url, *, headers, timeout):
+            calls.append(("DELETE", url, None))
+            return FakeResponse({}, status_code=200)
+
+        plan = build_airtable_mirror_plan(
+            [{"username": "new", "account_type": "TRIALS"}],
+            [{"id": "recGone", "fields": {"Username": "gone", "Categoria": "SPAM"}}],
+        )
+        counts = apply_airtable_mirror_plan(
+            AirtableConfig("pat_secret", "app123", "Cuentas"),
+            plan,
+            fake_post,
+            fake_patch,
+            fake_delete,
+        )
+
+        self.assertEqual(counts, {"created": 1, "updated": 0, "deleted": 1})
+        self.assertEqual([call[0] for call in calls], ["POST", "DELETE"])
+        self.assertNotIn("pat_secret", repr(calls))
+
+
 class AirtableGuiConnectionTest(unittest.TestCase):
+    def test_mirror_review_mentions_deletions_and_source(self):
+        text = airtable_mirror_review_text(
+            type("Plan", (), {
+                "create": [{"Username": "new"}],
+                "update": [{"username": "keep"}],
+                "delete": [{"username": "gone"}],
+            })()
+        )
+        self.assertIn("GUI → Airtable", text)
+        self.assertIn("1 creadas", text)
+        self.assertIn("1 actualizadas", text)
+        self.assertIn("1 eliminadas", text)
+        self.assertIn("@gone", text)
+
+    def test_gui_exposes_separate_gui_to_airtable_button(self):
+        source = open(
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "gui_premium_v7.py"),
+            encoding="utf-8",
+        ).read()
+        self.assertIn('text="Sincronizar GUI → Airtable"', source)
+        self.assertIn("apply_airtable_mirror_plan", source)
+
     def test_connection_feedback_reports_reused_first_columns(self):
         text = airtable_schema_preparation_text(AirtableSchemaPreparation(
             added_fields=(),

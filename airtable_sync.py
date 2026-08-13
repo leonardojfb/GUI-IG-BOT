@@ -109,6 +109,17 @@ class AccountSyncPlan:
         return bool(self.create or self.update or self.delete_usernames)
 
 
+@dataclass(frozen=True)
+class AirtableMirrorPlan:
+    create: list[dict[str, Any]]
+    update: list[dict[str, Any]]
+    delete: list[dict[str, str]]
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.create or self.update or self.delete)
+
+
 def normalize_username(value: Any) -> str:
     return str(value or "").strip().lstrip("@").strip()
 
@@ -461,6 +472,40 @@ def fetch_airtable_accounts(
             return accounts
 
 
+def fetch_airtable_records(
+    config: AirtableConfig,
+    requests_get: Callable[..., Any] = requests.get,
+) -> list[dict[str, Any]]:
+    """Descarga los registros crudos conservando sus IDs para el espejo remoto."""
+    url = "https://api.airtable.com/v0/{}/{}".format(
+        quote(config.base_id, safe=""), quote(config.table_name, safe="")
+    )
+    headers = _airtable_headers(config)
+    offset: str | None = None
+    records: list[dict[str, Any]] = []
+    while True:
+        params: dict[str, Any] = {"pageSize": 100}
+        if offset:
+            params["offset"] = offset
+        try:
+            response = requests_get(url, headers=headers, params=params, timeout=20)
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            raise AirtableSyncError(
+                "No se pudo descargar Airtable. Verifica conexión, token, Base ID y tabla."
+            ) from exc
+        if not isinstance(payload, dict) or not isinstance(payload.get("records", []), list):
+            raise AirtableSyncError("Airtable devolvió una respuesta inválida.")
+        for record in payload["records"]:
+            if not isinstance(record, dict) or not isinstance(record.get("id"), str):
+                raise AirtableSyncError("Airtable devolvió un registro inválido.")
+            records.append(record)
+        offset = payload.get("offset")
+        if not offset:
+            return records
+
+
 def _coerce_managed_row(row: AirtableAccount | dict[str, Any]) -> dict[str, Any]:
     values = row.as_managed_dict() if isinstance(row, AirtableAccount) else dict(row)
     username = normalize_username(values.get("username"))
@@ -478,6 +523,117 @@ def _coerce_managed_row(row: AirtableAccount | dict[str, Any]) -> dict[str, Any]
         "vpn_proxy": str(values.get("vpn_proxy") or "").strip(),
         "account_link": str(values.get("account_link") or "").strip(),
     }
+
+
+def _airtable_fields_from_managed_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Convierte una cuenta local al formato exacto de las nueve columnas."""
+    return {
+        "Username": row["username"],
+        "2FA": row["two_factor"],
+        "VA": row["assigned_va"],
+        "Categoria": row["account_type"],
+        "Trials desbloqueados": row["trials_active"],
+        "Dia": row["account_day"],
+        "Red social": row["social_network"],
+        "VPN / Proxy": row["vpn_proxy"],
+        "Link": row["account_link"],
+    }
+
+
+def build_airtable_mirror_plan(
+    local_rows: list[dict[str, Any]],
+    remote_records: list[dict[str, Any]],
+) -> AirtableMirrorPlan:
+    """Construye un espejo completo local -> Airtable por Username."""
+    local_by_key: dict[str, dict[str, Any]] = {}
+    for raw_row in local_rows:
+        row = _coerce_managed_row(raw_row)
+        key = row["username"].casefold()
+        if key in local_by_key:
+            raise AirtableSyncError(f"Username duplicado en la GUI: @{row['username']}.")
+        local_by_key[key] = row
+
+    remote_by_key: dict[str, tuple[str, dict[str, Any]]] = {}
+    for record in remote_records:
+        if not isinstance(record, dict) or not isinstance(record.get("id"), str):
+            raise AirtableSyncError("Airtable devolvió un registro inválido.")
+        account = _account_from_record(record)
+        row = account.as_managed_dict()
+        key = row["username"].casefold()
+        if key in remote_by_key:
+            raise AirtableSyncError(f"Username duplicado en Airtable: @{row['username']}.")
+        remote_by_key[key] = (record["id"], row)
+
+    create = [
+        _airtable_fields_from_managed_row(row)
+        for key, row in local_by_key.items()
+        if key not in remote_by_key
+    ]
+    update: list[dict[str, Any]] = []
+    for key, row in local_by_key.items():
+        remote = remote_by_key.get(key)
+        if remote is None:
+            continue
+        record_id, remote_row = remote
+        if any(row[name] != remote_row[name] for name in MANAGED_FIELDS):
+            update.append({
+                "record_id": record_id,
+                "username": row["username"],
+                "fields": _airtable_fields_from_managed_row(row),
+            })
+    delete = [
+        {"record_id": record_id, "username": row["username"]}
+        for key, (record_id, row) in remote_by_key.items()
+        if key not in local_by_key
+    ]
+    return AirtableMirrorPlan(create=create, update=update, delete=delete)
+
+
+def apply_airtable_mirror_plan(
+    config: AirtableConfig,
+    plan: AirtableMirrorPlan,
+    requests_post: Callable[..., Any] = requests.post,
+    requests_patch: Callable[..., Any] = requests.patch,
+    requests_delete: Callable[..., Any] = requests.delete,
+) -> dict[str, int]:
+    """Aplica el espejo remoto en lotes de Airtable, incluyendo eliminaciones."""
+    base_url = "https://api.airtable.com/v0/{}/{}".format(
+        quote(config.base_id, safe=""), quote(config.table_name, safe="")
+    )
+    headers = {**_airtable_headers(config), "Content-Type": "application/json"}
+
+    def request(method: str, response: Any, label: str) -> None:
+        try:
+            response.raise_for_status()
+        except Exception as exc:
+            raise AirtableSyncError(f"Airtable rechazó la sincronización ({method}: {label}).") from exc
+
+    for start in range(0, len(plan.create), 10):
+        batch = plan.create[start:start + 10]
+        response = requests_post(
+            base_url,
+            headers=headers,
+            json={"records": [{"fields": fields} for fields in batch]},
+            timeout=20,
+        )
+        request("POST", response, "crear cuentas")
+
+    for start in range(0, len(plan.update), 10):
+        batch = plan.update[start:start + 10]
+        response = requests_patch(
+            base_url,
+            headers=headers,
+            json={"records": [{"id": item["record_id"], "fields": item["fields"]} for item in batch]},
+            timeout=20,
+        )
+        request("PATCH", response, "actualizar cuentas")
+
+    for item in plan.delete:
+        record_url = f"{base_url}/{quote(item['record_id'], safe='')}"
+        response = requests_delete(record_url, headers=_airtable_headers(config), timeout=20)
+        request("DELETE", response, f"eliminar @{item['username']}")
+
+    return {"created": len(plan.create), "updated": len(plan.update), "deleted": len(plan.delete)}
 
 
 def build_account_sync_plan(

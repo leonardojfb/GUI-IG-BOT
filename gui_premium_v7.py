@@ -25,8 +25,11 @@ from database import DatabaseManager
 from airtable_sync import (
     AirtableConfig,
     AirtableSyncError,
+    apply_airtable_mirror_plan,
     build_account_sync_plan,
+    build_airtable_mirror_plan,
     fetch_airtable_accounts,
+    fetch_airtable_records,
     load_airtable_config,
     prepare_airtable_account_table,
     save_airtable_config,
@@ -790,6 +793,29 @@ def airtable_sync_review_text(plan) -> str:
         lines.append(
             "Las eliminadas salen solo de la tabla local; no se borran videos, calendarios ni historial."
         )
+    return "\n".join(lines)
+
+
+def airtable_mirror_review_text(plan) -> str:
+    """Resume el espejo GUI -> Airtable antes de aplicar cambios destructivos."""
+    lines = [
+        "Cambios detectados: GUI → Airtable",
+        f"• {len(plan.create)} creadas",
+        f"• {len(plan.update)} actualizadas",
+        f"• {len(plan.delete)} eliminadas",
+        "La GUI será la fuente de verdad para las 9 columnas administradas.",
+    ]
+    for title, usernames in (
+        ("Crear", [row["Username"] for row in plan.create]),
+        ("Actualizar", [row["username"] for row in plan.update]),
+        ("Eliminar", [row["username"] for row in plan.delete]),
+    ):
+        if usernames:
+            preview = ", ".join(f"@{name}" for name in usernames[:10])
+            extra = f" y {len(usernames) - 10} más" if len(usernames) > 10 else ""
+            lines.append(f"{title}: {preview}{extra}")
+    if plan.delete:
+        lines.append("Las eliminaciones en Airtable no se pueden deshacer desde la GUI.")
     return "\n".join(lines)
 
 
@@ -3908,8 +3934,13 @@ class InstagramAutoPro(ctk.CTk):
             command=self.sync_airtable_accounts,
         )
         self.btn_airtable_sync.grid(row=0, column=2, padx=(0, 8), sticky="e")
+        self.btn_airtable_mirror = GhostButton(
+            accounts_header, text="Sincronizar GUI → Airtable", width=205,
+            command=self.sync_gui_to_airtable,
+        )
+        self.btn_airtable_mirror.grid(row=0, column=3, padx=(0, 8), sticky="e")
         GhostButton(accounts_header, text="Actualizar", width=110,
-                    command=self._admin_load_accounts).grid(row=0, column=3, sticky="e")
+                    command=self._admin_load_accounts).grid(row=0, column=4, sticky="e")
 
         columns = ctk.CTkFrame(accounts_body, fg_color=BG_CARD2, corner_radius=BTN_RADIUS)
         columns.grid(row=1, column=0, sticky="ew", pady=(0, 6))
@@ -4020,6 +4051,55 @@ class InstagramAutoPro(ctk.CTk):
                 f"{counts['deleted']} eliminadas.",
                 parent=self,
             )
+
+        WorkerThread(self, done, task).start()
+
+    def sync_gui_to_airtable(self):
+        """Previsualiza y aplica un espejo completo de las cuentas locales a Airtable."""
+        self.btn_airtable_mirror.configure(state="disabled", text="Comparando...")
+
+        def task():
+            config = load_airtable_config()
+            records = fetch_airtable_records(config)
+            plan = build_airtable_mirror_plan(self.db.get_all_accounts(), records)
+            return config, plan
+
+        def done(success, result):
+            if not success:
+                self.btn_airtable_mirror.configure(state="normal", text="Sincronizar GUI → Airtable")
+                messagebox.showerror("Airtable", result, parent=self)
+                return
+            config, plan = result
+            if not plan.changed:
+                self.btn_airtable_mirror.configure(state="normal", text="Sincronizar GUI → Airtable")
+                messagebox.showinfo("Airtable", "Airtable ya coincide con la GUI.", parent=self)
+                return
+            if not messagebox.askyesno(
+                "Confirmar espejo GUI → Airtable",
+                airtable_mirror_review_text(plan),
+                parent=self,
+            ):
+                self.btn_airtable_mirror.configure(state="normal", text="Sincronizar GUI → Airtable")
+                return
+            self.btn_airtable_mirror.configure(text="Aplicando...")
+
+            def apply_task():
+                return apply_airtable_mirror_plan(config, plan)
+
+            def apply_done(applied, counts):
+                self.btn_airtable_mirror.configure(state="normal", text="Sincronizar GUI → Airtable")
+                if not applied:
+                    messagebox.showerror("Airtable", counts, parent=self)
+                    return
+                messagebox.showinfo(
+                    "Airtable",
+                    "Espejo completado: "
+                    f"{counts['created']} creadas, {counts['updated']} actualizadas, "
+                    f"{counts['deleted']} eliminadas.",
+                    parent=self,
+                )
+
+            WorkerThread(self, apply_done, apply_task).start()
 
         WorkerThread(self, done, task).start()
 
