@@ -20,6 +20,7 @@ import shutil
 import requests
 
 from database import DatabaseManager
+from trial_content import group_trial_sources
 from updater import APP_DIR as UPDATE_APP_DIR, check_and_apply, load_config, read_local_version
 from console_encoding import ensure_stdout_utf8
 
@@ -4250,12 +4251,22 @@ class InstagramAutoPro(ctk.CTk):
         # "Días a distribuir" is read via self.e_forge_days.get().strip()
         # or "MAX" in forge_process — a Stepper.get() returns an int, which
         # has no .strip(), so this field MUST stay a CTkEntry.
+        self.forge_trial_mode_var = tk.StringVar(value="Normal")
+        ctk.CTkLabel(card_cfg, text="Tipo de tanda:", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11), anchor="e"
+                     ).grid(row=1, column=0, padx=(18, 8), pady=7, sticky="e")
+        self.forge_trial_mode = SegmentedControl(
+            card_cfg, values=["Normal", "Trials"], default="Normal",
+            command=self.forge_trial_mode_var.set,
+        )
+        self.forge_trial_mode.grid(row=1, column=1, padx=(0, 18), pady=7, sticky="ew")
+
         cfg_rows = [
             ("Nombre de tanda:",   "e_forge_tanda",   None,    None),
             ("Copias por vídeo:",   "e_forge_copies",  None,    "stepper"),
             ("Días a distribuir:", "e_forge_days",     "MAX",   None),
         ]
-        for row_i, (lbl, attr, default, kind) in enumerate(cfg_rows, start=1):
+        for row_i, (lbl, attr, default, kind) in enumerate(cfg_rows, start=2):
             ctk.CTkLabel(card_cfg, text=lbl, text_color=TEXT_MUTED,
                          font=ctk.CTkFont(size=11), anchor="e"
                          ).grid(row=row_i, column=0, padx=(18, 8), pady=7, sticky="e")
@@ -4516,6 +4527,7 @@ class InstagramAutoPro(ctk.CTk):
             return messagebox.showwarning("⚠️", "Copias por vídeo debe ser un número >= 1.")
 
         n_total = len(self.forge_video_paths) * copies
+        is_trial_tanda = self.forge_trial_mode_var.get() == "Trials"
 
         # Leer checkboxes de micro-ediciones en el hilo principal (tk vars no
         # son seguras desde el worker).
@@ -4536,7 +4548,7 @@ class InstagramAutoPro(ctk.CTk):
 
         if not messagebox.askyesno("Confirmar Forge", (
             f"¿Generar {len(self.forge_video_paths)} vídeos × {copies} copias = {n_total} archivos con metadata iPhone única?\n\n"
-            f"Tanda: {tanda_name}\n"
+            f"Tanda: {tanda_name}{' (TRIALS)' if is_trial_tanda else ''}\n"
             f"Micro-ediciones: {fx_desc}"
         )):
             return
@@ -4586,6 +4598,7 @@ class InstagramAutoPro(ctk.CTk):
             db_ref.add_tanda(
                 tanda_name, tanda_name, tanda_name, existing_tanda.get("captions_file_path")
             )
+            db_ref.set_tanda_trial(tanda_name, is_trial_tanda)
 
             msg = (
                 f"✅ {n_total} archivos generados ({len(videos)} vídeos × {copies} copias).\n"

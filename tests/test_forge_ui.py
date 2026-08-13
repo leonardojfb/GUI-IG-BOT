@@ -1,3 +1,11 @@
+def test_forge_exposes_an_explicit_trials_mode_without_distribution():
+    forge = _forge_source()
+
+    assert 'values=["Normal", "Trials"]' in forge
+    assert "forge_trial_mode_var" in forge
+    assert "set_tanda_trial" in forge
+
+
 from pathlib import Path
 
 
