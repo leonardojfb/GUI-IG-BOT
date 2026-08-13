@@ -20,7 +20,10 @@ import shutil
 import requests
 
 from database import DatabaseManager
-from trial_content import group_trial_sources
+from trial_content import (
+    group_trial_sources, missing_trial_caption_sources,
+    selected_trial_usernames, trial_calendar_root,
+)
 from updater import APP_DIR as UPDATE_APP_DIR, check_and_apply, load_config, read_local_version
 from console_encoding import ensure_stdout_utf8
 
@@ -1810,6 +1813,11 @@ class InstagramAutoPro(ctk.CTk):
             )
             c_va.set(assigned if assigned in vas_list else vas_list[0])
             c_va.grid(row=0, column=5, padx=(2, 4), pady=6)
+            trials_var = tk.BooleanVar(value=bool(acc.get("trials_active")))
+            ctk.CTkSwitch(
+                r, text="TRIALS ACTIVOS", variable=trials_var, width=118,
+                command=lambda u=username, v=trials_var: self._set_account_trials_active(u, v.get()),
+            ).grid(row=0, column=6, padx=(2, 4), pady=6)
             notes_var = tk.StringVar(value=acc.get("notes") or "")
             notes = ctk.CTkEntry(
                 r, textvariable=notes_var, width=150, height=30,
@@ -1817,15 +1825,15 @@ class InstagramAutoPro(ctk.CTk):
             )
             notes.bind("<FocusOut>", lambda _e, u=username, v=notes_var: self._set_account_notes(u, v.get()))
             notes.bind("<Return>", lambda _e, u=username, v=notes_var: self._set_account_notes(u, v.get()))
-            notes.grid(row=0, column=6, padx=(2, 4), pady=6)
+            notes.grid(row=0, column=7, padx=(2, 4), pady=6)
             limitations = self._parse_account_limitations(acc.get("limitations"))
             GhostButton(
                 r, text=f"Checks ({len(limitations)})", width=108, height=30,
                 command=lambda u=username, values=limitations: self._edit_account_limitations(u, values),
-            ).grid(row=0, column=7, padx=(2, 4), pady=6)
+            ).grid(row=0, column=8, padx=(2, 4), pady=6)
             DangerButton(r, text="×", width=28, height=30,
                           command=lambda u=username: self._admin_delete_account(u)
-                          ).grid(row=0, column=8, padx=(2, 8), pady=6)
+                          ).grid(row=0, column=9, padx=(2, 8), pady=6)
 
     def _set_account_label(self, username: str, value: str):
         self.db.update_account(username, ig_label=value)
@@ -1834,6 +1842,11 @@ class InstagramAutoPro(ctk.CTk):
     def _set_account_category(self, username: str, value: str):
         self.db.update_account(username, account_type=value)
         self.refresh_dashboard()
+
+    def _set_account_trials_active(self, username: str, active: bool):
+        self.db.set_account_trials_active(username, active)
+        if hasattr(self, "reload_dist_lists"):
+            self.reload_dist_lists()
 
     def _set_account_va(self, username: str, value: str):
         self.db.update_account(username, assigned_va=value)
@@ -2283,9 +2296,11 @@ class InstagramAutoPro(ctk.CTk):
 
         t1 = tabs.add("🚀  Por Tandas")
         t2 = tabs.add("📤  Por Cuentas")
+        t3 = tabs.add("TRIALS")
 
         self._build_dist_tandas_tab(t1)
         self._build_dist_cuentas_tab(t2)
+        self._build_dist_trials_tab(t3)
 
         # Cargar datos iniciales
         self.reload_dist_lists()
@@ -2378,6 +2393,145 @@ class InstagramAutoPro(ctk.CTk):
         label.pack(side="left", padx=10)
         setattr(self, label_attr, label)
         self._refresh_logistica_caption_label(selector_attr, label_attr)
+
+    def _build_dist_trials_tab(self, parent):
+        """Trial distribution keeps captions and calendars separate from normal work."""
+        parent.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(parent, text="Tanda Trial:", text_color=TEXT_MUTED).grid(
+            row=0, column=0, padx=16, pady=(16, 8), sticky="e"
+        )
+        self.trial_dist_tanda = ctk.CTkComboBox(
+            parent, values=[], fg_color=BG_INPUT, border_color=BORDER,
+            command=self._trial_refresh_sources,
+        )
+        self.trial_dist_tanda.grid(row=0, column=1, padx=(0, 16), pady=(16, 8), sticky="ew")
+
+        cfg = ctk.CTkFrame(parent, fg_color="transparent")
+        cfg.grid(row=1, column=0, columnspan=2, sticky="ew", padx=16, pady=(0, 8))
+        ctk.CTkLabel(cfg, text="Videos/dia por cuenta:", text_color=TEXT_MUTED).pack(side="left")
+        self.trial_dist_vpd = Stepper(cfg, value=1, min=1, max=50)
+        self.trial_dist_vpd.pack(side="left", padx=(8, 20))
+        ctk.CTkLabel(cfg, text="Dias:", text_color=TEXT_MUTED).pack(side="left")
+        self.trial_dist_days = ctk.CTkEntry(cfg, width=70, fg_color=BG_INPUT, border_color=BORDER)
+        self.trial_dist_days.insert(0, "MAX")
+        self.trial_dist_days.pack(side="left", padx=8)
+        self.trial_accounts_lbl = ctk.CTkLabel(cfg, text="0 cuentas con TRIALS ACTIVOS", text_color=TEXT_MUTED)
+        self.trial_accounts_lbl.pack(side="right")
+
+        self.trial_caption_scroll = ctk.CTkScrollableFrame(parent, fg_color=BG_CARD2)
+        self.trial_caption_scroll.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=16, pady=8)
+        parent.grid_rowconfigure(2, weight=1)
+        self.trial_caption_editors = {}
+
+        buttons = ctk.CTkFrame(parent, fg_color="transparent")
+        buttons.grid(row=3, column=0, columnspan=2, pady=(4, 12))
+        GhostButton(buttons, text="Guardar captions Trial", command=self._save_trial_captions).pack(side="left", padx=6)
+        GhostButton(buttons, text="VISTA PREVIA", command=lambda: self._trial_dist_run(True)).pack(side="left", padx=6)
+        PrimaryButton(buttons, text="DISTRIBUIR TRIALS", command=lambda: self._trial_dist_run(False)).pack(side="left", padx=6)
+        self.trial_dist_result = ctk.CTkTextbox(parent, height=100, fg_color=BG_INPUT, text_color=NEON_CYAN)
+        self.trial_dist_result.grid(row=4, column=0, columnspan=2, sticky="ew", padx=16, pady=(0, 16))
+
+    def _trial_tanda_files(self, tanda_name=None):
+        tanda_name = tanda_name or getattr(self, "trial_dist_tanda", None).get()
+        folder = os.path.join(_BASE_DIR, "videos_finales", tanda_name)
+        if not os.path.isdir(folder):
+            return []
+        return sorted(name for name in os.listdir(folder) if name.lower().endswith((".mp4", ".mov", ".avi")))
+
+    def _trial_refresh_sources(self, _value=None):
+        tanda = self.trial_dist_tanda.get().strip()
+        for widget in self.trial_caption_scroll.winfo_children():
+            widget.destroy()
+        self.trial_caption_editors = {}
+        captions = self.db.get_trial_source_captions(tanda) if tanda else {}
+        for source_key, copies in group_trial_sources(self._trial_tanda_files(tanda)):
+            row = ctk.CTkFrame(self.trial_caption_scroll, fg_color=BG_CARD)
+            row.pack(fill="x", padx=4, pady=4)
+            ctk.CTkLabel(row, text=f"{source_key} ({len(copies)} copias)", text_color=TEXT_BODY).pack(
+                anchor="w", padx=8, pady=(6, 2)
+            )
+            editor = ctk.CTkTextbox(row, height=72, fg_color=BG_INPUT, border_color=BORDER, border_width=1)
+            editor.pack(fill="x", padx=8, pady=(0, 8))
+            editor.insert("1.0", captions.get(source_key, ""))
+            self.trial_caption_editors[source_key] = editor
+
+    def _save_trial_captions(self):
+        tanda = self.trial_dist_tanda.get().strip()
+        if not tanda:
+            return messagebox.showwarning("Trials", "Selecciona una tanda Trial.")
+        for source_key, editor in self.trial_caption_editors.items():
+            self.db.set_trial_source_caption(tanda, source_key, editor.get("1.0", "end-1c").strip())
+        messagebox.showinfo("Trials", "Captions Trial guardados.")
+
+    def _trial_missing_caption_sources(self, tanda_name):
+        return missing_trial_caption_sources(
+            self._trial_tanda_files(tanda_name),
+            self.db.get_trial_source_captions(tanda_name),
+        )
+
+    def _trial_calendar_root(self):
+        return str(trial_calendar_root(_BASE_DIR))
+
+    def _trial_dist_run(self, preview_only):
+        tanda = self.trial_dist_tanda.get().strip()
+        if not tanda:
+            return messagebox.showwarning("Trials", "Selecciona una tanda Trial.")
+        self._save_trial_captions()
+        missing = self._trial_missing_caption_sources(tanda)
+        if missing:
+            return messagebox.showwarning(
+                "Captions Trial faltantes",
+                "Falta asignar caption a: " + ", ".join(missing),
+            )
+        accounts = selected_trial_usernames(self.db.get_trials_active_accounts())
+        if not accounts:
+            return messagebox.showwarning("Trials", "No hay cuentas con TRIALS ACTIVOS.")
+        try:
+            per_day = int(self.trial_dist_vpd.get())
+            days_text = self.trial_dist_days.get().strip().upper()
+            files = self._trial_tanda_files(tanda)
+            days = max(1, (len(files) + len(accounts) * per_day - 1) // (len(accounts) * per_day)) if days_text == "MAX" else int(days_text)
+            if per_day < 1 or days < 1:
+                raise ValueError
+        except ValueError:
+            return messagebox.showwarning("Trials", "Videos por dia y dias deben ser positivos o MAX.")
+        needed = len(accounts) * per_day * days
+        if len(files) < needed:
+            return messagebox.showwarning("Trials", f"Faltan videos: se necesitan {needed} y hay {len(files)}.")
+        planned = []
+        index = 0
+        for day in range(1, days + 1):
+            for username in accounts:
+                for slot in range(1, per_day + 1):
+                    planned.append((day, username, slot, files[index]))
+                    index += 1
+        result = "\n".join(f"Dia {day} @{user}: {name}" for day, user, _slot, name in planned)
+        if preview_only:
+            self.trial_dist_result.delete("1.0", "end")
+            self.trial_dist_result.insert("1.0", result)
+            return
+        if not messagebox.askyesno("Distribuir Trials", f"Crear {len(planned)} videos Trial en calendario separado?"):
+            return
+        account_ids = {row["username"]: row["id"] for row in self.db.get_trials_active_accounts()}
+        folder = os.path.join(_BASE_DIR, "videos_finales", tanda)
+        root = self._trial_calendar_root()
+
+        def task():
+            from Organizador import build_calendar_video_filename
+            for day, username, slot, name in planned:
+                source = os.path.join(folder, name)
+                target_dir = os.path.join(root, f"Dia_{day}", username)
+                target_name = build_calendar_video_filename(name, tanda, account_ids[username], day, slot)
+                _copy_calendar_file(source, os.path.join(target_dir, target_name))
+            return f"OK: {len(planned)} videos Trial en {root}"
+
+        def done(success, result_text):
+            self.trial_dist_result.delete("1.0", "end")
+            self.trial_dist_result.insert("1.0", result_text)
+            if not success:
+                messagebox.showerror("Trials", result_text)
+
+        WorkerThread(self, done, task).start()
 
     def _build_dist_cuentas_tab(self, parent):
         """Tab: bloques secuenciales — cada cuenta recibe un bloque distinto del pool."""
@@ -2524,20 +2678,30 @@ class InstagramAutoPro(ctk.CTk):
             # huérfanas (carpeta renombrada/borrada). Ver DatabaseManager.list_and_sync_tandas.
             vf_root = os.path.join(_BASE_DIR, "videos_finales")
             tandas = self.db.list_and_sync_tandas(vf_root)
+            trial_tandas = self.db.get_trial_tandas()
+            normal_tandas = [name for name in tandas if name not in set(trial_tandas)]
 
             if hasattr(self, "c_tandas"):
-                self.c_tandas.configure(values=tandas)
-                if not self.c_tandas.get() and tandas: self.c_tandas.set(tandas[0])
+                self.c_tandas.configure(values=normal_tandas)
+                if not self.c_tandas.get() and normal_tandas: self.c_tandas.set(normal_tandas[0])
                 self._refresh_tanda_caption_label()
 
             if hasattr(self, "c_tandas_2"):
-                self.c_tandas_2.configure(values=[""] + tandas)
+                self.c_tandas_2.configure(values=[""] + normal_tandas)
 
             if hasattr(self, "acct_dist_tanda"):
-                self.acct_dist_tanda.configure(values=tandas)
-                if not self.acct_dist_tanda.get() and tandas:
-                    self.acct_dist_tanda.set(tandas[0])
+                self.acct_dist_tanda.configure(values=normal_tandas)
+                if not self.acct_dist_tanda.get() and normal_tandas:
+                    self.acct_dist_tanda.set(normal_tandas[0])
                 self._refresh_tanda_caption_label()
+
+            if hasattr(self, "trial_dist_tanda"):
+                self.trial_dist_tanda.configure(values=trial_tandas)
+                if not self.trial_dist_tanda.get() and trial_tandas:
+                    self.trial_dist_tanda.set(trial_tandas[0])
+                active_trials = len(self.db.get_trials_active_accounts())
+                self.trial_accounts_lbl.configure(text=f"{active_trials} cuentas con TRIALS ACTIVOS")
+                self._trial_refresh_sources()
 
             cats = self.db.get_categories()
             if hasattr(self, "c_dest"):
