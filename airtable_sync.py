@@ -222,6 +222,7 @@ def prepare_airtable_account_table(
             if existing_type != required.field_type:
                 incompatible.append((required.name, str(existing_type), required.field_type))
             continue
+        response = None
         try:
             response = requests_post(
                 fields_url,
@@ -231,8 +232,21 @@ def prepare_airtable_account_table(
             )
             response.raise_for_status()
         except Exception as exc:
+            status_code = getattr(response, "status_code", None)
+            if status_code == 401:
+                message = "El token de Airtable es inválido o fue revocado."
+            elif status_code in (403, 404):
+                message = (
+                    "El token fue aceptado, pero no tiene permiso para editar la estructura de esta base. "
+                    "Confirma acceso a esta base y schema.bases:write."
+                )
+            else:
+                message = (
+                    "No se pudo crear una columna en Airtable. "
+                    "Verifica que el token tenga schema.bases:write."
+                )
             raise AirtableSyncError(
-                "No se pudo crear una columna en Airtable. Verifica que el token tenga schema.bases:write."
+                message
             ) from exc
         added.append(required.name)
     return AirtableSchemaPreparation(tuple(added), tuple(incompatible))

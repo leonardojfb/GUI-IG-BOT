@@ -145,6 +145,25 @@ class AirtableSchemaPreparationTest(unittest.TestCase):
                 fake_post,
             )
 
+    def test_reports_schema_write_permission_without_exposing_the_token(self):
+        def fake_get(_url, *, headers, timeout):
+            return FakeResponse({"tables": [{
+                "id": "tblAccounts",
+                "name": "Cuentas",
+                "fields": [],
+            }]})
+
+        def fake_post(_url, *, headers, json, timeout):
+            return FakeResponse({
+                "error": {"type": "INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND"}
+            }, status_code=403)
+
+        with self.assertRaisesRegex(AirtableSyncError, "permiso.*schema.bases:write") as exc:
+            prepare_airtable_account_table(
+                AirtableConfig("pat_secret", "app123", "Cuentas"), fake_get, fake_post
+            )
+        self.assertNotIn("pat_secret", str(exc.exception))
+
 
 class AirtableGuiConnectionTest(unittest.TestCase):
     def test_connection_feedback_reports_added_and_untouched_fields(self):
