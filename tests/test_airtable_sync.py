@@ -12,6 +12,7 @@ from airtable_sync import (
     AirtableSyncError,
     build_legacy_field_migration_plan,
     build_legacy_column_repair_plan,
+    build_positional_column_repair_plan,
     build_account_sync_plan,
     fetch_airtable_accounts,
     load_airtable_config,
@@ -95,6 +96,32 @@ class AirtableFetchTest(unittest.TestCase):
 
 
 class AirtableSchemaPreparationTest(unittest.TestCase):
+    def test_repairs_first_nine_columns_by_position_without_name_detection(self):
+        table = {
+            "id": "tblAccounts",
+            "name": "Cuentas",
+            "fields": [
+                {"id": f"fld{i}", "name": name, "type": "singleLineText"}
+                for i, name in enumerate(
+                    ("Name", "Field 1", "Field 2", "Field 3", "Field 4", "Field 5", "Field 6", "Field 7", "Field 8"),
+                    start=1,
+                )
+            ] + [
+                {"id": "fldDuplicate", "name": "Categoria", "type": "singleLineText"},
+            ],
+        }
+
+        plan = build_positional_column_repair_plan(table)
+
+        self.assertEqual(
+            plan.source_renames,
+            tuple((f"fld{i}", target) for i, target in enumerate(
+                ("Username", "2FA", "VA", "Categoria", "Trials desbloqueados", "Dia", "Red social", "VPN / Proxy", "Link"),
+                start=1,
+            )),
+        )
+        self.assertEqual(plan.backup_renames, (("fldDuplicate", "__backup__Categoria"),))
+
     def test_repairs_first_columns_and_moves_existing_duplicates_to_backup_names(self):
         schema = {
             "id": "tblAccounts",
@@ -161,8 +188,9 @@ class AirtableSchemaPreparationTest(unittest.TestCase):
         self.assertEqual(calls[1][1], {"name": "2FA"})
         self.assertEqual(calls[-1][1], {"name": "Link"})
 
-    def test_adds_only_missing_required_fields_to_existing_table(self):
+    def test_renames_first_nine_columns_without_creating_fields(self):
         calls = []
+        post_calls = []
 
         def fake_get(url, *, headers, timeout):
             self.assertEqual(url, "https://api.airtable.com/v0/meta/bases/app123/tables")
@@ -170,39 +198,36 @@ class AirtableSchemaPreparationTest(unittest.TestCase):
             return FakeResponse({"tables": [{
                 "id": "tblAccounts",
                 "name": "Cuentas",
-                "fields": [{"id": "fldUsername", "name": "Username", "type": "singleLineText"}],
+                "fields": [
+                    {"id": f"fld{i}", "name": f"Whatever {i}", "type": "singleLineText"}
+                    for i in range(1, 10)
+                ],
             }]})
 
         def fake_post(url, *, headers, json, timeout):
+            post_calls.append((url, headers, json, timeout))
+            return FakeResponse({"id": "unexpected"})
+
+        def fake_patch(url, *, headers, json, timeout):
             calls.append((url, headers, json, timeout))
-            return FakeResponse({"id": f"fld{len(calls)}"})
+            return FakeResponse({"id": "updated"})
 
         result = prepare_airtable_account_table(
-            AirtableConfig("pat_secret", "app123", "Cuentas"), fake_get, fake_post
+            AirtableConfig("pat_secret", "app123", "Cuentas"), fake_get, fake_post, fake_patch
         )
 
         self.assertEqual(
             result.added_fields,
-            ("2FA", "VA", "Categoria", "Trials desbloqueados", "Dia", "Red social", "VPN / Proxy", "Link"),
+            (),
         )
         self.assertEqual(result.incompatible_fields, ())
         self.assertEqual([call[2] for call in calls], [
-            {"name": "2FA", "type": "multilineText"},
-            {"name": "VA", "type": "singleLineText"},
-            {"name": "Categoria", "type": "singleLineText"},
-            {
-                "name": "Trials desbloqueados",
-                "type": "checkbox",
-                "options": {"icon": "check", "color": "greenBright"},
-            },
-            {"name": "Dia", "type": "singleLineText"},
-            {"name": "Red social", "type": "singleLineText"},
-            {"name": "VPN / Proxy", "type": "multilineText"},
-            {"name": "Link", "type": "url"},
+            {"name": name}
+            for name in ("Username", "2FA", "VA", "Categoria", "Trials desbloqueados", "Dia", "Red social", "VPN / Proxy", "Link")
         ])
-        self.assertTrue(all(call[0].endswith("/tblAccounts/fields") for call in calls))
+        self.assertEqual(post_calls, [])
 
-    def test_rejects_unrelated_table_instead_of_appending_account_columns(self):
+    def test_rejects_table_with_fewer_than_nine_columns(self):
         def fake_get(_url, *, headers, timeout):
             return FakeResponse({"tables": [{
                 "id": "tblWrong", "name": "CUENTAS EVE", "fields": [
@@ -211,12 +236,12 @@ class AirtableSchemaPreparationTest(unittest.TestCase):
                 ],
             }]})
 
-        with self.assertRaisesRegex(AirtableSyncError, "no parece una tabla de cuentas"):
+        with self.assertRaisesRegex(AirtableSyncError, "al menos 9 columnas"):
             prepare_airtable_account_table(
                 AirtableConfig("pat_secret", "app123", "CUENTAS EVE"), fake_get
             )
 
-    def test_keeps_incompatible_field_and_requires_existing_table(self):
+    def test_requires_at_least_nine_columns_and_existing_table(self):
         def fake_get(_url, *, headers, timeout):
             return FakeResponse({"tables": [{
                 "id": "tblAccounts",
@@ -227,24 +252,15 @@ class AirtableSchemaPreparationTest(unittest.TestCase):
                 ],
             }]})
 
-        calls = []
-
-        def fake_post(_url, *, headers, json, timeout):
-            calls.append(json)
-            return FakeResponse({"id": f"fld{len(calls)}"})
-
-        result = prepare_airtable_account_table(
-            AirtableConfig("pat_secret", "app123", "Cuentas"), fake_get, fake_post
-        )
-
-        self.assertEqual(result.incompatible_fields, (("Categoria", "singleSelect", "singleLineText"),))
-        self.assertNotIn({"name": "Categoria", "type": "singleLineText"}, calls)
+        with self.assertRaisesRegex(AirtableSyncError, "al menos 9 columnas"):
+            prepare_airtable_account_table(
+                AirtableConfig("pat_secret", "app123", "Cuentas"), fake_get
+            )
 
         with self.assertRaisesRegex(AirtableSyncError, "no existe"):
             prepare_airtable_account_table(
                 AirtableConfig("pat_secret", "app123", "Ausente"),
                 lambda _url, **_kwargs: FakeResponse({"tables": []}),
-                fake_post,
             )
 
     def test_reports_schema_write_permission_without_exposing_the_token(self):
@@ -252,22 +268,27 @@ class AirtableSchemaPreparationTest(unittest.TestCase):
             return FakeResponse({"tables": [{
                 "id": "tblAccounts",
                 "name": "Cuentas",
-                "fields": [{"id": "fldUsername", "name": "Username", "type": "singleLineText"}],
+                "fields": [
+                    {"id": f"fld{i}", "name": f"Whatever {i}", "type": "singleLineText"}
+                    for i in range(1, 10)
+                ],
             }]})
 
-        def fake_post(_url, *, headers, json, timeout):
+        def fake_patch(_url, *, headers, json, timeout):
             return FakeResponse({
                 "error": {"type": "INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND"}
             }, status_code=403)
 
-        with self.assertRaisesRegex(AirtableSyncError, "permiso.*schema.bases:write") as exc:
+        with self.assertRaisesRegex(AirtableSyncError, "HTTP 403") as exc:
             prepare_airtable_account_table(
-                AirtableConfig("pat_secret", "app123", "Cuentas"), fake_get, fake_post
+                AirtableConfig("pat_secret", "app123", "Cuentas"),
+                fake_get,
+                requests_patch=fake_patch,
             )
         message = str(exc.exception)
         self.assertIn("HTTP 403", message)
         self.assertIn("INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND", message)
-        self.assertIn("2FA", message)
+        self.assertIn("Username", message)
         self.assertNotIn("pat_secret", message)
 
 
@@ -280,7 +301,7 @@ class AirtableGuiConnectionTest(unittest.TestCase):
             backup_renames=(("fldOld", "__backup__2FA"),),
         ))
 
-        self.assertIn("Field 1–Field 8", text)
+        self.assertIn("primeras 9 columnas por posición", text)
         self.assertIn("2FA", text)
         self.assertIn("respaldo", text)
 
