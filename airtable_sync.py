@@ -24,6 +24,25 @@ MANAGED_FIELDS = (
 )
 
 
+@dataclass(frozen=True)
+class AirtableRequiredField:
+    name: str
+    field_type: str
+
+
+AIRTABLE_ACCOUNT_COLUMNS = (
+    AirtableRequiredField("Username", "singleLineText"),
+    AirtableRequiredField("2FA", "multilineText"),
+    AirtableRequiredField("VA", "singleLineText"),
+    AirtableRequiredField("Categoría", "singleLineText"),
+    AirtableRequiredField("Trials desbloqueados", "checkbox"),
+    AirtableRequiredField("Día", "singleLineText"),
+    AirtableRequiredField("Red social", "singleLineText"),
+    AirtableRequiredField("VPN / Proxy", "multilineText"),
+    AirtableRequiredField("Link", "url"),
+)
+
+
 class AirtableSyncError(Exception):
     """Error que puede mostrarse al usuario sin revelar secretos."""
 
@@ -33,6 +52,12 @@ class AirtableConfig:
     personal_access_token: str = field(repr=False)
     base_id: str
     table_name: str
+
+
+@dataclass(frozen=True)
+class AirtableSchemaPreparation:
+    added_fields: tuple[str, ...]
+    incompatible_fields: tuple[tuple[str, str, str], ...]
 
 
 @dataclass(frozen=True)
@@ -142,6 +167,77 @@ def save_airtable_config(config: AirtableConfig, path: str | Path = CONFIG_FILE)
     )
 
 
+def _airtable_headers(config: AirtableConfig) -> dict[str, str]:
+    return {"Authorization": f"Bearer {config.personal_access_token}"}
+
+
+def _configured_table_schema(
+    config: AirtableConfig,
+    requests_get: Callable[..., Any],
+) -> dict[str, Any]:
+    url = "https://api.airtable.com/v0/meta/bases/{}/tables".format(
+        quote(config.base_id, safe="")
+    )
+    try:
+        response = requests_get(url, headers=_airtable_headers(config), timeout=20)
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        raise AirtableSyncError(
+            "No se pudo leer la estructura de Airtable. Verifica que el token tenga schema.bases:read."
+        ) from exc
+    tables = payload.get("tables") if isinstance(payload, dict) else None
+    if not isinstance(tables, list):
+        raise AirtableSyncError("Airtable devolvió una estructura de base inválida.")
+    for table in tables:
+        if isinstance(table, dict) and table.get("name") == config.table_name:
+            if not isinstance(table.get("id"), str) or not isinstance(table.get("fields"), list):
+                raise AirtableSyncError("Airtable devolvió una tabla inválida.")
+            return table
+    raise AirtableSyncError(
+        f"La tabla '{config.table_name}' no existe en la base indicada. Créala en Airtable e inténtalo otra vez."
+    )
+
+
+def prepare_airtable_account_table(
+    config: AirtableConfig,
+    requests_get: Callable[..., Any] = requests.get,
+    requests_post: Callable[..., Any] = requests.post,
+) -> AirtableSchemaPreparation:
+    """Agrega solamente los campos requeridos que aún no existen en la tabla."""
+    table = _configured_table_schema(config, requests_get)
+    existing_types = {
+        field.get("name"): field.get("type")
+        for field in table["fields"]
+        if isinstance(field, dict) and isinstance(field.get("name"), str)
+    }
+    fields_url = "https://api.airtable.com/v0/meta/bases/{}/tables/{}/fields".format(
+        quote(config.base_id, safe=""), quote(table["id"], safe="")
+    )
+    added: list[str] = []
+    incompatible: list[tuple[str, str, str]] = []
+    for required in AIRTABLE_ACCOUNT_COLUMNS:
+        existing_type = existing_types.get(required.name)
+        if existing_type is not None:
+            if existing_type != required.field_type:
+                incompatible.append((required.name, str(existing_type), required.field_type))
+            continue
+        try:
+            response = requests_post(
+                fields_url,
+                headers=_airtable_headers(config),
+                json={"name": required.name, "type": required.field_type},
+                timeout=20,
+            )
+            response.raise_for_status()
+        except Exception as exc:
+            raise AirtableSyncError(
+                "No se pudo crear una columna en Airtable. Verifica que el token tenga schema.bases:write."
+            ) from exc
+        added.append(required.name)
+    return AirtableSchemaPreparation(tuple(added), tuple(incompatible))
+
+
 def fetch_airtable_accounts(
     config: AirtableConfig,
     requests_get: Callable[..., Any] = requests.get,
@@ -149,7 +245,7 @@ def fetch_airtable_accounts(
     url = "https://api.airtable.com/v0/{}/{}".format(
         quote(config.base_id, safe=""), quote(config.table_name, safe="")
     )
-    headers = {"Authorization": f"Bearer {config.personal_access_token}"}
+    headers = _airtable_headers(config)
     offset: str | None = None
     seen: set[str] = set()
     accounts: list[AirtableAccount] = []

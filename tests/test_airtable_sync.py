@@ -8,13 +8,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from airtable_sync import (
     AirtableConfig,
+    AirtableSchemaPreparation,
     AirtableSyncError,
     build_account_sync_plan,
     fetch_airtable_accounts,
     load_airtable_config,
+    prepare_airtable_account_table,
     save_airtable_config,
 )
-from gui_premium_v7 import airtable_sync_review_text
+from gui_premium_v7 import airtable_schema_preparation_text, airtable_sync_review_text
 
 
 class FakeResponse:
@@ -75,6 +77,99 @@ class AirtableFetchTest(unittest.TestCase):
             fetch_airtable_accounts(
                 AirtableConfig("pat_secret", "app123", "Cuentas"), fake_get
             )
+
+
+class AirtableSchemaPreparationTest(unittest.TestCase):
+    def test_adds_only_missing_required_fields_to_existing_table(self):
+        calls = []
+
+        def fake_get(url, *, headers, timeout):
+            self.assertEqual(url, "https://api.airtable.com/v0/meta/bases/app123/tables")
+            self.assertEqual(headers, {"Authorization": "Bearer pat_secret"})
+            return FakeResponse({"tables": [{
+                "id": "tblAccounts",
+                "name": "Cuentas",
+                "fields": [{"id": "fldUsername", "name": "Username", "type": "singleLineText"}],
+            }]})
+
+        def fake_post(url, *, headers, json, timeout):
+            calls.append((url, headers, json, timeout))
+            return FakeResponse({"id": f"fld{len(calls)}"})
+
+        result = prepare_airtable_account_table(
+            AirtableConfig("pat_secret", "app123", "Cuentas"), fake_get, fake_post
+        )
+
+        self.assertEqual(
+            result.added_fields,
+            ("2FA", "VA", "Categoría", "Trials desbloqueados", "Día", "Red social", "VPN / Proxy", "Link"),
+        )
+        self.assertEqual(result.incompatible_fields, ())
+        self.assertEqual([call[2] for call in calls], [
+            {"name": "2FA", "type": "multilineText"},
+            {"name": "VA", "type": "singleLineText"},
+            {"name": "Categoría", "type": "singleLineText"},
+            {"name": "Trials desbloqueados", "type": "checkbox"},
+            {"name": "Día", "type": "singleLineText"},
+            {"name": "Red social", "type": "singleLineText"},
+            {"name": "VPN / Proxy", "type": "multilineText"},
+            {"name": "Link", "type": "url"},
+        ])
+        self.assertTrue(all(call[0].endswith("/tblAccounts/fields") for call in calls))
+
+    def test_keeps_incompatible_field_and_requires_existing_table(self):
+        def fake_get(_url, *, headers, timeout):
+            return FakeResponse({"tables": [{
+                "id": "tblAccounts",
+                "name": "Cuentas",
+                "fields": [{"id": "fldCategory", "name": "Categoría", "type": "singleSelect"}],
+            }]})
+
+        calls = []
+
+        def fake_post(_url, *, headers, json, timeout):
+            calls.append(json)
+            return FakeResponse({"id": f"fld{len(calls)}"})
+
+        result = prepare_airtable_account_table(
+            AirtableConfig("pat_secret", "app123", "Cuentas"), fake_get, fake_post
+        )
+
+        self.assertEqual(result.incompatible_fields, (("Categoría", "singleSelect", "singleLineText"),))
+        self.assertNotIn({"name": "Categoría", "type": "singleLineText"}, calls)
+
+        with self.assertRaisesRegex(AirtableSyncError, "no existe"):
+            prepare_airtable_account_table(
+                AirtableConfig("pat_secret", "app123", "Ausente"),
+                lambda _url, **_kwargs: FakeResponse({"tables": []}),
+                fake_post,
+            )
+
+
+class AirtableGuiConnectionTest(unittest.TestCase):
+    def test_connection_feedback_reports_added_and_untouched_fields(self):
+        text = airtable_schema_preparation_text(AirtableSchemaPreparation(
+            added_fields=("Username", "Link"),
+            incompatible_fields=(("Categoría", "singleSelect", "singleLineText"),),
+        ))
+
+        self.assertIn("Columnas agregadas: Username, Link.", text)
+        self.assertIn("Categoría", text)
+        self.assertIn("no se modificó", text)
+
+    def test_gui_prepares_schema_before_saving_connection(self):
+        source = open(
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "gui_premium_v7.py"),
+            encoding="utf-8",
+        ).read()
+        configure_source = source[source.index("    def configure_airtable(self):"):source.index("    def sync_airtable_accounts(self):")]
+
+        self.assertIn('text="Conectar y preparar Airtable"', source)
+        self.assertIn("prepare_airtable_account_table(config)", configure_source)
+        self.assertLess(
+            configure_source.index("prepare_airtable_account_table(config)"),
+            configure_source.index("save_airtable_config(config)"),
+        )
 
 
 class ReconciliationTest(unittest.TestCase):

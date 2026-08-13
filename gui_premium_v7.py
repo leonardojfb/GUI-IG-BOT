@@ -28,6 +28,7 @@ from airtable_sync import (
     build_account_sync_plan,
     fetch_airtable_accounts,
     load_airtable_config,
+    prepare_airtable_account_table,
     save_airtable_config,
 )
 from trial_content import (
@@ -789,6 +790,22 @@ def airtable_sync_review_text(plan) -> str:
         lines.append(
             "Las eliminadas salen solo de la tabla local; no se borran videos, calendarios ni historial."
         )
+    return "\n".join(lines)
+
+
+def airtable_schema_preparation_text(result) -> str:
+    """Resume cambios de esquema sin incluir el token local."""
+    if result.added_fields:
+        lines = [f"Columnas agregadas: {', '.join(result.added_fields)}."]
+    else:
+        lines = ["La tabla ya tenía todas las columnas requeridas."]
+    if result.incompatible_fields:
+        details = ", ".join(
+            f"{name} ({actual}; se esperaba {expected})"
+            for name, actual, expected in result.incompatible_fields
+        )
+        lines.append(f"Estas columnas ya existían y no se modificó su tipo: {details}.")
+    lines.append("Conexión guardada en esta GUI.")
     return "\n".join(lines)
 
 
@@ -3873,7 +3890,7 @@ class InstagramAutoPro(ctk.CTk):
         )
         self._acc_header_lbl.grid(row=0, column=0, sticky="w")
         self.btn_airtable_config = GhostButton(
-            accounts_header, text="Configurar Airtable", width=145,
+            accounts_header, text="Conectar y preparar Airtable", width=205,
             command=self.configure_airtable,
         )
         self.btn_airtable_config.grid(row=0, column=1, padx=(0, 8), sticky="e")
@@ -3904,14 +3921,14 @@ class InstagramAutoPro(ctk.CTk):
         self._admin_refresh()
 
     def configure_airtable(self):
-        """Guarda la configuración local de lectura para esta instalación."""
+        """Prepara una tabla existente y guarda la configuración local al terminar."""
         try:
             current = load_airtable_config()
         except AirtableSyncError:
             current = AirtableConfig("", "", "Cuentas")
 
         token = simpledialog.askstring(
-            "Airtable", "Personal Access Token (solo lectura):",
+            "Airtable", "Personal Access Token (lectura y edición de columnas):",
             initialvalue=current.personal_access_token, show="*", parent=self,
         )
         if token is None:
@@ -3928,12 +3945,29 @@ class InstagramAutoPro(ctk.CTk):
         )
         if table_name is None:
             return
-        try:
-            save_airtable_config(AirtableConfig(token, base_id, table_name))
-        except AirtableSyncError as exc:
-            messagebox.showerror("Airtable", str(exc), parent=self)
-            return
-        messagebox.showinfo("Airtable", "Configuración guardada en esta GUI.", parent=self)
+        config = AirtableConfig(token, base_id, table_name)
+        self.btn_airtable_config.configure(state="disabled", text="Conectando...")
+
+        def task():
+            return prepare_airtable_account_table(config)
+
+        def done(success, result):
+            self.btn_airtable_config.configure(
+                state="normal", text="Conectar y preparar Airtable"
+            )
+            if not success:
+                messagebox.showerror("Airtable", result, parent=self)
+                return
+            try:
+                save_airtable_config(config)
+            except AirtableSyncError as exc:
+                messagebox.showerror("Airtable", str(exc), parent=self)
+                return
+            messagebox.showinfo(
+                "Airtable", airtable_schema_preparation_text(result), parent=self
+            )
+
+        WorkerThread(self, done, task).start()
 
     def sync_airtable_accounts(self):
         """Descarga Airtable y pide confirmación antes de modificar SQLite local."""
