@@ -38,6 +38,7 @@ $ReleaseFiles = @(
     "video_editor.py",
     "render_performance.py",
     "metadata_pool.py",
+    "trial_content.py",
     "telegram_core.py",
     "cleaner.py",
     "vercuentas.py",
