@@ -341,6 +341,20 @@ def prepare_airtable_account_table(
 ) -> AirtableSchemaPreparation:
     """Prepara una tabla existente, reutilizando Field 1-8 cuando están presentes."""
     table = _configured_table_schema(config, requests_get)
+    field_names = {
+        field.get("name")
+        for field in table.get("fields", [])
+        if isinstance(field, dict)
+    }
+    has_legacy_columns = all(
+        source in field_names for source, _target in LEGACY_COLUMN_RENAMES
+    )
+    if "Username" not in field_names and not has_legacy_columns:
+        raise AirtableSyncError(
+            "La tabla configurada no parece una tabla de cuentas. "
+            "Selecciona la tabla que contiene Username o Field 1–Field 8. "
+            "No se crearon columnas."
+        )
     repair = build_legacy_column_repair_plan(table)
     if repair.source_renames:
         fields_url = "https://api.airtable.com/v0/meta/bases/{}/tables/{}/fields/{}"

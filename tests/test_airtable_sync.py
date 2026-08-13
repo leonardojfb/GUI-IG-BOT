@@ -202,12 +202,29 @@ class AirtableSchemaPreparationTest(unittest.TestCase):
         ])
         self.assertTrue(all(call[0].endswith("/tblAccounts/fields") for call in calls))
 
+    def test_rejects_unrelated_table_instead_of_appending_account_columns(self):
+        def fake_get(_url, *, headers, timeout):
+            return FakeResponse({"tables": [{
+                "id": "tblWrong", "name": "CUENTAS EVE", "fields": [
+                    {"id": "fldName", "name": "Name", "type": "singleLineText"},
+                    {"id": "fldStatus", "name": "Status", "type": "singleSelect"},
+                ],
+            }]})
+
+        with self.assertRaisesRegex(AirtableSyncError, "no parece una tabla de cuentas"):
+            prepare_airtable_account_table(
+                AirtableConfig("pat_secret", "app123", "CUENTAS EVE"), fake_get
+            )
+
     def test_keeps_incompatible_field_and_requires_existing_table(self):
         def fake_get(_url, *, headers, timeout):
             return FakeResponse({"tables": [{
                 "id": "tblAccounts",
                 "name": "Cuentas",
-                "fields": [{"id": "fldCategory", "name": "Categoria", "type": "singleSelect"}],
+                "fields": [
+                    {"id": "fldUsername", "name": "Username", "type": "singleLineText"},
+                    {"id": "fldCategory", "name": "Categoria", "type": "singleSelect"},
+                ],
             }]})
 
         calls = []
@@ -235,7 +252,7 @@ class AirtableSchemaPreparationTest(unittest.TestCase):
             return FakeResponse({"tables": [{
                 "id": "tblAccounts",
                 "name": "Cuentas",
-                "fields": [],
+                "fields": [{"id": "fldUsername", "name": "Username", "type": "singleLineText"}],
             }]})
 
         def fake_post(_url, *, headers, json, timeout):
@@ -250,7 +267,7 @@ class AirtableSchemaPreparationTest(unittest.TestCase):
         message = str(exc.exception)
         self.assertIn("HTTP 403", message)
         self.assertIn("INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND", message)
-        self.assertIn("Username", message)
+        self.assertIn("2FA", message)
         self.assertNotIn("pat_secret", message)
 
 
