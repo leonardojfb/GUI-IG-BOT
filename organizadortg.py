@@ -405,6 +405,10 @@ def call_tg(method, data, silent=False):
                     print(f"⏳ Telegram rate limit ({method}), esperando {retry_after}s...")
                     time.sleep(retry_after + 1)
                     continue
+                description = str(res.get("description", ""))
+                if method == "deleteForumTopic" and "TOPIC_ID_INVALID" in description:
+                    print("ℹ️ Se intento borrar un topic que ya no existe; continúo con la limpieza.")
+                    return res
                 if not silent:
                     print(f"⚠️ Error en Telegram API ({method}): {res}")
             return res
