@@ -8,13 +8,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from airtable_sync import (
     AirtableConfig,
+    AirtableSchemaPreparation,
     AirtableSyncError,
+    build_legacy_field_migration_plan,
     build_account_sync_plan,
     fetch_airtable_accounts,
     load_airtable_config,
+    prepare_airtable_account_table,
     save_airtable_config,
 )
-from gui_premium_v7 import airtable_sync_review_text
+from gui_premium_v7 import airtable_schema_preparation_text, airtable_sync_review_text
 
 
 class FakeResponse:
@@ -51,10 +54,10 @@ class AirtableFetchTest(unittest.TestCase):
             calls.append(params.copy())
             if params.get("offset"):
                 return FakeResponse({"records": [
-                    {"id": "rec2", "fields": {"Username": "two", "Categoría": "PROMO"}}
+                    {"id": "rec2", "fields": {"Username": "two", "Categoria": "PROMO"}}
                 ]})
             return FakeResponse({"records": [
-                {"id": "rec1", "fields": {"Username": "@One", "Categoría": "PROMO"}}
+                {"id": "rec1", "fields": {"Username": "@One", "Categoria": "PROMO"}}
             ], "offset": "next"})
 
         rows = fetch_airtable_accounts(
@@ -67,14 +70,178 @@ class AirtableFetchTest(unittest.TestCase):
     def test_rejects_duplicate_username(self):
         def fake_get(_url, *, headers, params, timeout):
             return FakeResponse({"records": [
-                {"id": "rec1", "fields": {"Username": "@One", "Categoría": "PROMO"}},
-                {"id": "rec2", "fields": {"Username": "one", "Categoría": "PROMO"}},
+                {"id": "rec1", "fields": {"Username": "@One", "Categoria": "PROMO"}},
+                {"id": "rec2", "fields": {"Username": "one", "Categoria": "PROMO"}},
             ]})
 
         with self.assertRaisesRegex(AirtableSyncError, "duplicado"):
             fetch_airtable_accounts(
                 AirtableConfig("pat_secret", "app123", "Cuentas"), fake_get
             )
+
+    def test_ignores_completely_empty_airtable_rows(self):
+        def fake_get(_url, *, headers, params, timeout):
+            return FakeResponse({"records": [
+                {"id": "recEmpty", "fields": {}},
+                {"id": "recOne", "fields": {"Username": "one", "Categoria": "PROMO"}},
+            ]})
+
+        rows = fetch_airtable_accounts(
+            AirtableConfig("pat_secret", "app123", "Cuentas"), fake_get
+        )
+
+        self.assertEqual([row.username for row in rows], ["one"])
+
+
+class AirtableSchemaPreparationTest(unittest.TestCase):
+    def test_adds_only_missing_required_fields_to_existing_table(self):
+        calls = []
+
+        def fake_get(url, *, headers, timeout):
+            self.assertEqual(url, "https://api.airtable.com/v0/meta/bases/app123/tables")
+            self.assertEqual(headers, {"Authorization": "Bearer pat_secret"})
+            return FakeResponse({"tables": [{
+                "id": "tblAccounts",
+                "name": "Cuentas",
+                "fields": [{"id": "fldUsername", "name": "Username", "type": "singleLineText"}],
+            }]})
+
+        def fake_post(url, *, headers, json, timeout):
+            calls.append((url, headers, json, timeout))
+            return FakeResponse({"id": f"fld{len(calls)}"})
+
+        result = prepare_airtable_account_table(
+            AirtableConfig("pat_secret", "app123", "Cuentas"), fake_get, fake_post
+        )
+
+        self.assertEqual(
+            result.added_fields,
+            ("2FA", "VA", "Categoria", "Trials desbloqueados", "Dia", "Red social", "VPN / Proxy", "Link"),
+        )
+        self.assertEqual(result.incompatible_fields, ())
+        self.assertEqual([call[2] for call in calls], [
+            {"name": "2FA", "type": "multilineText"},
+            {"name": "VA", "type": "singleLineText"},
+            {"name": "Categoria", "type": "singleLineText"},
+            {
+                "name": "Trials desbloqueados",
+                "type": "checkbox",
+                "options": {"icon": "check", "color": "greenBright"},
+            },
+            {"name": "Dia", "type": "singleLineText"},
+            {"name": "Red social", "type": "singleLineText"},
+            {"name": "VPN / Proxy", "type": "multilineText"},
+            {"name": "Link", "type": "url"},
+        ])
+        self.assertTrue(all(call[0].endswith("/tblAccounts/fields") for call in calls))
+
+    def test_keeps_incompatible_field_and_requires_existing_table(self):
+        def fake_get(_url, *, headers, timeout):
+            return FakeResponse({"tables": [{
+                "id": "tblAccounts",
+                "name": "Cuentas",
+                "fields": [{"id": "fldCategory", "name": "Categoria", "type": "singleSelect"}],
+            }]})
+
+        calls = []
+
+        def fake_post(_url, *, headers, json, timeout):
+            calls.append(json)
+            return FakeResponse({"id": f"fld{len(calls)}"})
+
+        result = prepare_airtable_account_table(
+            AirtableConfig("pat_secret", "app123", "Cuentas"), fake_get, fake_post
+        )
+
+        self.assertEqual(result.incompatible_fields, (("Categoria", "singleSelect", "singleLineText"),))
+        self.assertNotIn({"name": "Categoria", "type": "singleLineText"}, calls)
+
+        with self.assertRaisesRegex(AirtableSyncError, "no existe"):
+            prepare_airtable_account_table(
+                AirtableConfig("pat_secret", "app123", "Ausente"),
+                lambda _url, **_kwargs: FakeResponse({"tables": []}),
+                fake_post,
+            )
+
+    def test_reports_schema_write_permission_without_exposing_the_token(self):
+        def fake_get(_url, *, headers, timeout):
+            return FakeResponse({"tables": [{
+                "id": "tblAccounts",
+                "name": "Cuentas",
+                "fields": [],
+            }]})
+
+        def fake_post(_url, *, headers, json, timeout):
+            return FakeResponse({
+                "error": {"type": "INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND"}
+            }, status_code=403)
+
+        with self.assertRaisesRegex(AirtableSyncError, "permiso.*schema.bases:write") as exc:
+            prepare_airtable_account_table(
+                AirtableConfig("pat_secret", "app123", "Cuentas"), fake_get, fake_post
+            )
+        message = str(exc.exception)
+        self.assertIn("HTTP 403", message)
+        self.assertIn("INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND", message)
+        self.assertIn("Username", message)
+        self.assertNotIn("pat_secret", message)
+
+
+class AirtableGuiConnectionTest(unittest.TestCase):
+    def test_connection_feedback_reports_added_and_untouched_fields(self):
+        text = airtable_schema_preparation_text(AirtableSchemaPreparation(
+            added_fields=("Username", "Link"),
+            incompatible_fields=(("Categoria", "singleSelect", "singleLineText"),),
+        ))
+
+        self.assertIn("Columnas agregadas: Username, Link.", text)
+        self.assertIn("Categoria", text)
+        self.assertIn("no se modificó", text)
+
+    def test_gui_prepares_schema_before_saving_connection(self):
+        source = open(
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "gui_premium_v7.py"),
+            encoding="utf-8",
+        ).read()
+        configure_source = source[source.index("    def configure_airtable(self):"):source.index("    def sync_airtable_accounts(self):")]
+
+        self.assertIn('text="Conectar y preparar Airtable"', source)
+        self.assertIn("prepare_airtable_account_table(config)", configure_source)
+        self.assertLess(
+            configure_source.index("prepare_airtable_account_table(config)"),
+            configure_source.index("save_airtable_config(config)"),
+        )
+
+
+class AirtableLegacyMigrationTest(unittest.TestCase):
+    def test_copies_generic_fields_without_overwriting_and_converts_trials(self):
+        plan = build_legacy_field_migration_plan([
+            {
+                "id": "recOne",
+                "fields": {
+                    "Field 1": "secret", "Field 2": "Ana", "Field 3": "PROMO",
+                    "Field 4": "Sí", "Field 5": "Lunes", "Field 6": "Instagram",
+                    "Field 7": "proxy", "Field 8": "instagram.com/one",
+                    "VA": "No sobreescribir",
+                },
+            },
+            {
+                "id": "recTwo",
+                "fields": {"Field 3": "TRIALS", "Field 4": "No"},
+            },
+        ])
+
+        self.assertEqual(plan.records_to_update, 2)
+        self.assertEqual(plan.field_counts["Categoria"], 2)
+        first = next(row for row in plan.updates if row["id"] == "recOne")["fields"]
+        second = next(row for row in plan.updates if row["id"] == "recTwo")["fields"]
+        self.assertEqual(first["2FA"], "secret")
+        self.assertNotIn("VA", first)
+        self.assertEqual(first["Categoria"], "PROMO")
+        self.assertTrue(first["Trials desbloqueados"])
+        self.assertEqual(first["Dia"], "Lunes")
+        self.assertEqual(first["Link"], "https://instagram.com/one")
+        self.assertNotIn("Trials desbloqueados", second)
 
 
 class ReconciliationTest(unittest.TestCase):

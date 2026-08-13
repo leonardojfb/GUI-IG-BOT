@@ -1,0 +1,40 @@
+from types import SimpleNamespace
+
+import launcher
+
+
+def test_ensure_pillow_installs_missing_pil(monkeypatch):
+    calls = []
+    specs = iter([None, object()])
+
+    monkeypatch.setattr(launcher.importlib.util, "find_spec", lambda name: next(specs))
+    monkeypatch.setattr(
+        launcher.subprocess,
+        "run",
+        lambda command, **kwargs: calls.append((command, kwargs)) or SimpleNamespace(returncode=0),
+    )
+
+    assert launcher._ensure_pillow() == ""
+    assert calls
+    assert calls[0][0][:5] == [
+        launcher.sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--disable-pip-version-check",
+    ]
+    assert calls[0][0][-1] == "Pillow==12.2.0"
+
+
+def test_ensure_pillow_skips_pip_when_pil_exists(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(launcher.importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(
+        launcher.subprocess,
+        "run",
+        lambda command, **kwargs: calls.append((command, kwargs)) or SimpleNamespace(returncode=0),
+    )
+
+    assert launcher._ensure_pillow() == ""
+    assert calls == []

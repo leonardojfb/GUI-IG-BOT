@@ -3,6 +3,8 @@ import subprocess
 import json
 import random
 import re
+import shutil
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from database import DatabaseManager
 from console_encoding import ensure_stdout_utf8
@@ -22,6 +24,14 @@ LAT, LON = "+34.0522", "-118.2437"
 # Windows: suppress the console window each ffmpeg/ffprobe child would otherwise
 # pop (the GUI runs windowless). 0 on non-Windows, where the flag doesn't exist.
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def _ffmpeg_tool_command(tool_name):
+    executable_name = f"{tool_name}.exe" if os.name == "nt" else tool_name
+    bundled = Path(__file__).resolve().parent / "tools" / "ffmpeg" / "bin" / executable_name
+    if bundled.is_file():
+        return str(bundled)
+    return tool_name
 
 
 # ==================== SISTEMA DE CAPTIONS ====================
@@ -76,7 +86,7 @@ def get_caption_for_video(tanda: dict) -> str:
 def get_audio(file_path):
     """Verifica si un archivo de video contiene stream de audio."""
     cmd = [
-        'ffprobe', '-v', 'error', '-select_streams', 'a',
+        _ffmpeg_tool_command('ffprobe'), '-v', 'error', '-select_streams', 'a',
         '-show_entries', 'stream=codec_type', '-of', 'json', file_path
     ]
     try:
@@ -260,7 +270,7 @@ def render_video_pair(path_v1, path_v2, out_path, cat, p1_id, p2_id, ffmpeg_thre
         print(f"🎬 Renderizando con {label}: {name_out}...")
 
         cmd = (
-            ['ffmpeg', '-y']
+            [_ffmpeg_tool_command('ffmpeg'), '-y']
             + hw_args
             + ['-i', path_v1, '-i', path_v2,
                '-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',

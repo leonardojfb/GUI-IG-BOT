@@ -143,6 +143,35 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual((self.app_dir / "dist_accounts_history.json").read_text(), "release history")
         self.assertEqual((self.app_dir / "organizador.db").read_bytes(), b"user database")
 
+    def test_apply_package_can_install_bundled_ffmpeg_tools(self):
+        package_path = self.app_dir / "release.zip"
+        package_path.write_bytes(
+            _zip_bytes(
+                {
+                    "version.json": json.dumps({"version": "1.0.1"}),
+                    "tools/ffmpeg/bin/ffmpeg.exe": b"ffmpeg binary",
+                    "tools/ffmpeg/bin/ffprobe.exe": b"ffprobe binary",
+                }
+            )
+        )
+
+        version = updater.apply_package(
+            self.app_dir,
+            package_path,
+            {
+                "version": "1.0.1",
+                "files": [
+                    "version.json",
+                    "tools/ffmpeg/bin/ffmpeg.exe",
+                    "tools/ffmpeg/bin/ffprobe.exe",
+                ],
+            },
+        )
+
+        self.assertEqual(version, "1.0.1")
+        self.assertEqual((self.app_dir / "tools/ffmpeg/bin/ffmpeg.exe").read_bytes(), b"ffmpeg binary")
+        self.assertEqual((self.app_dir / "tools/ffmpeg/bin/ffprobe.exe").read_bytes(), b"ffprobe binary")
+
     def test_apply_package_can_replace_database_when_manifest_explicitly_requests_it(self):
         package_path = self.app_dir / "release.zip"
         package_path.write_bytes(

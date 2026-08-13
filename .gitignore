@@ -37,6 +37,7 @@ captions.txt
 accounts_*.txt
 reporte_organizacion.txt
 archive_legacy/
+tools/ffmpeg/bin/*.exe
 
 # Generated media and working folders
 videos_finales/

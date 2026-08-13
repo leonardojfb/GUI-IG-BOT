@@ -16,6 +16,14 @@ _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 EXTERNAL_PROCESS_TIMEOUT_SECONDS = 300
 
 
+def _ffmpeg_tool_command(tool_name: str) -> str:
+    executable_name = f"{tool_name}.exe" if os.name == "nt" else tool_name
+    bundled = Path(__file__).resolve().parent / "tools" / "ffmpeg" / "bin" / executable_name
+    if bundled.is_file():
+        return str(bundled)
+    return tool_name
+
+
 def build_photo_video_pairs(videos: list[str], overlays: list[dict]) -> list[tuple[str, dict, int]]:
     return [
         (video, overlay, photo_index)
@@ -53,7 +61,7 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
 
 def probe_video(path: str) -> dict:
     result = _run([
-        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        _ffmpeg_tool_command("ffprobe"), "-v", "error", "-select_streams", "v:0",
         "-show_entries", "stream=width,height,r_frame_rate,avg_frame_rate,duration",
         "-show_entries", "format=duration", "-of", "json", path,
     ])
@@ -130,7 +138,7 @@ def render_video(input_path: str, output_path: str, overlays: list[dict], ffmpeg
     info = probe_video(input_path)
     if not overlays:
         raise ValueError("Agregá al menos una foto.")
-    cmd = ["ffmpeg", "-y", "-i", input_path]
+    cmd = [_ffmpeg_tool_command("ffmpeg"), "-y", "-i", input_path]
     for item in overlays:
         cmd += ["-loop", "1", "-i", item["photo"]]
     filters = [f"[0:v]format=yuv420p[v0]"]
@@ -178,7 +186,7 @@ def render_preview(
     if output_path is None:
         handle, output_path = tempfile.mkstemp(prefix="ig_preview_", suffix=".png")
         os.close(handle)
-    result = _run(["ffmpeg", "-y", "-ss", str(timestamp), "-i", input_path, "-frames:v", "1", output_path])
+    result = _run([_ffmpeg_tool_command("ffmpeg"), "-y", "-ss", str(timestamp), "-i", input_path, "-frames:v", "1", output_path])
     if result.returncode:
         stderr = (result.stderr or "")[-1800:]
         raise RuntimeError(

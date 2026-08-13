@@ -55,6 +55,8 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "cleaner.py",
         "vercuentas.py",
         "logo_elittisse.svg",
+        "tools/ffmpeg/bin/ffmpeg.exe",
+        "tools/ffmpeg/bin/ffprobe.exe",
         "styles/colors.py",
         "styles/components.py",
         "styles/__init__.py",

@@ -24,6 +24,28 @@ MANAGED_FIELDS = (
 )
 
 
+@dataclass(frozen=True)
+class AirtableRequiredField:
+    name: str
+    field_type: str
+
+
+AIRTABLE_ACCOUNT_COLUMNS = (
+    AirtableRequiredField("Username", "singleLineText"),
+    AirtableRequiredField("2FA", "multilineText"),
+    AirtableRequiredField("VA", "singleLineText"),
+    AirtableRequiredField("Categoria", "singleLineText"),
+    AirtableRequiredField("Trials desbloqueados", "checkbox"),
+    AirtableRequiredField("Dia", "singleLineText"),
+    AirtableRequiredField("Red social", "singleLineText"),
+    AirtableRequiredField("VPN / Proxy", "multilineText"),
+    AirtableRequiredField("Link", "url"),
+)
+AIRTABLE_FIELD_OPTIONS = {
+    "Trials desbloqueados": {"icon": "check", "color": "greenBright"},
+}
+
+
 class AirtableSyncError(Exception):
     """Error que puede mostrarse al usuario sin revelar secretos."""
 
@@ -33,6 +55,22 @@ class AirtableConfig:
     personal_access_token: str = field(repr=False)
     base_id: str
     table_name: str
+
+
+@dataclass(frozen=True)
+class AirtableSchemaPreparation:
+    added_fields: tuple[str, ...]
+    incompatible_fields: tuple[tuple[str, str, str], ...]
+
+
+@dataclass(frozen=True)
+class AirtableLegacyMigrationPlan:
+    updates: list[dict[str, Any]]
+    field_counts: dict[str, int]
+
+    @property
+    def records_to_update(self) -> int:
+        return len(self.updates)
 
 
 @dataclass(frozen=True)
@@ -92,18 +130,18 @@ def _account_from_record(record: dict[str, Any]) -> AirtableAccount:
     if not isinstance(fields, dict):
         raise AirtableSyncError("Airtable devolvió una fila inválida.")
     username = normalize_username(fields.get("Username"))
-    account_type = _text(fields, "Categoría")
+    account_type = _text(fields, "Categoria")
     if not username:
         raise AirtableSyncError("Cada fila debe tener Username.")
     if not account_type:
-        raise AirtableSyncError(f"La cuenta @{username} no tiene Categoría.")
+        raise AirtableSyncError(f"La cuenta @{username} no tiene Categoria.")
     return AirtableAccount(
         username=username,
         two_factor=_text(fields, "2FA"),
         assigned_va=_text(fields, "VA", "Sin Asignar") or "Sin Asignar",
         account_type=account_type,
         trials_active=_checkbox(fields, "Trials desbloqueados"),
-        account_day=_text(fields, "Día"),
+        account_day=_text(fields, "Dia"),
         social_network=_text(fields, "Red social"),
         vpn_proxy=_text(fields, "VPN / Proxy"),
         account_link=_text(fields, "Link"),
@@ -142,6 +180,170 @@ def save_airtable_config(config: AirtableConfig, path: str | Path = CONFIG_FILE)
     )
 
 
+def _airtable_headers(config: AirtableConfig) -> dict[str, str]:
+    return {"Authorization": f"Bearer {config.personal_access_token}"}
+
+
+def _configured_table_schema(
+    config: AirtableConfig,
+    requests_get: Callable[..., Any],
+) -> dict[str, Any]:
+    url = "https://api.airtable.com/v0/meta/bases/{}/tables".format(
+        quote(config.base_id, safe="")
+    )
+    try:
+        response = requests_get(url, headers=_airtable_headers(config), timeout=20)
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        raise AirtableSyncError(
+            "No se pudo leer la estructura de Airtable. Verifica que el token tenga schema.bases:read."
+        ) from exc
+    tables = payload.get("tables") if isinstance(payload, dict) else None
+    if not isinstance(tables, list):
+        raise AirtableSyncError("Airtable devolvió una estructura de base inválida.")
+    for table in tables:
+        if isinstance(table, dict) and table.get("name") == config.table_name:
+            if not isinstance(table.get("id"), str) or not isinstance(table.get("fields"), list):
+                raise AirtableSyncError("Airtable devolvió una tabla inválida.")
+            return table
+    raise AirtableSyncError(
+        f"La tabla '{config.table_name}' no existe en la base indicada. Créala en Airtable e inténtalo otra vez."
+    )
+
+
+def _airtable_error_code(response: Any) -> str:
+    """Devuelve solo el tipo de error público de Airtable, nunca el cuerpo ni token."""
+    try:
+        payload = response.json()
+        code = payload.get("error", {}).get("type", "") if isinstance(payload, dict) else ""
+    except Exception:
+        return ""
+    return code if isinstance(code, str) and code.replace("_", "").isalnum() else ""
+
+
+LEGACY_AIRTABLE_FIELD_MAPPING = (
+    ("Field 1", "2FA"),
+    ("Field 2", "VA"),
+    ("Field 3", "Categoria"),
+    ("Field 4", "Trials desbloqueados"),
+    ("Field 5", "Dia"),
+    ("Field 6", "Red social"),
+    ("Field 7", "VPN / Proxy"),
+    ("Field 8", "Link"),
+)
+
+
+def _is_populated(value: Any) -> bool:
+    return value not in (None, "", [], False)
+
+
+def _legacy_trial_value(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return True if value else None
+    normalized = str(value or "").strip().casefold()
+    if normalized in {"si", "sí", "true", "1"}:
+        return True
+    return None
+
+
+def _legacy_link_value(value: Any) -> str:
+    link = str(value or "").strip()
+    if link and not link.casefold().startswith(("http://", "https://")):
+        return f"https://{link}"
+    return link
+
+
+def build_legacy_field_migration_plan(records: list[dict[str, Any]]) -> AirtableLegacyMigrationPlan:
+    """Copia el formato genérico legado sin borrar ni sobrescribir datos de Airtable."""
+    updates: list[dict[str, Any]] = []
+    field_counts: dict[str, int] = {}
+    for record in records:
+        record_id = record.get("id")
+        fields = record.get("fields") or {}
+        if not isinstance(record_id, str) or not isinstance(fields, dict):
+            raise AirtableSyncError("Airtable devolvió una fila inválida para migrar.")
+        update_fields: dict[str, Any] = {}
+        for source_name, target_name in LEGACY_AIRTABLE_FIELD_MAPPING:
+            source_value = fields.get(source_name)
+            if not _is_populated(source_value) or _is_populated(fields.get(target_name)):
+                continue
+            if target_name == "Trials desbloqueados":
+                target_value = _legacy_trial_value(source_value)
+                if target_value is None:
+                    continue
+            elif target_name == "Link":
+                target_value = _legacy_link_value(source_value)
+            else:
+                target_value = source_value
+            update_fields[target_name] = target_value
+            field_counts[target_name] = field_counts.get(target_name, 0) + 1
+        if update_fields:
+            updates.append({"id": record_id, "fields": update_fields})
+    return AirtableLegacyMigrationPlan(updates, field_counts)
+
+
+def prepare_airtable_account_table(
+    config: AirtableConfig,
+    requests_get: Callable[..., Any] = requests.get,
+    requests_post: Callable[..., Any] = requests.post,
+) -> AirtableSchemaPreparation:
+    """Agrega solamente los campos requeridos que aún no existen en la tabla."""
+    table = _configured_table_schema(config, requests_get)
+    existing_types = {
+        field.get("name"): field.get("type")
+        for field in table["fields"]
+        if isinstance(field, dict) and isinstance(field.get("name"), str)
+    }
+    fields_url = "https://api.airtable.com/v0/meta/bases/{}/tables/{}/fields".format(
+        quote(config.base_id, safe=""), quote(table["id"], safe="")
+    )
+    added: list[str] = []
+    incompatible: list[tuple[str, str, str]] = []
+    for required in AIRTABLE_ACCOUNT_COLUMNS:
+        existing_type = existing_types.get(required.name)
+        if existing_type is not None:
+            if existing_type != required.field_type:
+                incompatible.append((required.name, str(existing_type), required.field_type))
+            continue
+        response = None
+        try:
+            payload = {"name": required.name, "type": required.field_type}
+            if required.name in AIRTABLE_FIELD_OPTIONS:
+                payload["options"] = AIRTABLE_FIELD_OPTIONS[required.name]
+            response = requests_post(
+                fields_url,
+                headers=_airtable_headers(config),
+                json=payload,
+                timeout=20,
+            )
+            response.raise_for_status()
+        except Exception as exc:
+            status_code = getattr(response, "status_code", None)
+            diagnostic = f"HTTP {status_code}" if isinstance(status_code, int) else "HTTP desconocido"
+            error_code = _airtable_error_code(response) if response is not None else ""
+            if error_code:
+                diagnostic = f"{diagnostic}: {error_code}"
+            if status_code == 401:
+                message = f"El token de Airtable es inválido o fue revocado ({diagnostic})."
+            elif status_code in (403, 404):
+                message = (
+                    "El token fue aceptado, pero no tiene permiso para editar la estructura de esta base. "
+                    "Confirma acceso a esta base y schema.bases:write. "
+                    f"Airtable rechazó '{required.name}' ({diagnostic})."
+                )
+            else:
+                message = (
+                    "No se pudo crear una columna en Airtable. "
+                    f"Airtable rechazó '{required.name}' ({diagnostic})."
+                )
+            raise AirtableSyncError(
+                message
+            ) from exc
+        added.append(required.name)
+    return AirtableSchemaPreparation(tuple(added), tuple(incompatible))
+
+
 def fetch_airtable_accounts(
     config: AirtableConfig,
     requests_get: Callable[..., Any] = requests.get,
@@ -149,7 +351,7 @@ def fetch_airtable_accounts(
     url = "https://api.airtable.com/v0/{}/{}".format(
         quote(config.base_id, safe=""), quote(config.table_name, safe="")
     )
-    headers = {"Authorization": f"Bearer {config.personal_access_token}"}
+    headers = _airtable_headers(config)
     offset: str | None = None
     seen: set[str] = set()
     accounts: list[AirtableAccount] = []
@@ -169,6 +371,8 @@ def fetch_airtable_accounts(
         if not isinstance(payload, dict) or not isinstance(payload.get("records", []), list):
             raise AirtableSyncError("Airtable devolvió una respuesta inválida.")
         for record in payload["records"]:
+            if isinstance(record, dict) and record.get("fields") == {}:
+                continue
             account = _account_from_record(record)
             key = account.username.casefold()
             if key in seen:
@@ -185,7 +389,7 @@ def _coerce_managed_row(row: AirtableAccount | dict[str, Any]) -> dict[str, Any]
     username = normalize_username(values.get("username"))
     account_type = str(values.get("account_type") or "").strip()
     if not username or not account_type:
-        raise AirtableSyncError("Cada cuenta necesita Username y Categoría.")
+        raise AirtableSyncError("Cada cuenta necesita Username y Categoria.")
     return {
         "username": username,
         "two_factor": str(values.get("two_factor") or "").strip(),

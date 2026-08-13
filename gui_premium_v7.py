@@ -28,6 +28,7 @@ from airtable_sync import (
     build_account_sync_plan,
     fetch_airtable_accounts,
     load_airtable_config,
+    prepare_airtable_account_table,
     save_airtable_config,
 )
 from trial_content import (
@@ -789,6 +790,22 @@ def airtable_sync_review_text(plan) -> str:
         lines.append(
             "Las eliminadas salen solo de la tabla local; no se borran videos, calendarios ni historial."
         )
+    return "\n".join(lines)
+
+
+def airtable_schema_preparation_text(result) -> str:
+    """Resume cambios de esquema sin incluir el token local."""
+    if result.added_fields:
+        lines = [f"Columnas agregadas: {', '.join(result.added_fields)}."]
+    else:
+        lines = ["La tabla ya tenía todas las columnas requeridas."]
+    if result.incompatible_fields:
+        details = ", ".join(
+            f"{name} ({actual}; se esperaba {expected})"
+            for name, actual, expected in result.incompatible_fields
+        )
+        lines.append(f"Estas columnas ya existían y no se modificó su tipo: {details}.")
+    lines.append("Conexión guardada en esta GUI.")
     return "\n".join(lines)
 
 
@@ -2168,9 +2185,7 @@ class InstagramAutoPro(ctk.CTk):
     def _build_render_performance_control(self, parent, context):
         """Build one compact view of the globally persisted render worker count."""
         snapshot = render_performance.get_render_performance()
-        value_text = f"{snapshot.workers} de {snapshot.max_workers}"
-        if snapshot.workers_were_reclamped:
-            value_text += " · ajustado al equipo"
+        value_text = self._render_performance_value_text(snapshot)
         slider_max = max(2, snapshot.max_workers)
         slider_state = "disabled" if snapshot.max_workers == 1 else "normal"
         control = ctk.CTkFrame(parent, fg_color=BG_CARD2, corner_radius=8)
@@ -2189,7 +2204,7 @@ class InstagramAutoPro(ctk.CTk):
         slider.pack(side="left", padx=(0, 6), pady=6)
         value_label = ctk.CTkLabel(
             control, text=value_text,
-            text_color=TEXT_BODY, font=ctk.CTkFont(size=11), width=42,
+            text_color=TEXT_BODY, font=ctk.CTkFont(size=11), width=142,
         )
         value_label.pack(side="left", padx=(0, 10), pady=6)
 
@@ -2203,20 +2218,42 @@ class InstagramAutoPro(ctk.CTk):
             self._render_worker_syncing = was_syncing
         return control
 
+    def _render_performance_value_text(self, snapshot):
+        value_text = f"{snapshot.workers} de {snapshot.max_workers} equipo"
+        available_workers = snapshot.available_workers or snapshot.max_workers
+        if available_workers < snapshot.max_workers:
+            value_text += f" - RAM actual: {available_workers}"
+        if snapshot.workers_were_reclamped:
+            value_text += " - ajustado"
+        return value_text
+
     def _on_render_workers_changed(self, value):
         if getattr(self, "_render_worker_syncing", False):
             return
         current = render_performance.get_render_performance()
         workers = max(1, min(round(float(value)), current.max_workers))
+        available_workers = current.available_workers or current.max_workers
+        if workers > available_workers:
+            self._sync_render_worker_controls(current)
+            warning_key = (workers, available_workers, current.max_workers)
+            if getattr(self, "_render_memory_warning_key", None) != warning_key:
+                self._render_memory_warning_key = warning_key
+                messagebox.showwarning(
+                    "Rendimiento",
+                    (
+                        f"Ahora hay memoria para {available_workers} videos en paralelo.\n\n"
+                        f"Cerra mas programas para poder usar {workers}."
+                    ),
+                )
+            return
+        self._render_memory_warning_key = None
         snapshot = render_performance.save_render_workers(workers)
         self._sync_render_worker_controls(snapshot)
 
     def _sync_render_worker_controls(self, snapshot):
         self._render_worker_syncing = True
         try:
-            value_text = f"{snapshot.workers} de {snapshot.max_workers}"
-            if snapshot.workers_were_reclamped:
-                value_text += " · ajustado al equipo"
+            value_text = self._render_performance_value_text(snapshot)
             for slider, value_label in self._render_worker_controls:
                 slider_max = max(2, snapshot.max_workers)
                 slider.configure(
@@ -3853,7 +3890,7 @@ class InstagramAutoPro(ctk.CTk):
         )
         self._acc_header_lbl.grid(row=0, column=0, sticky="w")
         self.btn_airtable_config = GhostButton(
-            accounts_header, text="Configurar Airtable", width=145,
+            accounts_header, text="Conectar y preparar Airtable", width=205,
             command=self.configure_airtable,
         )
         self.btn_airtable_config.grid(row=0, column=1, padx=(0, 8), sticky="e")
@@ -3884,14 +3921,14 @@ class InstagramAutoPro(ctk.CTk):
         self._admin_refresh()
 
     def configure_airtable(self):
-        """Guarda la configuración local de lectura para esta instalación."""
+        """Prepara una tabla existente y guarda la configuración local al terminar."""
         try:
             current = load_airtable_config()
         except AirtableSyncError:
             current = AirtableConfig("", "", "Cuentas")
 
         token = simpledialog.askstring(
-            "Airtable", "Personal Access Token (solo lectura):",
+            "Airtable", "Personal Access Token (lectura y edición de columnas):",
             initialvalue=current.personal_access_token, show="*", parent=self,
         )
         if token is None:
@@ -3908,12 +3945,29 @@ class InstagramAutoPro(ctk.CTk):
         )
         if table_name is None:
             return
-        try:
-            save_airtable_config(AirtableConfig(token, base_id, table_name))
-        except AirtableSyncError as exc:
-            messagebox.showerror("Airtable", str(exc), parent=self)
-            return
-        messagebox.showinfo("Airtable", "Configuración guardada en esta GUI.", parent=self)
+        config = AirtableConfig(token, base_id, table_name)
+        self.btn_airtable_config.configure(state="disabled", text="Conectando...")
+
+        def task():
+            return prepare_airtable_account_table(config)
+
+        def done(success, result):
+            self.btn_airtable_config.configure(
+                state="normal", text="Conectar y preparar Airtable"
+            )
+            if not success:
+                messagebox.showerror("Airtable", result, parent=self)
+                return
+            try:
+                save_airtable_config(config)
+            except AirtableSyncError as exc:
+                messagebox.showerror("Airtable", str(exc), parent=self)
+                return
+            messagebox.showinfo(
+                "Airtable", airtable_schema_preparation_text(result), parent=self
+            )
+
+        WorkerThread(self, done, task).start()
 
     def sync_airtable_accounts(self):
         """Descarga Airtable y pide confirmación antes de modificar SQLite local."""

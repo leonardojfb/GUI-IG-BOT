@@ -5,6 +5,7 @@ param(
     [switch]$IncludeClientDatabase,
     [switch]$IncludeRealDatabase,
     [switch]$IncludeClientHistory,
+    [switch]$BootstrapUpdater,
     [string]$DownloadUrl = "",
     [string]$GitHubRepository = "leonardojfb/GUI-IG-BOT",
     [string]$Notes = ""
@@ -44,10 +45,44 @@ $ReleaseFiles = @(
     "cleaner.py",
     "vercuentas.py",
     "logo_elittisse.svg",
+    "tools/ffmpeg/bin/ffmpeg.exe",
+    "tools/ffmpeg/bin/ffprobe.exe",
     "styles/colors.py",
     "styles/components.py",
     "styles/__init__.py"
 )
+
+# Puente para instalaciones cuyo updater aún no permite copiar módulos nuevos.
+# Debe publicarse antes de una release que agregue imports locales nuevos.
+$BootstrapReleaseFiles = @(
+    "updater.py",
+    "version.json"
+)
+
+if ($BootstrapUpdater) {
+    $ReleaseFiles = $BootstrapReleaseFiles
+}
+
+function Ensure-BundledFfmpegTool {
+    param(
+        [Parameter(Mandatory=$true)][string]$ExecutableName
+    )
+    $Target = Join-Path $Root ("tools/ffmpeg/bin/{0}" -f $ExecutableName)
+    if (Test-Path -LiteralPath $Target -PathType Leaf) {
+        return
+    }
+
+    $Command = Get-Command $ExecutableName -ErrorAction SilentlyContinue
+    if (-not $Command -or -not (Test-Path -LiteralPath $Command.Source -PathType Leaf)) {
+        throw "Falta $ExecutableName. Instala FFmpeg en PATH o coloca $Target antes de generar la release."
+    }
+
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Target) | Out-Null
+    Copy-Item -LiteralPath $Command.Source -Destination $Target -Force
+}
+
+Ensure-BundledFfmpegTool "ffmpeg.exe"
+Ensure-BundledFfmpegTool "ffprobe.exe"
 
 foreach ($File in $ReleaseFiles) {
     if (-not (Test-Path -LiteralPath (Join-Path $Root $File) -PathType Leaf)) {

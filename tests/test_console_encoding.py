@@ -76,3 +76,25 @@ def test_organizadortg_and_gui_call_ensure_stdout_utf8():
 
     assert "ensure_stdout_utf8" in organizadortg_src
     assert "ensure_stdout_utf8" in gui_src
+
+
+def test_ffmpeg_tool_command_prefers_bundled_windows_binary(tmp_path, monkeypatch):
+    import console_encoding
+
+    bundled_bin = tmp_path / "tools" / "ffmpeg" / "bin"
+    bundled_bin.mkdir(parents=True)
+    ffmpeg_path = bundled_bin / "ffmpeg.exe"
+    ffmpeg_path.write_bytes(b"binary")
+    monkeypatch.setattr(console_encoding, "APP_DIR", tmp_path)
+
+    assert console_encoding.ffmpeg_tool_command("ffmpeg") == str(ffmpeg_path)
+
+
+def test_ffmpeg_tool_command_falls_back_to_path_name_when_bundled_binary_is_missing(
+    tmp_path, monkeypatch,
+):
+    import console_encoding
+
+    monkeypatch.setattr(console_encoding, "APP_DIR", tmp_path)
+
+    assert console_encoding.ffmpeg_tool_command("ffprobe") == "ffprobe"
