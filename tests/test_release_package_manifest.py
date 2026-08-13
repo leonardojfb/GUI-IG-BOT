@@ -44,6 +44,13 @@ def _release_files_from_build_script():
     return set(re.findall(r'"([^"]+)"', match.group(1)))
 
 
+def _bootstrap_release_files_from_build_script():
+    script = (REPO_ROOT / "build_release.ps1").read_text(encoding="utf-8")
+    match = re.search(r"\$BootstrapReleaseFiles\s*=\s*@\((.*?)\)", script, re.S)
+    assert match, "build_release.ps1 must define a $BootstrapReleaseFiles array"
+    return set(re.findall(r'"([^"]+)"', match.group(1)))
+
+
 def _imported_local_modules(path):
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     imported = set()
@@ -90,7 +97,7 @@ def test_release_packages_clean_pc_video_dependencies():
 
 
 def test_legacy_updater_can_apply_import_compatible_python_files():
-    release_files = _release_files_from_build_script()
+    release_files = _bootstrap_release_files_from_build_script()
     legacy_python = [
         REPO_ROOT / file
         for file in release_files
@@ -104,6 +111,10 @@ def test_legacy_updater_can_apply_import_compatible_python_files():
 
     missing = {file: modules for file, modules in missing.items() if modules}
     assert missing == {}
+
+
+def test_bootstrap_package_only_contains_files_an_old_updater_can_copy():
+    assert _bootstrap_release_files_from_build_script() == {"updater.py", "version.json"}
 
 
 def test_legacy_updater_python_files_do_not_require_new_console_encoding_names():

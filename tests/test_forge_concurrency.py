@@ -53,6 +53,9 @@ class _Database:
     def add_tanda(self, *args):
         self.saved_tandas.append(args)
 
+    def set_tanda_trial(self, tanda_name, is_trial):
+        self.trial_tandas = [(tanda_name, is_trial)]
+
 
 def _forge_app(tmp_path, completed):
     videos = [tmp_path / "one.mp4", tmp_path / "two.mp4"]
@@ -81,6 +84,7 @@ def _forge_app(tmp_path, completed):
         forge_meta_assignments=metadata,
         e_forge_tanda=_Value("Concurrent"),
         e_forge_copies=_Value("1"),
+        forge_trial_mode_var=_Value("Normal"),
         forge_fx_vars={},
         forge_efectos_var=_Value("Default"),
         forge_fuerza_var=_Value("Default"),
@@ -179,6 +183,7 @@ def test_forge_records_are_saved_after_all_variants_complete(monkeypatch, tmp_pa
         "two.mp4_1",
     ]
     assert app.db.saved_tandas == [("Concurrent", "Concurrent", "Concurrent", None)]
+    assert app.db.trial_tandas == [("Concurrent", False)]
 
 
 def test_forge_variant_cpu_command_uses_snapshot_thread_budget(monkeypatch):

@@ -5,6 +5,7 @@ param(
     [switch]$IncludeClientDatabase,
     [switch]$IncludeRealDatabase,
     [switch]$IncludeClientHistory,
+    [switch]$BootstrapUpdater,
     [string]$DownloadUrl = "",
     [string]$GitHubRepository = "leonardojfb/GUI-IG-BOT",
     [string]$Notes = ""
@@ -50,6 +51,17 @@ $ReleaseFiles = @(
     "styles/components.py",
     "styles/__init__.py"
 )
+
+# Puente para instalaciones cuyo updater aún no permite copiar módulos nuevos.
+# Debe publicarse antes de una release que agregue imports locales nuevos.
+$BootstrapReleaseFiles = @(
+    "updater.py",
+    "version.json"
+)
+
+if ($BootstrapUpdater) {
+    $ReleaseFiles = $BootstrapReleaseFiles
+}
 
 function Ensure-BundledFfmpegTool {
     param(
