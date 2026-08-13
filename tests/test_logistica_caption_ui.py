@@ -37,3 +37,10 @@ def test_por_cuentas_distribution_calendarizes_filenames_for_telegram_captions()
     run = _method_source("_acct_dist_run")
 
     assert "build_calendar_video_filename" in run
+
+
+def test_por_cuentas_has_optional_individual_caption_controls():
+    source = _method_source("_build_dist_cuentas_tab")
+
+    assert "Captions individuales" in source
+    assert "_acct_refresh_individual_captions" in source

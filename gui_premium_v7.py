@@ -2772,28 +2772,39 @@ class InstagramAutoPro(ctk.CTk):
             padx=(16, 16), pady=(0, 8),
         )
 
+        self.acct_individual_captions_var = tk.BooleanVar(value=False)
+        ctk.CTkSwitch(
+            cfg, text="Captions individuales", variable=self.acct_individual_captions_var,
+            command=self._acct_on_individual_captions_toggle,
+        ).grid(row=2, column=0, columnspan=2, padx=16, pady=(0, 8), sticky="w")
+        self.acct_individual_captions_btn = GhostButton(
+            cfg, text="Editar captions individuales", state="disabled",
+            command=self._acct_refresh_individual_captions,
+        )
+        self.acct_individual_captions_btn.grid(row=2, column=2, columnspan=4, padx=8, pady=(0, 8), sticky="w")
+
         # Fila 1: Videos al día + Período + total calculado
         ctk.CTkLabel(cfg, text="Videos al día:", text_color=TEXT_MUTED).grid(
-            row=2, column=0, padx=(16, 8), pady=(4, 16), sticky="e")
+            row=3, column=0, padx=(16, 8), pady=(4, 16), sticky="e")
         self.acct_dist_vpd = Stepper(
             cfg, value=3, min=1, max=50,
             command=lambda _: self._acct_dist_update_total()
         )
-        self.acct_dist_vpd.grid(row=2, column=1, padx=(0, 16), pady=(4, 16), sticky="w")
+        self.acct_dist_vpd.grid(row=3, column=1, padx=(0, 16), pady=(4, 16), sticky="w")
 
         ctk.CTkLabel(cfg, text="Período:", text_color=TEXT_MUTED).grid(
-            row=2, column=2, padx=(8, 8), pady=(4, 16), sticky="e")
+            row=3, column=2, padx=(8, 8), pady=(4, 16), sticky="e")
         self.acct_dist_period = ctk.CTkComboBox(
             cfg, values=list(self.PERIOD_DAYS.keys()),
             fg_color=BG_INPUT, border_color=BORDER,
             command=lambda _: self._acct_dist_update_total())
         self.acct_dist_period.set("1 semana")
-        self.acct_dist_period.grid(row=2, column=3, padx=(0, 16), pady=(4, 16), sticky="ew")
+        self.acct_dist_period.grid(row=3, column=3, padx=(0, 16), pady=(4, 16), sticky="ew")
 
         self.acct_dist_total_lbl = ctk.CTkLabel(
             cfg, text="= 21 videos/cuenta",
             font=ctk.CTkFont(size=13, weight="bold"), text_color=NEON_CYAN)
-        self.acct_dist_total_lbl.grid(row=2, column=4, columnspan=2, padx=(0, 16), pady=(4, 16), sticky="w")
+        self.acct_dist_total_lbl.grid(row=3, column=4, columnspan=2, padx=(0, 16), pady=(4, 16), sticky="w")
         self._acct_dist_update_total()
 
         # ── Cuentas ──────────────────────────────────────────────────────
@@ -3100,6 +3111,13 @@ class InstagramAutoPro(ctk.CTk):
         if not tanda:
             messagebox.showwarning("⚠️", "Selecciona una tanda fuente")
             return
+        if self.acct_individual_captions_var.get():
+            missing = self._acct_missing_individual_captions(tanda)
+            if missing:
+                return messagebox.showwarning(
+                    "Captions individuales faltantes",
+                    "Falta asignar caption a: " + ", ".join(missing),
+                )
         if not accounts:
             messagebox.showwarning("⚠️", "Agrega al menos una cuenta")
             return
@@ -5099,3 +5117,82 @@ if __name__ == "__main__":
 
     def _trial_dist_run(self, preview_only):
         return self._trial_dist_run_per_account(preview_only)
+    def _acct_on_individual_captions_toggle(self):
+        enabled = self.acct_individual_captions_var.get()
+        self.acct_individual_captions_btn.configure(state="normal" if enabled else "disabled")
+        if enabled:
+            self._acct_refresh_individual_captions()
+
+    def _acct_normal_tanda_files(self, tanda=None):
+        tanda = tanda or self.acct_dist_tanda.get().strip()
+        folder = os.path.join(_BASE_DIR, "videos_finales", tanda)
+        if not os.path.isdir(folder):
+            return []
+        return sorted(name for name in os.listdir(folder) if name.lower().endswith((".mp4", ".mov", ".avi")))
+
+    def _acct_refresh_individual_captions(self):
+        tanda = self.acct_dist_tanda.get().strip()
+        if not tanda:
+            return messagebox.showwarning("Captions individuales", "Selecciona una tanda fuente.")
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(f"Captions individuales - {tanda}")
+        dialog.geometry("860x680")
+        dialog.configure(fg_color=BG_APP)
+        scroll = ctk.CTkScrollableFrame(dialog, fg_color=BG_CARD2)
+        scroll.pack(fill="both", expand=True, padx=16, pady=16)
+        editors, previews = {}, []
+        captions = self.db.get_normal_source_captions(tanda)
+        folder = os.path.join(_BASE_DIR, "videos_finales", tanda)
+        for source_key, copies in group_trial_sources(self._acct_normal_tanda_files(tanda)):
+            row = ctk.CTkFrame(scroll, fg_color=BG_CARD)
+            row.pack(fill="x", padx=4, pady=4)
+            preview_label = ctk.CTkLabel(row, text="Cargando preview", width=120, height=68)
+            preview_label.pack(side="left", padx=8, pady=8)
+            body = ctk.CTkFrame(row, fg_color="transparent")
+            body.pack(side="left", fill="both", expand=True, padx=(0, 8), pady=6)
+            ctk.CTkLabel(body, text=f"{source_key} ({len(copies)} copias)", text_color=TEXT_BODY).pack(anchor="w")
+            editor = ctk.CTkTextbox(body, height=72, fg_color=BG_INPUT, border_color=BORDER, border_width=1)
+            editor.pack(fill="x", pady=(2, 0))
+            editor.insert("1.0", captions.get(source_key, ""))
+            editors[source_key] = editor
+
+            def load(label=preview_label, path=os.path.join(folder, copies[0])):
+                def task():
+                    cache = trial_preview_path(path)
+                    if not cache.exists():
+                        cache.parent.mkdir(parents=True, exist_ok=True)
+                        from video_editor import render_preview
+                        render_preview(path, [], str(cache), timestamp=0.1)
+                    return cache
+                def done(success, result):
+                    if not success:
+                        return label.configure(text="Sin preview")
+                    try:
+                        from PIL import Image
+                        image = Image.open(result).convert("RGB")
+                        image.thumbnail((120, 68), Image.Resampling.LANCZOS)
+                        preview = ctk.CTkImage(light_image=image, dark_image=image, size=image.size)
+                        previews.append(preview)
+                        label.configure(image=preview, text="")
+                    except Exception:
+                        label.configure(text="Sin preview")
+                WorkerThread(self, done, task).start()
+            load()
+
+        def save():
+            missing = []
+            for source_key, editor in editors.items():
+                text = editor.get("1.0", "end-1c").strip()
+                if not text:
+                    missing.append(source_key)
+                self.db.set_normal_source_caption(tanda, source_key, text)
+            if missing:
+                return messagebox.showwarning("Captions individuales", "Falta caption: " + ", ".join(missing), parent=dialog)
+            dialog.destroy()
+            messagebox.showinfo("Captions individuales", "Captions guardados.")
+
+        PrimaryButton(dialog, text="Guardar captions individuales", command=save).pack(pady=(0, 16))
+
+    def _acct_missing_individual_captions(self, tanda):
+        captions = self.db.get_normal_source_captions(tanda)
+        return missing_trial_caption_sources(self._acct_normal_tanda_files(tanda), captions)

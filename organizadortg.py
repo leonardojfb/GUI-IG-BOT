@@ -354,6 +354,19 @@ def load_trial_caption_maps():
         for tanda in db.get_trial_tandas()
     }
 
+
+def caption_for_normal_individual_video(filename, captions):
+    """Return a normal individual caption literally, by Forge source."""
+    return captions.get(extract_source_key_from_calendar_filename(filename))
+
+
+def load_normal_individual_caption_maps():
+    return {
+        _tanda_tag(tanda["tanda_name"]): captions
+        for tanda in db.get_all_tandas()
+        if (captions := db.get_normal_source_captions(tanda["tanda_name"]))
+    }
+
 history_db = load_json(os.path.join(base_dir, HISTORY_FILE))
 
 # --- 3. BASE DE DATOS Y ENRUTAMIENTO ---
@@ -729,6 +742,7 @@ def _account_tag(acc_info):
 def execute_telegram_plan(start_date, selected_accounts=None, controller=None, reset_topics=False):
     caption_pools = load_tanda_caption_pools()
     trial_caption_maps = load_trial_caption_maps()
+    normal_individual_caption_maps = load_normal_individual_caption_maps()
 
     accounts = get_accounts_with_va_info()
     all_videos = scan_calendar_structure()
@@ -871,7 +885,13 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     )
                     cap = caption_for_trial_calendar_video(vid["filename"], trial_map)
                 else:
-                    cap = caption_for_calendar_video(vid['filename'], caption_pools, caption_indexes)
+                    normal_map = normal_individual_caption_maps.get(
+                        extract_tanda_tag_from_calendar_filename(vid["filename"]), {}
+                    )
+                    cap = (
+                        caption_for_normal_individual_video(vid["filename"], normal_map)
+                        if normal_map else caption_for_calendar_video(vid['filename'], caption_pools, caption_indexes)
+                    )
                 try:
                     ok, video_topic_id = _send_video_to_topic(chat_id, video_topic_id, cap, vid['path'], topics_state, username, tag)
                     if ok:

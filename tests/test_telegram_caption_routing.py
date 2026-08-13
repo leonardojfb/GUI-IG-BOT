@@ -67,3 +67,12 @@ def test_logistica_caption_assignment_persists_on_the_tanda(tmp_path):
     finally:
         db.close()
         database.DB_PATH = previous_db_path
+
+
+def test_normal_individual_copies_use_the_same_literal_caption():
+    captions = {"vid1": "CAPTION ONE\n#same"}
+    first = "vid1__c01__TANDA_NORMAL__ACC1__D1__S1.mp4"
+    second = "vid1__c02__TANDA_NORMAL__ACC1__D1__S2.mp4"
+
+    assert organizadortg.caption_for_normal_individual_video(first, captions) == captions["vid1"]
+    assert organizadortg.caption_for_normal_individual_video(second, captions) == captions["vid1"]
