@@ -53,3 +53,17 @@
 - [ ] Run `python -m pytest tests/test_airtable_sync.py tests/test_release_package_manifest.py -q`.
 - [ ] Run `python -m pytest -q`.
 - [ ] On the later v1.0.24 normal release build, inspect that `airtable_sync.py` is included while `airtable_config.json`, databases, tokens, and account history are excluded.
+
+### Task 4: Legacy generic-field migration
+
+**Files:**
+- Modify: `airtable_sync.py`, `gui_premium_v7.py`
+- Test: `tests/test_airtable_sync.py`
+
+**Interfaces:**
+- Produces: a previewable migration from `Field 1` through `Field 8` to the agreed Airtable columns.
+
+- [ ] Use ASCII destination names `Categoria` and `Dia`; no accent-dependent field names.
+- [ ] Copy only into empty destinations, never delete or overwrite the generic source fields.
+- [ ] Convert only `Sí` from legacy `Field 4` to the `Trials desbloqueados` checkbox; leave `No` and `Sin dato` unchecked.
+- [ ] Show a preview and require confirmation before PATCHing Airtable records in batches.
