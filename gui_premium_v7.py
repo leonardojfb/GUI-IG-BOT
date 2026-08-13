@@ -22,7 +22,8 @@ import requests
 from database import DatabaseManager
 from trial_content import (
     group_trial_sources, missing_trial_caption_sources,
-    selected_trial_usernames, trial_calendar_root,
+    selected_trial_usernames, trial_calendar_root, build_trial_account_plan,
+    reused_trial_tanda_warnings, trial_preview_path,
 )
 from updater import APP_DIR as UPDATE_APP_DIR, check_and_apply, load_config, read_local_version
 from console_encoding import ensure_stdout_utf8
@@ -2418,18 +2419,22 @@ class InstagramAutoPro(ctk.CTk):
         self.trial_accounts_lbl = ctk.CTkLabel(cfg, text="0 cuentas con TRIALS ACTIVOS", text_color=TEXT_MUTED)
         self.trial_accounts_lbl.pack(side="right")
 
+        self.trial_account_scroll = ctk.CTkScrollableFrame(parent, fg_color=BG_CARD2, height=150)
+        self.trial_account_scroll.grid(row=2, column=0, columnspan=2, sticky="ew", padx=16, pady=8)
+        self.trial_account_vars = {}
         self.trial_caption_scroll = ctk.CTkScrollableFrame(parent, fg_color=BG_CARD2)
-        self.trial_caption_scroll.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=16, pady=8)
-        parent.grid_rowconfigure(2, weight=1)
+        self.trial_caption_scroll.grid(row=3, column=0, columnspan=2, sticky="nsew", padx=16, pady=8)
+        parent.grid_rowconfigure(3, weight=1)
         self.trial_caption_editors = {}
+        self.trial_thumbnail_images = []
 
         buttons = ctk.CTkFrame(parent, fg_color="transparent")
-        buttons.grid(row=3, column=0, columnspan=2, pady=(4, 12))
+        buttons.grid(row=4, column=0, columnspan=2, pady=(4, 12))
         GhostButton(buttons, text="Guardar captions Trial", command=self._save_trial_captions).pack(side="left", padx=6)
-        GhostButton(buttons, text="VISTA PREVIA", command=lambda: self._trial_dist_run(True)).pack(side="left", padx=6)
-        PrimaryButton(buttons, text="DISTRIBUIR TRIALS", command=lambda: self._trial_dist_run(False)).pack(side="left", padx=6)
+        GhostButton(buttons, text="VISTA PREVIA", command=lambda: self._trial_dist_run_per_account(True)).pack(side="left", padx=6)
+        PrimaryButton(buttons, text="DISTRIBUIR TRIALS", command=lambda: self._trial_dist_run_per_account(False)).pack(side="left", padx=6)
         self.trial_dist_result = ctk.CTkTextbox(parent, height=100, fg_color=BG_INPUT, text_color=NEON_CYAN)
-        self.trial_dist_result.grid(row=4, column=0, columnspan=2, sticky="ew", padx=16, pady=(0, 16))
+        self.trial_dist_result.grid(row=5, column=0, columnspan=2, sticky="ew", padx=16, pady=(0, 16))
 
     def _trial_tanda_files(self, tanda_name=None):
         tanda_name = tanda_name or getattr(self, "trial_dist_tanda", None).get()
@@ -2438,30 +2443,76 @@ class InstagramAutoPro(ctk.CTk):
             return []
         return sorted(name for name in os.listdir(folder) if name.lower().endswith((".mp4", ".mov", ".avi")))
 
+    def _trial_refresh_account_rows(self):
+        for widget in self.trial_account_scroll.winfo_children():
+            widget.destroy()
+        tandas = [""] + self.db.get_trial_tandas()
+        self.trial_account_vars = {}
+        for account in self.db.get_trials_active_accounts():
+            username = account["username"]
+            row = ctk.CTkFrame(self.trial_account_scroll, fg_color=BG_CARD)
+            row.pack(fill="x", padx=4, pady=3)
+            ctk.CTkLabel(row, text=f"@{username} [{account.get('account_type', '')}]", width=220, anchor="w").pack(side="left", padx=8)
+            var = tk.StringVar(value="")
+            ctk.CTkComboBox(row, values=tandas, variable=var, width=260, command=lambda _v: self._trial_refresh_sources()).pack(side="left", padx=8, pady=5)
+            self.trial_account_vars[username] = var
+
+    def _trial_selected_assignments(self):
+        return {u: v.get().strip() for u, v in self.trial_account_vars.items() if v.get().strip()}
+
+    def _trial_load_thumbnail(self, label, video_path):
+        def task():
+            cache = trial_preview_path(video_path)
+            if not cache.exists():
+                cache.parent.mkdir(parents=True, exist_ok=True)
+                from video_editor import render_preview
+                render_preview(str(video_path), [], str(cache), timestamp=0.1)
+            return cache
+        def done(success, result):
+            if success:
+                try:
+                    from PIL import Image
+                    image = Image.open(result).convert("RGB"); image.thumbnail((120, 68), Image.Resampling.LANCZOS)
+                    preview = ctk.CTkImage(light_image=image, dark_image=image, size=image.size)
+                    self.trial_thumbnail_images.append(preview); label.configure(image=preview, text="")
+                    return
+                except Exception:
+                    pass
+            label.configure(text="Sin preview")
+        WorkerThread(self, done, task).start()
+
     def _trial_refresh_sources(self, _value=None):
-        tanda = self.trial_dist_tanda.get().strip()
+        tandas = sorted(set(self._trial_selected_assignments().values()))
+        if not tandas and self.trial_dist_tanda.get().strip():
+            tandas = [self.trial_dist_tanda.get().strip()]
         for widget in self.trial_caption_scroll.winfo_children():
             widget.destroy()
         self.trial_caption_editors = {}
-        captions = self.db.get_trial_source_captions(tanda) if tanda else {}
-        for source_key, copies in group_trial_sources(self._trial_tanda_files(tanda)):
-            row = ctk.CTkFrame(self.trial_caption_scroll, fg_color=BG_CARD)
-            row.pack(fill="x", padx=4, pady=4)
-            ctk.CTkLabel(row, text=f"{source_key} ({len(copies)} copias)", text_color=TEXT_BODY).pack(
-                anchor="w", padx=8, pady=(6, 2)
-            )
-            editor = ctk.CTkTextbox(row, height=72, fg_color=BG_INPUT, border_color=BORDER, border_width=1)
-            editor.pack(fill="x", padx=8, pady=(0, 8))
-            editor.insert("1.0", captions.get(source_key, ""))
-            self.trial_caption_editors[source_key] = editor
+        self.trial_thumbnail_images = []
+        for tanda in tandas:
+            captions = self.db.get_trial_source_captions(tanda)
+            folder = os.path.join(_BASE_DIR, "videos_finales", tanda)
+            for source_key, copies in group_trial_sources(self._trial_tanda_files(tanda)):
+                row = ctk.CTkFrame(self.trial_caption_scroll, fg_color=BG_CARD)
+                row.pack(fill="x", padx=4, pady=4)
+                preview_label = ctk.CTkLabel(row, text="Cargando preview", width=120, height=68)
+                preview_label.pack(side="left", padx=8, pady=8)
+                body = ctk.CTkFrame(row, fg_color="transparent")
+                body.pack(side="left", fill="both", expand=True, padx=(0, 8), pady=6)
+                ctk.CTkLabel(body, text=f"{tanda} / {source_key} ({len(copies)} copias)", text_color=TEXT_BODY).pack(anchor="w")
+                editor = ctk.CTkTextbox(body, height=72, fg_color=BG_INPUT, border_color=BORDER, border_width=1)
+                editor.pack(fill="x", pady=(2, 0))
+                editor.insert("1.0", captions.get(source_key, ""))
+                self.trial_caption_editors[(tanda, source_key)] = editor
+                self._trial_load_thumbnail(preview_label, os.path.join(folder, copies[0]))
 
     def _save_trial_captions(self):
-        tanda = self.trial_dist_tanda.get().strip()
-        if not tanda:
-            return messagebox.showwarning("Trials", "Selecciona una tanda Trial.")
-        for source_key, editor in self.trial_caption_editors.items():
+        if not self.trial_caption_editors:
+            return messagebox.showwarning("Trials", "Selecciona una tanda para al menos una cuenta.")
+        for (tanda, source_key), editor in self.trial_caption_editors.items():
             self.db.set_trial_source_caption(tanda, source_key, editor.get("1.0", "end-1c").strip())
-        messagebox.showinfo("Trials", "Captions Trial guardados.")
+        if not getattr(self, "_trial_saving_silently", False):
+            messagebox.showinfo("Trials", "Captions Trial guardados.")
 
     def _trial_missing_caption_sources(self, tanda_name):
         return missing_trial_caption_sources(
@@ -2472,7 +2523,48 @@ class InstagramAutoPro(ctk.CTk):
     def _trial_calendar_root(self):
         return str(trial_calendar_root(_BASE_DIR))
 
-    def _trial_dist_run(self, preview_only):
+    def _trial_dist_run_per_account(self, preview_only):
+        assignments = self._trial_selected_assignments()
+        if not assignments:
+            return messagebox.showwarning("Trials", "Selecciona una tanda para al menos una cuenta.")
+        self._trial_saving_silently = True
+        self._save_trial_captions()
+        self._trial_saving_silently = False
+        missing = [f"{t}/{s}" for t in set(assignments.values()) for s in self._trial_missing_caption_sources(t)]
+        if missing:
+            return messagebox.showwarning("Captions Trial faltantes", ", ".join(missing))
+        try:
+            per_day = int(self.trial_dist_vpd.get())
+            files_by_tanda = {t: self._trial_tanda_files(t) for t in set(assignments.values())}
+            available = sum(len(v) for v in files_by_tanda.values())
+            raw_days = self.trial_dist_days.get().strip().upper()
+            days = max(1, (available + len(assignments) * per_day - 1) // (len(assignments) * per_day)) if raw_days == "MAX" else int(raw_days)
+        except ValueError:
+            return messagebox.showwarning("Trials", "Dias invalidos.")
+        plan = build_trial_account_plan(assignments, files_by_tanda, per_day, days)
+        warnings = reused_trial_tanda_warnings(plan)
+        result = "\n".join(warnings + [f"@{u}: {len(v)} videos" + (f" (faltan {plan.shortfalls[u]})" if u in plan.shortfalls else "") for u, v in plan.assigned.items()])
+        if preview_only:
+            self.trial_dist_result.delete("1.0", "end"); self.trial_dist_result.insert("1.0", result); return
+        if not messagebox.askyesno("Distribuir Trials", "\n\n".join(warnings + [f"Crear {sum(map(len, plan.assigned.values()))} videos sin reutilizar metadata?"])):
+            return
+        ids = {r["username"]: r["id"] for r in self.db.get_trials_active_accounts()}
+        root = self._trial_calendar_root()
+        def task():
+            from Organizador import build_calendar_video_filename
+            count = 0
+            for user, files in plan.assigned.items():
+                tanda = assignments[user]
+                for index, name in enumerate(files):
+                    day, slot = index // per_day + 1, index % per_day + 1
+                    target = os.path.join(root, f"Dia_{day}", user, build_calendar_video_filename(name, tanda, ids[user], day, slot))
+                    _copy_calendar_file(os.path.join(_BASE_DIR, "videos_finales", tanda, name), target); count += 1
+            shortages = ", ".join(f"@{u}: faltan {n}" for u, n in plan.shortfalls.items())
+            return f"OK: {count} videos Trial" + (f"\nSin reutilizar: {shortages}" if shortages else "")
+        def done(success, text):
+            self.trial_dist_result.delete("1.0", "end"); self.trial_dist_result.insert("1.0", text)
+            if not success: messagebox.showerror("Trials", text)
+        WorkerThread(self, done, task).start()
         tanda = self.trial_dist_tanda.get().strip()
         if not tanda:
             return messagebox.showwarning("Trials", "Selecciona una tanda Trial.")
@@ -2701,6 +2793,7 @@ class InstagramAutoPro(ctk.CTk):
                     self.trial_dist_tanda.set(trial_tandas[0])
                 active_trials = len(self.db.get_trials_active_accounts())
                 self.trial_accounts_lbl.configure(text=f"{active_trials} cuentas con TRIALS ACTIVOS")
+                self._trial_refresh_account_rows()
                 self._trial_refresh_sources()
 
             cats = self.db.get_categories()
@@ -4795,3 +4888,61 @@ class InstagramAutoPro(ctk.CTk):
 if __name__ == "__main__":
     app = InstagramAutoPro()
     app.mainloop()
+    def _trial_refresh_account_rows(self):
+        for widget in self.trial_account_scroll.winfo_children():
+            widget.destroy()
+        active_accounts = self.db.get_trials_active_accounts()
+        trial_tandas = self.db.get_trial_tandas()
+        self.trial_account_vars = {}
+        for account in active_accounts:
+            username = account["username"]
+            row = ctk.CTkFrame(self.trial_account_scroll, fg_color=BG_CARD)
+            row.pack(fill="x", padx=4, pady=3)
+            ctk.CTkLabel(
+                row, text=f"@{username} [{account.get('account_type', '')}]",
+                text_color=TEXT_BODY, width=230, anchor="w",
+            ).pack(side="left", padx=8, pady=6)
+            var = tk.StringVar(value="")
+            combo = ctk.CTkComboBox(
+                row, values=[""] + trial_tandas, variable=var,
+                fg_color=BG_INPUT, border_color=BORDER, width=280,
+                command=lambda _value: self._trial_refresh_sources(),
+            )
+            combo.pack(side="left", padx=8, pady=6)
+            self.trial_account_vars[username] = var
+        self.trial_accounts_lbl.configure(text=f"{len(active_accounts)} cuentas con TRIALS ACTIVOS")
+
+    def _trial_selected_assignments(self):
+        return {
+            username: variable.get().strip()
+            for username, variable in self.trial_account_vars.items()
+            if variable.get().strip()
+        }
+
+    def _trial_load_thumbnail(self, label, video_path):
+        def task():
+            cache = trial_preview_path(video_path)
+            if not cache.exists():
+                cache.parent.mkdir(parents=True, exist_ok=True)
+                from video_editor import render_preview
+                render_preview(str(video_path), [], str(cache), timestamp=0.1)
+            return cache
+
+        def done(success, result):
+            if not success:
+                label.configure(text="Sin preview")
+                return
+            try:
+                from PIL import Image
+                image = Image.open(result).convert("RGB")
+                image.thumbnail((120, 68), Image.Resampling.LANCZOS)
+                preview = ctk.CTkImage(light_image=image, dark_image=image, size=image.size)
+                self.trial_thumbnail_images.append(preview)
+                label.configure(image=preview, text="")
+            except Exception:
+                label.configure(text="Sin preview")
+
+        WorkerThread(self, done, task).start()
+
+    def _trial_dist_run(self, preview_only):
+        return self._trial_dist_run_per_account(preview_only)
