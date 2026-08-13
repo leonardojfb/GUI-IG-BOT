@@ -162,7 +162,11 @@ class AirtableSchemaPreparationTest(unittest.TestCase):
             prepare_airtable_account_table(
                 AirtableConfig("pat_secret", "app123", "Cuentas"), fake_get, fake_post
             )
-        self.assertNotIn("pat_secret", str(exc.exception))
+        message = str(exc.exception)
+        self.assertIn("HTTP 403", message)
+        self.assertIn("INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND", message)
+        self.assertIn("Username", message)
+        self.assertNotIn("pat_secret", message)
 
 
 class AirtableGuiConnectionTest(unittest.TestCase):

@@ -199,6 +199,16 @@ def _configured_table_schema(
     )
 
 
+def _airtable_error_code(response: Any) -> str:
+    """Devuelve solo el tipo de error público de Airtable, nunca el cuerpo ni token."""
+    try:
+        payload = response.json()
+        code = payload.get("error", {}).get("type", "") if isinstance(payload, dict) else ""
+    except Exception:
+        return ""
+    return code if isinstance(code, str) and code.replace("_", "").isalnum() else ""
+
+
 def prepare_airtable_account_table(
     config: AirtableConfig,
     requests_get: Callable[..., Any] = requests.get,
@@ -233,17 +243,22 @@ def prepare_airtable_account_table(
             response.raise_for_status()
         except Exception as exc:
             status_code = getattr(response, "status_code", None)
+            diagnostic = f"HTTP {status_code}" if isinstance(status_code, int) else "HTTP desconocido"
+            error_code = _airtable_error_code(response) if response is not None else ""
+            if error_code:
+                diagnostic = f"{diagnostic}: {error_code}"
             if status_code == 401:
-                message = "El token de Airtable es inválido o fue revocado."
+                message = f"El token de Airtable es inválido o fue revocado ({diagnostic})."
             elif status_code in (403, 404):
                 message = (
                     "El token fue aceptado, pero no tiene permiso para editar la estructura de esta base. "
-                    "Confirma acceso a esta base y schema.bases:write."
+                    "Confirma acceso a esta base y schema.bases:write. "
+                    f"Airtable rechazó '{required.name}' ({diagnostic})."
                 )
             else:
                 message = (
                     "No se pudo crear una columna en Airtable. "
-                    "Verifica que el token tenga schema.bases:write."
+                    f"Airtable rechazó '{required.name}' ({diagnostic})."
                 )
             raise AirtableSyncError(
                 message
