@@ -44,14 +44,19 @@ username contienen `trial`; el nuevo flujo no las seleccionará implícitamente.
    categoría ni la VA.
 2. En Forge > Trials, carga los videos fuente, define copias y procesa la tanda.
    Forge sigue guardando el registro fuente/salida que ya existe.
-3. En Logística > Trials, elige la tanda. La interfaz agrupa todos los archivos
-   `__cNN` por fuente y presenta una sola fila por grupo con un campo
-   multilínea para pegar el caption.
+3. En Logística > Trials, cada cuenta con `TRIALS ACTIVOS` elige su propia
+   tanda. La interfaz agrega todas las fuentes de las tandas seleccionadas,
+   usando una clave `(tanda, fuente)` para mostrar cada grupo `__cNN` una vez,
+   con miniatura y un campo multilínea para pegar el caption.
 4. Guardar persiste el texto por fuente. La previsualización y calendarización
    se bloquean con una lista clara de fuentes faltantes si alguna no tiene
    caption.
 5. La distribución Trial usa las reglas existentes de Logística pero escribe
-   exclusivamente en el calendario Trial para las cuentas activas.
+   exclusivamente en el calendario Trial para las cuentas activas. Cada
+   archivo Forge solo puede calendarizarse una vez: si dos cuentas eligieron la
+   misma tanda, se muestra el grupo de cuentas, disponibles, requeridos y
+   faltantes. Al confirmar, se usan solo los archivos existentes; nunca se
+   reutiliza metadata ni se generan copias extra.
 6. Al enviar, Telegram reconoce el calendario Trial, resuelve `source_key` del
    archivo calendarizado y usa el caption persistido literal. No aplica la
    rotación ni el shuffle de hashtags del flujo normal. Todas las copias de la
@@ -78,5 +83,8 @@ intacto y continúa usando sus pools/rotación de captions por tanda.
 - Resolución exacta: `vid1__c01`, `vid1__c02` y `vid1__c03` reciben el mismo
   caption literal; `vid2` usa solo el suyo.
 - Logística Trial selecciona solo cuentas activas y usa solo el calendario Trial.
+- Selector individual cuenta-tanda, advertencia de tanda repetida y reparto sin
+  duplicar archivos cuando el pool no alcanza.
+- Miniaturas asíncronas/cacheadas junto a cada fuente/caption Trial.
 - Telegram genera/usa topic Trial separado, sin cambiar el topic normal.
 - Regresión: las tandas y captions normales mantienen su comportamiento actual.
