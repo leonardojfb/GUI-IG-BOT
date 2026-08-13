@@ -109,7 +109,11 @@ class AirtableSchemaPreparationTest(unittest.TestCase):
             {"name": "2FA", "type": "multilineText"},
             {"name": "VA", "type": "singleLineText"},
             {"name": "Categoría", "type": "singleLineText"},
-            {"name": "Trials desbloqueados", "type": "checkbox"},
+            {
+                "name": "Trials desbloqueados",
+                "type": "checkbox",
+                "options": {"icon": "check", "color": "greenBright"},
+            },
             {"name": "Día", "type": "singleLineText"},
             {"name": "Red social", "type": "singleLineText"},
             {"name": "VPN / Proxy", "type": "multilineText"},

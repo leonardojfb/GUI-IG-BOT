@@ -41,6 +41,9 @@ AIRTABLE_ACCOUNT_COLUMNS = (
     AirtableRequiredField("VPN / Proxy", "multilineText"),
     AirtableRequiredField("Link", "url"),
 )
+AIRTABLE_FIELD_OPTIONS = {
+    "Trials desbloqueados": {"icon": "check", "color": "greenBright"},
+}
 
 
 class AirtableSyncError(Exception):
@@ -234,10 +237,13 @@ def prepare_airtable_account_table(
             continue
         response = None
         try:
+            payload = {"name": required.name, "type": required.field_type}
+            if required.name in AIRTABLE_FIELD_OPTIONS:
+                payload["options"] = AIRTABLE_FIELD_OPTIONS[required.name]
             response = requests_post(
                 fields_url,
                 headers=_airtable_headers(config),
-                json={"name": required.name, "type": required.field_type},
+                json=payload,
                 timeout=20,
             )
             response.raise_for_status()
