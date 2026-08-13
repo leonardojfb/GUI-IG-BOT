@@ -20,6 +20,7 @@ __pycache__/
 
 # Credentials and user-specific configuration
 panel_config.json
+airtable_config.json
 .env
 *.session
 
