@@ -48,6 +48,7 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "videos.py",
         "video_editor.py",
         "metadata_pool.py",
+        "trial_content.py",
         "telegram_core.py",
         "cleaner.py",
         "vercuentas.py",
