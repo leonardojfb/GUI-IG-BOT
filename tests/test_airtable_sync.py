@@ -14,6 +14,7 @@ from airtable_sync import (
     load_airtable_config,
     save_airtable_config,
 )
+from gui_premium_v7 import airtable_sync_review_text
 
 
 class FakeResponse:
@@ -105,3 +106,23 @@ class ReconciliationTest(unittest.TestCase):
         self.assertEqual(plan.delete_usernames, ["gone"])
         self.assertEqual(plan.categories_to_add, ["PROMO", "TRIALS"])
         self.assertNotIn("notes", plan.update[0])
+
+
+class ReviewTextTest(unittest.TestCase):
+    def test_review_contains_counts_and_usernames_only(self):
+        plan = build_account_sync_plan(
+            [{
+                "username": "one", "account_type": "PROMO", "assigned_va": "Ana",
+                "trials_active": False, "two_factor": "never-show", "account_day": "",
+                "social_network": "", "vpn_proxy": "never-show", "account_link": "",
+            }],
+            [{"id": 1, "username": "gone", "account_type": "PROMO", "assigned_va": "Ana"}],
+        )
+
+        text = airtable_sync_review_text(plan)
+
+        self.assertIn("1 creadas", text)
+        self.assertIn("1 eliminadas", text)
+        self.assertIn("@one", text)
+        self.assertIn("@gone", text)
+        self.assertNotIn("never-show", text)
