@@ -4,6 +4,7 @@ Limpio, sin código legacy, e integra la lógica Anti-Choque Global.
 """
 import sqlite3
 import os
+import json
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "organizador.db")
@@ -107,11 +108,26 @@ CREATE TABLE IF NOT EXISTS normal_source_captions (
     PRIMARY KEY (tanda_name, source_key),
     FOREIGN KEY (tanda_name) REFERENCES batch_tandas(tanda_name)
 );
+
+CREATE TABLE IF NOT EXISTS video_transform_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    process_kind TEXT NOT NULL,
+    source_path TEXT NOT NULL,
+    output_path TEXT NOT NULL UNIQUE,
+    output_filename TEXT NOT NULL,
+    tanda_name TEXT,
+    source_identity TEXT,
+    details_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_transform_logs_process_created
+ON video_transform_logs(process_kind, created_at);
 """
 
 class DatabaseManager:
-    def __init__(self):
-        self.db_path = DB_PATH
+    def __init__(self, db_path=None):
+        self.db_path = db_path or DB_PATH
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.initialize()
@@ -573,6 +589,71 @@ class DatabaseManager:
             VALUES (?, ?, ?, ?, datetime('now'))
         ''', (tanda_name, source_name, output_name, video_hash))
         self.conn.commit()
+
+    def save_video_transform_log(
+        self,
+        process_kind,
+        source_path,
+        output_path,
+        details,
+        tanda_name=None,
+        source_identity=None,
+    ):
+        source_path = os.path.abspath(source_path)
+        output_path = os.path.abspath(output_path)
+        details_json = json.dumps(details or {}, ensure_ascii=False, sort_keys=True)
+        output_filename = os.path.basename(output_path)
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO video_transform_logs (
+                process_kind, source_path, output_path, output_filename,
+                tanda_name, source_identity, details_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(output_path) DO UPDATE SET
+                process_kind=excluded.process_kind,
+                source_path=excluded.source_path,
+                output_filename=excluded.output_filename,
+                tanda_name=excluded.tanda_name,
+                source_identity=excluded.source_identity,
+                details_json=excluded.details_json,
+                created_at=datetime('now')
+            """,
+            (
+                process_kind,
+                source_path,
+                output_path,
+                output_filename,
+                tanda_name,
+                source_identity,
+                details_json,
+            ),
+        )
+        self.conn.commit()
+        row = cur.execute("SELECT id FROM video_transform_logs WHERE output_path=?", (output_path,)).fetchone()
+        return int(row[0])
+
+    def get_video_transform_log_id(self, output_path):
+        output_path = os.path.abspath(output_path)
+        row = self.conn.execute(
+            "SELECT id FROM video_transform_logs WHERE output_path=?",
+            (output_path,),
+        ).fetchone()
+        return int(row[0]) if row else None
+
+    def list_video_transform_logs(self, limit=500):
+        rows = self.conn.execute(
+            """
+            SELECT id, process_kind, source_path, output_path, output_filename,
+                   tanda_name, source_identity, details_json, created_at
+            FROM video_transform_logs
+            ORDER BY datetime(created_at) DESC, id DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        ).fetchall()
+        return [dict(row) for row in rows]
 
     def save_metadata_fingerprints(self, fingerprints: list):
         """Inserta batch de fingerprints (ignora duplicados por el UNIQUE constraint)."""
