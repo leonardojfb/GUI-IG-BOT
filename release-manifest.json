@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.29",
+    "version":  "1.0.30",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.29",
-    "asset_name":  "MetodoIG-v1.0.29.zip",
-    "sha256":  "00474294653907a5a00a087b4a7f23ba3451436048c8df25d79e73bb56e04389",
-    "notes":  "Responsive general: ventana principal adaptada a resoluciones bajas/escala 150%, pestañas principales y sidebar scrolleables, y popups grandes ajustados al tamaño de pantalla.",
+    "github_release_tag":  "v1.0.30",
+    "asset_name":  "MetodoIG-v1.0.30.zip",
+    "sha256":  "7c33262fe93efc474cd4f7b37b44ee1172a062050788d8bc0c65dc9826d332d1",
+    "notes":  "Hotfix layout: corrige la pantalla blanca de v1.0.29 restaurando los contenedores principales como CTkFrame y manteniendo scroll solo en sidebar/pestañas internas.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",

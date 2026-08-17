@@ -1257,7 +1257,7 @@ class InstagramAutoPro(ctk.CTk):
         self._container = container
 
         for name in ["Dashboard", "Equipo", "Tandas", "Logistica", "Telegram", "Cuentas", "VerifyLegacy", "AIAdvisor", "Forge", "VideoEditor", "Actualizaciones"]:
-            f = ctk.CTkScrollableFrame(container, fg_color=BG_APP, corner_radius=0)
+            f = ctk.CTkFrame(container, fg_color=BG_APP, corner_radius=0)
             f.grid(row=0, column=0, sticky="nsew")
             f.grid_columnconfigure(0, weight=1)
             self._frames[name] = f

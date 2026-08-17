@@ -56,18 +56,39 @@ def test_responsive_window_uses_screen_bounds_and_low_minimum():
     assert "minsize(MIN_WINDOW_W, MIN_WINDOW_H)" in segment
 
 
-def test_content_frames_are_scrollable_for_low_height_resolutions():
+def test_content_frames_keep_normal_root_geometry():
     method = _method("_build_content_area")
 
-    scrollable_frame_calls = [
+    root_scrollable_calls = [
         child
         for child in ast.walk(method)
         if isinstance(child, ast.Call)
         and isinstance(child.func, ast.Attribute)
         and child.func.attr == "CTkScrollableFrame"
     ]
+    root_frame_calls = [
+        child
+        for child in ast.walk(method)
+        if isinstance(child, ast.Call)
+        and isinstance(child.func, ast.Attribute)
+        and child.func.attr == "CTkFrame"
+    ]
 
-    assert scrollable_frame_calls
+    assert not root_scrollable_calls
+    assert root_frame_calls
+
+
+def test_tall_content_tabs_keep_their_own_scroll_area():
+    source = GUI.read_text(encoding="utf-8")
+
+    for method_name in (
+        "_build_updates_frame",
+        "_build_video_editor_frame",
+        "_build_forge_frame",
+    ):
+        segment = ast.get_source_segment(source, _method(method_name))
+        assert "CTkScrollableFrame" in segment
+
 
 
 def test_large_toplevel_windows_use_responsive_geometry_helper():
