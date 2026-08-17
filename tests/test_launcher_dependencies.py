@@ -38,3 +38,24 @@ def test_ensure_pillow_skips_pip_when_pil_exists(monkeypatch):
 
     assert launcher._ensure_pillow() == ""
     assert calls == []
+
+
+def test_launcher_still_opens_gui_when_optional_dependency_repair_fails(monkeypatch, tmp_path):
+    opened = []
+    status_file = tmp_path / ".update_status.json"
+
+    monkeypatch.setattr(launcher, "STATUS_FILE", status_file)
+    monkeypatch.setattr(launcher, "_ensure_timezone_data", lambda: "")
+    monkeypatch.setattr(launcher, "_ensure_pillow", lambda: "No se pudo instalar Pillow.")
+    monkeypatch.setattr(launcher, "_ensure_database", lambda: None)
+    monkeypatch.setattr(launcher, "_run_update_check", lambda: None)
+    monkeypatch.setattr(launcher, "_windowless_python", lambda: "pythonw.exe")
+    monkeypatch.setattr(
+        launcher.subprocess,
+        "Popen",
+        lambda command, **kwargs: opened.append((command, kwargs)) or SimpleNamespace(pid=1234),
+    )
+
+    assert launcher.main() == 0
+    assert opened
+    assert "No se pudo instalar Pillow." in status_file.read_text(encoding="utf-8")

@@ -150,15 +150,14 @@ def _windowless_python() -> str:
 def main() -> int:
     timezone_error = _ensure_timezone_data()
     dependency_error = timezone_error or _ensure_pillow()
+
+    _ensure_database()
+    _run_update_check()
     if dependency_error:
         try:
             STATUS_FILE.write_text(json.dumps({"error": dependency_error}), encoding="utf-8")
         except OSError:
             pass
-        return 1
-
-    _ensure_database()
-    _run_update_check()
     try:
         subprocess.Popen([_windowless_python(), str(GUI)], cwd=str(APP_DIR))
     except OSError as exc:

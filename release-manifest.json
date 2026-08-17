@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.27",
+    "version":  "1.0.28",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.27",
-    "asset_name":  "MetodoIG-v1.0.27.zip",
-    "sha256":  "d3cdb52b700ec42943f3310b3567209a93a29cea3d3f51842d572dd26dd0d190",
-    "notes":  "Logistica Trials por cuenta: selector de tanda individual, panel desplegable con previews/captions, manifest de calendario para normal/Trials y logs de transformacion Forge/Video Editor.",
+    "github_release_tag":  "v1.0.28",
+    "asset_name":  "MetodoIG-v1.0.28.zip",
+    "sha256":  "0179f6fb22e6ada4ec2996030a0991b2c15a3031a3e686070f83c38be58140e8",
+    "notes":  "Hotfix launcher: la GUI abre aunque falle la reparacion automatica de dependencias opcionales como Pillow o tzdata; el error queda como aviso dentro de la app.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",
