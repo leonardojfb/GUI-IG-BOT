@@ -1,4 +1,5 @@
 import os
+import json
 from types import SimpleNamespace
 
 import metadata_pool
@@ -38,6 +39,7 @@ class _Database:
         self.saved_forge_rows = []
         self.saved_fingerprints = []
         self.saved_tandas = []
+        self.saved_transform_logs = []
 
     def save_forge_video(self, _tanda, source, output, _video_hash):
         assert len(self.completed) == 2
@@ -56,9 +58,14 @@ class _Database:
     def set_tanda_trial(self, tanda_name, is_trial):
         self.trial_tandas = [(tanda_name, is_trial)]
 
+    def save_video_transform_log(self, *args, **kwargs):
+        self.saved_transform_logs.append((args, kwargs))
+        return len(self.saved_transform_logs)
 
-def _forge_app(tmp_path, completed):
-    videos = [tmp_path / "one.mp4", tmp_path / "two.mp4"]
+
+def _forge_app(tmp_path, completed, video_names=None):
+    video_names = video_names or ["one.mp4", "two.mp4"]
+    videos = [tmp_path / name for name in video_names]
     for video in videos:
         video.touch()
     metadata = [
@@ -184,9 +191,110 @@ def test_forge_records_are_saved_after_all_variants_complete(monkeypatch, tmp_pa
     ]
     assert app.db.saved_tandas == [("Concurrent", "Concurrent", "Concurrent", None)]
     assert app.db.trial_tandas == [("Concurrent", False)]
+    assert len(app.db.saved_transform_logs) == 2
+    assert app.db.saved_transform_logs[0][0][0] == "forge"
+    assert app.db.saved_transform_logs[0][1]["tanda_name"] == "Concurrent"
 
 
-def test_forge_variant_cpu_command_uses_snapshot_thread_budget(monkeypatch):
+def test_forge_preserves_edited_video_identity_in_output_names(monkeypatch, tmp_path):
+    import gui_premium_v7
+
+    completed = []
+    worker_tasks = []
+    performance = RenderPerformance(2, 2, 4, 8, None)
+
+    def apply_variant(_source, output, _meta, **_kwargs):
+        completed.append(os.path.basename(output))
+        return {}
+
+    class Worker:
+        def __init__(self, _app, _done, task):
+            worker_tasks.append(task)
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(metadata_pool, "apply_variant_and_metadata", apply_variant)
+    monkeypatch.setattr(metadata_pool, "get_video_hash", lambda source: os.path.basename(source))
+    monkeypatch.setattr(render_performance, "get_render_performance", lambda: performance)
+    monkeypatch.setattr(gui_premium_v7, "WorkerThread", Worker)
+    monkeypatch.setattr(gui_premium_v7.messagebox, "askyesno", lambda *_args: True)
+    monkeypatch.setattr(gui_premium_v7, "__file__", str(tmp_path / "gui_premium_v7.py"))
+    app = _forge_app(
+        tmp_path,
+        completed,
+        video_names=[
+            "PROMO EVE__Output 14__foto05_editado.mp4",
+            "PROMO EVE__Output 14__foto06_editado.mp4",
+        ],
+    )
+
+    InstagramAutoPro.forge_process(app)
+    worker_tasks[0]()
+
+    assert completed == [
+        "PROMO EVE__Output 14__foto05_editado__c01.mp4",
+        "PROMO EVE__Output 14__foto06_editado__c01.mp4",
+    ]
+    assert app.db.saved_forge_rows == [
+        (
+            "PROMO EVE__Output 14__foto05_editado.mp4",
+            "PROMO EVE__Output 14__foto05_editado__c01.mp4",
+        ),
+        (
+            "PROMO EVE__Output 14__foto06_editado.mp4",
+            "PROMO EVE__Output 14__foto06_editado__c01.mp4",
+        ),
+    ]
+
+
+def test_forge_logs_exact_variant_params_after_success(tmp_path):
+    import gui_premium_v7
+    from database import DatabaseManager
+
+    db = DatabaseManager(str(tmp_path / "organizador.db"))
+    src = tmp_path / "input.mp4"
+    out = tmp_path / "videos_finales" / "TANDA" / "input__c01.mp4"
+    src.write_bytes(b"input")
+    out.parent.mkdir(parents=True)
+    out.write_bytes(b"out")
+
+    log_id = gui_premium_v7._save_forge_transform_log(
+        db,
+        process_kind="forge",
+        source_path=str(src),
+        output_path=str(out),
+        tanda_name="TANDA",
+        source_identity="fingerprint",
+        params={
+            "crop_px": 2,
+            "mirror": False,
+            "zoom_pct": 0.004,
+            "rotate_deg": 0.8,
+            "brightness": 0.01,
+            "contrast": 1.01,
+            "saturation": 0.99,
+            "gamma": 1.0,
+            "noise": 0.002,
+            "speed": 1.003,
+            "trim_start_ms": 2,
+            "trim_end_ms": 0,
+        },
+        meta={"model": "iPhone 15 Pro"},
+    )
+
+    rows = db.list_video_transform_logs()
+    assert rows[0]["id"] == log_id
+    assert rows[0]["process_kind"] == "forge"
+    details = json.loads(rows[0]["details_json"])
+    assert details["rotate_deg"] == 0.8
+    assert details["crop_px"] == 2
+    assert details["speed"] == 1.003
+    assert details["iphone_metadata"]["model"] == "iPhone 15 Pro"
+    db.close()
+
+
+def test_forge_variant_prefers_nvenc_and_falls_back_to_cpu_thread_budget(monkeypatch):
     params = {
         "crop_px": 2,
         "mirror": False,
@@ -204,11 +312,11 @@ def test_forge_variant_cpu_command_uses_snapshot_thread_budget(monkeypatch):
     commands = []
     monkeypatch.setattr(metadata_pool, "_probe_video_info", lambda _path: (100, 100, 1.0, False))
     monkeypatch.setattr(metadata_pool, "generate_variant_params", lambda *_args, **_kwargs: params)
-    monkeypatch.setattr(
-        metadata_pool.subprocess,
-        "run",
-        lambda command, **_kwargs: commands.append(command) or SimpleNamespace(returncode=0),
-    )
+    def run(command, **_kwargs):
+        commands.append(command)
+        return SimpleNamespace(returncode=0 if len(commands) == 2 else 1, stderr=b"nvenc failed")
+
+    monkeypatch.setattr(metadata_pool.subprocess, "run", run)
 
     metadata_pool.apply_variant_and_metadata(
         "source.mp4",
@@ -223,6 +331,52 @@ def test_forge_variant_cpu_command_uses_snapshot_thread_budget(monkeypatch):
         ffmpeg_threads=3,
     )
 
+    assert commands[0][commands[0].index("-c:v") + 1] == "h264_nvenc"
+    assert commands[1][commands[1].index("-c:v") + 1] == "libx264"
     assert ["-threads", "3"] in [
+        commands[1][index:index + 2] for index in range(len(commands[1]) - 1)
+    ]
+
+
+def test_forge_variant_normalizes_square_pixels_and_compatible_pix_fmt(monkeypatch):
+    params = {
+        "crop_px": 2,
+        "mirror": False,
+        "zoom_pct": 1.0,
+        "rotate_deg": 0.0,
+        "brightness": 0.0,
+        "contrast": 1.0,
+        "saturation": 1.0,
+        "gamma": 1.0,
+        "noise": 0,
+        "speed": 1.0,
+        "trim_start_ms": 0,
+        "trim_end_ms": 0,
+    }
+    commands = []
+    monkeypatch.setattr(metadata_pool, "_probe_video_info", lambda _path: (1080, 1920, 1.0, False))
+    monkeypatch.setattr(metadata_pool, "generate_variant_params", lambda *_args, **_kwargs: params)
+
+    def run(command, **_kwargs):
+        commands.append(command)
+        return SimpleNamespace(returncode=0, stderr=b"")
+
+    monkeypatch.setattr(metadata_pool.subprocess, "run", run)
+
+    metadata_pool.apply_variant_and_metadata(
+        "source.mp4",
+        "output.mp4",
+        {
+            "iphone_model": "iPhone 15",
+            "lat": "+25.7617",
+            "lon": "-080.1918",
+            "ios_version": "18.0",
+            "carrier": "T-Mobile",
+        },
+    )
+
+    vf = commands[0][commands[0].index("-vf") + 1]
+    assert vf.endswith("crop=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1")
+    assert ["-pix_fmt", "yuv420p"] in [
         commands[0][index:index + 2] for index in range(len(commands[0]) - 1)
     ]

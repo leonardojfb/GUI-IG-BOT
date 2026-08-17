@@ -166,6 +166,7 @@ def patched_modules(run_root: Path):
         "videos.RES_W": videos.RES_W,
         "videos.RES_H": videos.RES_H,
         "videos.FPS": videos.FPS,
+        "Organizador.base_dir": Organizador.base_dir,
         "Organizador.source_root": Organizador.source_root,
         "Organizador.output_root": Organizador.output_root,
         "organizadortg.input_root": organizadortg.input_root,
@@ -178,6 +179,7 @@ def patched_modules(run_root: Path):
     videos.RES_W = 320
     videos.RES_H = 568
     videos.FPS = "15"
+    Organizador.base_dir = str(run_root)
     Organizador.source_root = str(run_root / "videos_finales")
     Organizador.output_root = str(run_root / "CALENDARIO_POSTEO")
     organizadortg.input_root = str(run_root / "CALENDARIO_POSTEO")
@@ -200,6 +202,7 @@ def patched_modules(run_root: Path):
         videos.RES_W = saved["videos.RES_W"]
         videos.RES_H = saved["videos.RES_H"]
         videos.FPS = saved["videos.FPS"]
+        Organizador.base_dir = saved["Organizador.base_dir"]
         Organizador.source_root = saved["Organizador.source_root"]
         Organizador.output_root = saved["Organizador.output_root"]
         organizadortg.input_root = saved["organizadortg.input_root"]

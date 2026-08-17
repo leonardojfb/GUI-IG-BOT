@@ -4,6 +4,7 @@ import os
 import pytest
 
 import organizadortg
+from calendar_manifest import build_entry, load_entries, replace_entries
 
 
 def _windows_long_path(path):
@@ -88,3 +89,35 @@ def test_gui_telegram_tab_exposes_selected_calendar_cleanup_button():
 
     assert "Borrar calendarizaciones" in source
     assert "command=self.delete_selected_calendarizations" in source
+
+
+def test_gui_telegram_tab_exposes_express_send_toggle():
+    source = Path("gui_premium_v7.py").read_text(encoding="utf-8")
+
+    assert "Envío express" in source
+    assert "_tg_express_mode" in source
+    assert "express_mode=express_mode" in source
+
+
+def test_delete_calendarizations_removes_manifest_rows_only(tmp_path, monkeypatch):
+    video = tmp_path / "videos_finales" / "T" / "clip.mp4"
+    legacy = tmp_path / "CALENDARIO_POSTEO" / "Dia_1" / "alice" / "legacy.mp4"
+    video.parent.mkdir(parents=True)
+    legacy.parent.mkdir(parents=True)
+    video.write_bytes(b"video")
+    legacy.write_bytes(b"legacy")
+    entries = [
+        build_entry("alice", 1, "normal", 1, 1, "T", str(video), "a__TANDA_T.mp4"),
+        build_entry("bob", 2, "normal", 1, 1, "T", str(video), "b__TANDA_T.mp4"),
+    ]
+    replace_entries(tmp_path / "calendar_manifest.json", entries, {"alice", "bob"}, "normal")
+    monkeypatch.setattr(organizadortg, "base_dir", str(tmp_path), raising=False)
+    monkeypatch.setattr(organizadortg, "input_root", str(tmp_path / "CALENDARIO_POSTEO"), raising=False)
+
+    summary = organizadortg.delete_calendarizations_for_accounts(["alice"])
+
+    assert summary["accounts"] == 1
+    assert summary["deleted_files"] == 1
+    assert summary["deleted_folders"] == 0
+    assert [row["username"] for row in load_entries(tmp_path / "calendar_manifest.json")] == ["bob"]
+    assert legacy.exists()

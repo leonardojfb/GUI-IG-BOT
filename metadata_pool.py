@@ -481,23 +481,22 @@ def apply_variant_and_metadata(
     # libx264/yuv420p exige dimensiones pares: garantizarlo siempre que se
     # reencodea (fuentes con resolución impar fallarían sin esto).
     even_guard = "crop=trunc(iw/2)*2:trunc(ih/2)*2"
-    vf = f"{vf},{even_guard}" if vf else even_guard
+    square_pixel_guard = "setsar=1"
+    output_guards = f"{even_guard},{square_pixel_guard}"
+    vf = f"{vf},{output_guards}" if vf else output_guards
 
-    cmd = [_ffmpeg_tool_command("ffmpeg"), "-y"]
+    base_cmd = [_ffmpeg_tool_command("ffmpeg"), "-y"]
     if start > 0:
-        cmd += ["-ss", f"{start:.3f}"]
-    cmd += ["-i", input_path]
+        base_cmd += ["-ss", f"{start:.3f}"]
+    base_cmd += ["-i", input_path]
+    common_args = []
     if clip_duration:
-        cmd += ["-t", f"{clip_duration:.3f}"]
+        common_args += ["-t", f"{clip_duration:.3f}"]
     if vf:
-        cmd += ["-vf", vf]
+        common_args += ["-vf", vf]
     if af:
-        cmd += ["-af", af]
-    cmd += ["-c:v", "libx264"]
-    if ffmpeg_threads:
-        cmd += ["-threads", str(ffmpeg_threads)]
-    cmd += [
-        "-preset", "veryfast", "-crf", "20",
+        common_args += ["-af", af]
+    metadata_args = [
         "-c:a", "aac", "-b:a", "128k",
         "-movflags", "use_metadata_tags",
         "-metadata", "make=Apple",
@@ -508,9 +507,22 @@ def apply_variant_and_metadata(
         "-metadata", f"com.apple.quicktime.network={meta['carrier']}",
         output_path,
     ]
-    result = subprocess.run(cmd, capture_output=True, creationflags=_NO_WINDOW)
-    if result.returncode != 0:
-        stderr = result.stderr.decode("utf-8", errors="replace")
-        raise RuntimeError(f"FFmpeg falló en '{os.path.basename(input_path)}':\n{stderr[-500:]}")
+    encoder_attempts = [
+        ["-c:v", "h264_nvenc", "-preset", "p4", "-cq:v", "20", "-pix_fmt", "yuv420p"],
+        ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"],
+    ]
+    last_stderr = b""
+    for encoder_args in encoder_attempts:
+        cmd = base_cmd + common_args + encoder_args
+        if ffmpeg_threads and "libx264" in encoder_args:
+            cmd += ["-threads", str(ffmpeg_threads)]
+        cmd += metadata_args
+        result = subprocess.run(cmd, capture_output=True, creationflags=_NO_WINDOW)
+        if result.returncode == 0:
+            return params
+        if os.path.exists(output_path):
+            os.remove(output_path)
+        last_stderr = result.stderr or b""
 
-    return params
+    stderr = last_stderr.decode("utf-8", errors="replace")
+    raise RuntimeError(f"FFmpeg falló en '{os.path.basename(input_path)}':\n{stderr[-500:]}")

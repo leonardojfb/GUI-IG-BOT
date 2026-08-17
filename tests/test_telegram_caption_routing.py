@@ -1,6 +1,7 @@
 import organizadortg
 import database
 from Organizador import build_calendar_video_filename
+from calendar_manifest import build_entry, replace_entries
 
 
 def test_caption_routing_uses_the_caption_assigned_to_each_tanda(tmp_path):
@@ -76,3 +77,49 @@ def test_normal_individual_copies_use_the_same_literal_caption():
 
     assert organizadortg.caption_for_normal_individual_video(first, captions) == captions["vid1"]
     assert organizadortg.caption_for_normal_individual_video(second, captions) == captions["vid1"]
+
+
+def test_normal_individual_caption_uses_original_p1_for_edited_video_forge_copies():
+    captions = {"Output 14": "CAPTION ORIGINAL OUTPUT 14\n#same"}
+    first = "PROMO EVE__Output 14__foto05_editado__c01__TANDA_NORMAL__ACC1__D1__S1.mp4"
+    second = "PROMO EVE__Output 14__foto06_editado__c01__TANDA_NORMAL__ACC1__D1__S2.mp4"
+
+    assert organizadortg.caption_for_normal_individual_video(first, captions) == captions["Output 14"]
+    assert organizadortg.caption_for_normal_individual_video(second, captions) == captions["Output 14"]
+
+
+def test_scan_calendar_structure_uses_manifest_when_present(tmp_path, monkeypatch):
+    video = tmp_path / "videos_finales" / "T1" / "clip.mp4"
+    legacy = tmp_path / "CALENDARIO_POSTEO" / "Dia_1" / "legacy" / "legacy.mp4"
+    video.parent.mkdir(parents=True)
+    legacy.parent.mkdir(parents=True)
+    video.write_bytes(b"manifest")
+    legacy.write_bytes(b"legacy")
+    entry = build_entry(
+        "alice",
+        1,
+        "normal",
+        1,
+        1,
+        "T1",
+        str(video),
+        "clip__TANDA_T1__ACC1__D1__S1.mp4",
+    )
+    replace_entries(tmp_path / "calendar_manifest.json", [entry], {"alice"}, "normal")
+
+    monkeypatch.setattr(organizadortg, "base_dir", str(tmp_path), raising=False)
+    monkeypatch.setattr(organizadortg, "input_root", str(tmp_path / "CALENDARIO_POSTEO"), raising=False)
+    monkeypatch.setattr(organizadortg, "trial_input_root", str(tmp_path / "CALENDARIO_TRIALS"), raising=False)
+    monkeypatch.setattr(organizadortg, "get_accounts_with_va_info", lambda: [
+        {"username": "alice", "account_type": "promo", "trials_active": False},
+        {"username": "legacy", "account_type": "main", "trials_active": False},
+    ])
+
+    rows = organizadortg.scan_calendar_structure()
+
+    assert len(rows) == 1
+    assert rows[0]["path"] == str(video.resolve())
+    assert rows[0]["filename"] == "clip__TANDA_T1__ACC1__D1__S1.mp4"
+    assert rows[0]["username"] == "alice"
+    assert rows[0]["delivery_kind"] == "normal"
+    assert rows[0]["category"] == "promo"

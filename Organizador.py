@@ -5,6 +5,7 @@ import random
 import string
 import math
 from collections import defaultdict
+from calendar_manifest import build_entry, manifest_path, replace_entries
 from database import DatabaseManager
 from console_encoding import ensure_stdout_utf8
 
@@ -285,20 +286,27 @@ def get_account_used_combinations_for_tandas(account_id: int, tanda_names) -> se
         db = DatabaseManager()
         cursor = db.conn.cursor()
         cursor.execute(
-            "SELECT video_path FROM fingerprint_history WHERE account_id = ?",
+            """
+            SELECT video_path, p1_source, p2_source, assigned_caption
+            FROM fingerprint_history
+            WHERE account_id = ?
+            """,
             (account_id,)
         )
         rows = cursor.fetchall()
         db.close()
 
         for row in rows:
-            video_path = row['video_path']
-            if not video_path:
+            video_path = row["video_path"] or ""
+            assigned_caption = row["assigned_caption"] or ""
+            tagged_path_match = any(f"__TANDA_{tag}__" in os.path.basename(video_path) for tag in tags)
+            caption_match = any(assigned_caption == f"Auto-Generated / {tag}" for tag in tags)
+            if not tagged_path_match and not caption_match:
                 continue
-            filename = os.path.basename(video_path)
-            if not any(f"__TANDA_{tag}__" in filename for tag in tags):
-                continue
-            p1, p2 = parse_combination_from_filename(filename)
+            p1 = row["p1_source"]
+            p2 = row["p2_source"]
+            if not p1 or not p2:
+                p1, p2 = parse_combination_from_filename(os.path.basename(video_path))
             if p1 and p2:
                 used.add((p1, p2))
     except Exception:
@@ -948,7 +956,9 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
             target_days = 1
 
     total_movidos = 0
-    os.makedirs(output_root, exist_ok=True)
+    manifest_entries = []
+    affected_usernames = {acc["username"] for acc in accounts}
+    logical_filenames = set()
 
     full_tanda_pool = video_items[:]
     random.shuffle(full_tanda_pool)
@@ -991,9 +1001,6 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
                     if day_key not in used_p1_by_account_today:
                         used_p1_by_account_today[day_key] = set()
 
-                    target_dir = os.path.join(output_root, day_label, acc_name)
-                    os.makedirs(target_dir, exist_ok=True)
-
                     # Intento 1: pool principal (videos únicos, se consumen al usarse)
                     vid_item = pick_random_video_item_for_account_day_slot(
                         video_items,
@@ -1028,9 +1035,8 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
                     unique_name = build_calendar_video_filename(
                         vid_name, vid_item["tanda"], acc_id, day, slot
                     )
-                    dst = os.path.join(target_dir, unique_name)
 
-                    if os.path.exists(dst):
+                    if unique_name in logical_filenames:
                         unique_name = build_calendar_video_filename(
                             vid_name,
                             vid_item["tanda"],
@@ -1039,10 +1045,7 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
                             slot,
                             collision_suffix=random.randint(1000, 9999),
                         )
-                        dst = os.path.join(target_dir, unique_name)
-
-                    shutil.copy2(src, dst)
-                    change_video_metadata(dst)
+                    logical_filenames.add(unique_name)
 
                     p1, p2 = parse_combination_from_filename(vid_name)
 
@@ -1054,9 +1057,22 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
                     if p1 and p2:
                         account_lifetime_combos[acc_id].add((p1, p2))
 
+                    manifest_entries.append(
+                        build_entry(
+                            username=acc_name,
+                            account_id=acc_id,
+                            delivery_kind="normal",
+                            day=day,
+                            slot=slot,
+                            tanda=vid_item["tanda"],
+                            source_path=src,
+                            telegram_filename=unique_name,
+                            transform_log_id=db.get_video_transform_log_id(src),
+                        )
+                    )
                     db.add_video_to_history(
                         acc_id,
-                        dst,
+                        src,
                         p1,
                         p2,
                         f"Auto-Generated / {vid_item['tanda']}",
@@ -1064,6 +1080,13 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
                     )
 
                     total_movidos += 1
+        if affected_usernames:
+            replace_entries(
+                manifest_path(base_dir),
+                manifest_entries,
+                affected_usernames,
+                "normal",
+            )
     finally:
         db.close()
 

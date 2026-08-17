@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import organizadortg
 
 
@@ -22,6 +24,7 @@ def test_scan_includes_only_trials_for_active_accounts(tmp_path, monkeypatch):
     inactive.mkdir(parents=True)
     (active / "vid1__c01__TANDA_T__ACC1__D1__S1.mp4").write_bytes(b"x")
     (inactive / "vid2__c01__TANDA_T__ACC2__D1__S1.mp4").write_bytes(b"x")
+    monkeypatch.setattr(organizadortg, "base_dir", str(tmp_path))
     monkeypatch.setattr(organizadortg, "input_root", str(tmp_path / "no-normal"))
     monkeypatch.setattr(organizadortg, "trial_input_root", str(trial_root))
     monkeypatch.setattr(organizadortg, "get_accounts_with_va_info", lambda: [
@@ -30,3 +33,89 @@ def test_scan_includes_only_trials_for_active_accounts(tmp_path, monkeypatch):
     ])
     scanned = organizadortg.scan_calendar_structure()
     assert [(row["username"], row["delivery_kind"]) for row in scanned] == [("eve", "trial")]
+
+
+def test_telegram_account_video_count_includes_trial_calendar(tmp_path):
+    normal_root = tmp_path / "CALENDARIO_POSTEO"
+    trial_root = tmp_path / "CALENDARIO_TRIALS"
+    (normal_root / "Dia_1" / "eve").mkdir(parents=True)
+    (trial_root / "Dia_1" / "eve").mkdir(parents=True)
+    (trial_root / "Dia_2" / "eve").mkdir(parents=True)
+    (trial_root / "Dia_1" / "other").mkdir(parents=True)
+    (normal_root / "Dia_1" / "eve" / "normal.mp4").write_bytes(b"x")
+    (trial_root / "Dia_1" / "eve" / "trial-one.mp4").write_bytes(b"x")
+    (trial_root / "Dia_2" / "eve" / "trial-two.mov").write_bytes(b"x")
+    (trial_root / "Dia_1" / "other" / "other.mp4").write_bytes(b"x")
+
+    counter = getattr(organizadortg, "count_account_calendar_videos", None)
+
+    assert counter is not None
+    assert counter("eve", roots=(normal_root, trial_root)) == 3
+
+
+def test_telegram_account_video_count_splits_normal_and_trial(tmp_path):
+    normal_root = tmp_path / "CALENDARIO_POSTEO"
+    trial_root = tmp_path / "CALENDARIO_TRIALS"
+    (normal_root / "Dia_1" / "eve").mkdir(parents=True)
+    (trial_root / "Dia_1" / "eve").mkdir(parents=True)
+    (normal_root / "Dia_1" / "eve" / "normal.mp4").write_bytes(b"x")
+    (trial_root / "Dia_1" / "eve" / "trial-one.mp4").write_bytes(b"x")
+    (trial_root / "Dia_1" / "eve" / "trial-two.mov").write_bytes(b"x")
+
+    counts = organizadortg.count_account_calendar_videos_by_kind(
+        "eve",
+        normal_root=normal_root,
+        trial_root=trial_root,
+    )
+
+    assert counts == {"normal": 1, "trial": 2}
+
+
+def test_telegram_video_label_marks_trial_only_accounts():
+    assert organizadortg.format_account_calendar_video_label({"normal": 0, "trial": 125}) == "125 videos TRIALS"
+    assert organizadortg.format_account_calendar_video_label({"normal": 2, "trial": 3}) == "5 videos (2 normales, 3 TRIALS)"
+
+
+def test_trial_only_send_precreates_only_trial_topic(monkeypatch):
+    created = []
+    state = {}
+
+    monkeypatch.setattr(organizadortg, "load_tanda_caption_pools", lambda: {})
+    monkeypatch.setattr(organizadortg, "load_trial_caption_maps", lambda: {})
+    monkeypatch.setattr(organizadortg, "load_normal_individual_caption_maps", lambda: {})
+    monkeypatch.setattr(organizadortg, "get_accounts_with_va_info", lambda: [
+        {"username": "eve", "account_type": "MAIN", "trials_active": True, "tg_group_id": "-1001", "assigned_va": "Leo"},
+    ])
+    monkeypatch.setattr(organizadortg, "scan_calendar_structure", lambda: [
+        {
+            "path": "trial.mp4",
+            "filename": "vid1__c01__TANDA_T__ACC1__D1__S1.mp4",
+            "category": "main",
+            "day": "Dia_1",
+            "username": "eve",
+            "delivery_kind": "trial",
+        },
+    ])
+    monkeypatch.setattr(organizadortg, "load_json", lambda _path: state)
+    monkeypatch.setattr(organizadortg, "save_json", lambda _path, _data: None)
+    monkeypatch.setattr(organizadortg, "get_slots_for_set", lambda *_args: ["9:00 AM"])
+    monkeypatch.setattr(organizadortg, "convert_et_to_va_tz", lambda slot, _tz: (slot, slot))
+    monkeypatch.setattr(organizadortg.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(organizadortg, "call_tg", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(organizadortg, "_send_video_to_topic", lambda *args: (True, args[1]))
+
+    def fake_get_or_create(chat_id, username, tag, topics_state, is_admin=False, force_recreate=False, delivery_kind="normal"):
+        state_key = organizadortg.topic_state_key(chat_id, username, delivery_kind)
+        if state_key in topics_state and not force_recreate:
+            return topics_state[state_key]
+        created.append(delivery_kind)
+        topic_id = 700 + len(created)
+        topics_state[state_key] = topic_id
+        return topic_id
+
+    monkeypatch.setattr(organizadortg, "get_or_create_topic", fake_get_or_create)
+
+    result = organizadortg.execute_telegram_plan(datetime(2026, 8, 14), selected_accounts=["eve"])
+
+    assert result.startswith("✨ PROCESO TERMINADO")
+    assert created == ["trial"]

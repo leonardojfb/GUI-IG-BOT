@@ -8,10 +8,12 @@ import re
 import shutil
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from calendar_manifest import load_entries, manifest_path, remove_entries_for_accounts
 from database import DatabaseManager
 from trial_content import source_key_from_filename
 from console_encoding import ensure_stdout_utf8
@@ -65,25 +67,34 @@ def _compress_video_for_tg(video_path: str, target_bytes: int = TG_COMPRESS_TARG
         target_kbps = max(target_kbps, 300)  # mínimo 300kbps para calidad mínima aceptable
 
         suffix = os.path.splitext(video_path)[1] or ".mp4"
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-        tmp.close()
+        encoder_attempts = [
+            ("GPU NVIDIA (h264_nvenc)", ["-vcodec", "h264_nvenc", "-preset", "p4"]),
+            ("CPU (libx264)", ["-vcodec", "libx264", "-preset", "fast"]),
+        ]
+        last_stderr = ""
 
         print(f"🗜️  Comprimiendo video ({size_bytes/1024/1024:.1f}MB → objetivo <{target_bytes/1024/1024:.0f}MB, bitrate {target_kbps}kbps)...")
-        result = subprocess.run(
-            [_ffmpeg_tool_command("ffmpeg"), "-y", "-i", video_path,
-             "-b:v", f"{target_kbps}k", "-b:a", "128k",
-             "-vcodec", "libx264", "-acodec", "aac",
-             "-preset", "fast", tmp.name],
-            capture_output=True, text=True, creationflags=_NO_WINDOW
-        )
-        if result.returncode != 0:
-            print(f"❌ ffmpeg falló:\n{result.stderr[-500:]}")
-            os.unlink(tmp.name)
-            return None
+        for label, codec_args in encoder_attempts:
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            tmp.close()
+            result = subprocess.run(
+                [_ffmpeg_tool_command("ffmpeg"), "-y", "-i", video_path,
+                 "-b:v", f"{target_kbps}k", "-b:a", "128k"]
+                + codec_args
+                + ["-acodec", "aac", tmp.name],
+                capture_output=True, text=True, creationflags=_NO_WINDOW
+            )
+            if result.returncode == 0:
+                compressed_size = os.path.getsize(tmp.name)
+                print(f"✅ Comprimido con {label}: {compressed_size/1024/1024:.1f}MB")
+                return tmp.name
+            last_stderr = result.stderr or ""
+            print(f"⚠️ {label} falló, probando siguiente encoder...")
+            if os.path.exists(tmp.name):
+                os.unlink(tmp.name)
 
-        compressed_size = os.path.getsize(tmp.name)
-        print(f"✅ Comprimido: {compressed_size/1024/1024:.1f}MB")
-        return tmp.name
+        print(f"❌ ffmpeg falló:\n{last_stderr[-500:]}")
+        return None
     except Exception as e:
         print(f"❌ Error al comprimir video: {e}")
         return None
@@ -101,6 +112,104 @@ input_root = os.path.join(base_dir, "CALENDARIO_POSTEO")
 trial_input_root = os.path.join(base_dir, "CALENDARIO_TRIALS")
 
 db = DatabaseManager()
+
+
+def _calendar_manifest_file():
+    return manifest_path(base_dir)
+
+
+def _manifest_exists():
+    return os.path.exists(_calendar_manifest_file())
+
+
+def _scan_manifest_calendar_structure(manifest_file=None):
+    accounts = get_accounts_with_va_info()
+    account_type_map = {
+        acc["username"]: acc.get("account_type", "").strip().lower()
+        for acc in accounts
+    }
+    rows = []
+    for entry in load_entries(manifest_file or _calendar_manifest_file(), require_source=True):
+        day_number = int(entry.get("day") or 0)
+        rows.append({
+            "path": entry["source_path"],
+            "filename": entry["telegram_filename"],
+            "category": account_type_map.get(entry["username"], entry.get("tanda") or "unknown"),
+            "tanda": entry.get("tanda") or "",
+            "day": f"Dia_{day_number}",
+            "slot": int(entry.get("slot") or 0),
+            "username": entry["username"],
+            "delivery_kind": entry.get("delivery_kind", "normal"),
+            "account_id": entry.get("account_id"),
+            "transform_log_id": entry.get("transform_log_id"),
+        })
+    rows.sort(key=lambda row: (int(str(row["day"]).split("_")[1]), row.get("slot", 0), row["username"], row["filename"]))
+    return rows
+
+
+def _count_account_videos_in_root(account_name, calendar_root):
+    total = 0
+    if not os.path.isdir(calendar_root):
+        return total
+    for day_folder in os.listdir(calendar_root):
+        if not day_folder.lower().startswith("dia_"):
+            continue
+        account_folder = os.path.join(calendar_root, day_folder, account_name)
+        if not os.path.isdir(account_folder):
+            continue
+        total += sum(
+            1 for filename in os.listdir(account_folder)
+            if filename.lower().endswith((".mp4", ".mov"))
+        )
+    return total
+
+
+def count_account_calendar_videos_by_kind(account_name, normal_root=None, trial_root=None):
+    account_name = _safe_calendar_account_name(account_name)
+    if not account_name:
+        return {"normal": 0, "trial": 0}
+    if normal_root is None and trial_root is None and _manifest_exists():
+        counts = {"normal": 0, "trial": 0}
+        for row in _scan_manifest_calendar_structure(_calendar_manifest_file()):
+            if row["username"] != account_name:
+                continue
+            kind = row.get("delivery_kind", "normal")
+            if kind in counts:
+                counts[kind] += 1
+        return counts
+    normal_root = normal_root or input_root
+    trial_root = trial_root or trial_input_root
+    return {
+        "normal": _count_account_videos_in_root(account_name, normal_root),
+        "trial": _count_account_videos_in_root(account_name, trial_root),
+    }
+
+
+def count_account_calendar_videos(account_name, roots=None):
+    account_name = _safe_calendar_account_name(account_name)
+    if not account_name:
+        return 0
+    if roots is None and _manifest_exists():
+        return sum(
+            1 for row in _scan_manifest_calendar_structure(_calendar_manifest_file())
+            if row["username"] == account_name
+        )
+    roots = roots or (input_root, trial_input_root)
+    total = 0
+    for calendar_root in roots:
+        total += _count_account_videos_in_root(account_name, calendar_root)
+    return total
+
+
+def format_account_calendar_video_label(counts):
+    normal = int(counts.get("normal", 0) or 0)
+    trial = int(counts.get("trial", 0) or 0)
+    total = normal + trial
+    if trial and normal:
+        return f"{total} videos ({normal} normales, {trial} TRIALS)"
+    if trial:
+        return f"{trial} videos TRIALS"
+    return f"{normal} videos"
 
 
 def _windows_long_path(path):
@@ -148,6 +257,10 @@ def delete_calendarizations_for_accounts(account_names, calendar_root=None):
         "failed": 0,
         "failures": [],
     }
+
+    if calendar_root is None and _manifest_exists():
+        summary["deleted_files"] = remove_entries_for_accounts(_calendar_manifest_file(), set(targets))
+        return summary
 
     if not targets or not calendar_path.exists():
         return summary
@@ -646,6 +759,12 @@ def scan_calendar_structure():
     print(f"📂 Escaneando calendario en: {input_root}")
     print(f"📄 Archivo organizadortg cargado: {__file__}")
 
+    manifest_file = _calendar_manifest_file()
+    if os.path.exists(manifest_file):
+        all_videos = _scan_manifest_calendar_structure(manifest_file)
+        print(f"Escaneo manifiesto completado: {len(all_videos)} videos encontrados.")
+        return all_videos
+
     if not os.path.exists(input_root):
         print("❌ No existe CALENDARIO_POSTEO")
     accounts = get_accounts_with_va_info()
@@ -743,7 +862,7 @@ def _account_tag(acc_info):
         return "SUICIDE"
     return category.upper() if category else "GENERAL"
 
-def execute_telegram_plan(start_date, selected_accounts=None, controller=None, reset_topics=False):
+def execute_telegram_plan(start_date, selected_accounts=None, controller=None, reset_topics=False, express_mode=False):
     caption_pools = load_tanda_caption_pools()
     trial_caption_maps = load_trial_caption_maps()
     normal_individual_caption_maps = load_normal_individual_caption_maps()
@@ -756,7 +875,10 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
     topics_state = load_json(os.path.join(base_dir, STATE_FILE))
     from collections import defaultdict
     day_account_videos = defaultdict(lambda: defaultdict(list))
-    for vid in all_videos: day_account_videos[vid['day']][vid['username']].append(vid)
+    account_delivery_kinds = defaultdict(set)
+    for vid in all_videos:
+        day_account_videos[vid['day']][vid['username']].append(vid)
+        account_delivery_kinds[vid['username']].add(vid.get("delivery_kind", "normal"))
 
     unique_usernames = sorted({vid['username'] for vid in all_videos})
     if reset_topics:
@@ -800,11 +922,14 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
             continue
         chat_id = acc_info['tg_group_id']
         tag = _account_tag(acc_info)
-        t_id = get_or_create_topic(chat_id, username, tag, topics_state)
-        if t_id:
-            print(f"✅ Topic listo: @{username} [{tag}] → thread {t_id}")
-        else:
-            print(f"❌ No se pudo crear topic para @{username} en chat {chat_id}")
+        for delivery_kind in sorted(account_delivery_kinds[username], key=lambda kind: kind != "normal"):
+            topic_kwargs = {"delivery_kind": delivery_kind} if delivery_kind == "trial" else {}
+            t_id = get_or_create_topic(chat_id, username, tag, topics_state, **topic_kwargs)
+            topic_label = "TRIAL" if delivery_kind == "trial" else tag
+            if t_id:
+                print(f"✅ Topic listo: @{username} [{topic_label}] → thread {t_id}")
+            else:
+                print(f"❌ No se pudo crear topic para @{username} [{topic_label}] en chat {chat_id}")
     save_json(os.path.join(base_dir, STATE_FILE), topics_state)
     print(f"── Topics listos. Iniciando envíos ──\n")
 
@@ -814,36 +939,37 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
 
     sorted_days = sorted(day_account_videos.keys(), key=lambda x: int(x.split('_')[1]))
 
+    state_lock = threading.Lock()
+    accounts_by_username = {account["username"]: account for account in accounts}
+    jobs_by_chat = defaultdict(list)
+
     for dia in sorted_days:
         dia_str = fecha_envio.strftime('%Y-%m-%d')
         day_of_week = fecha_envio.weekday()
 
         for username, videos in day_account_videos[dia].items():
-            if selected_accounts and username not in selected_accounts: continue
+            if selected_accounts and username not in selected_accounts:
+                continue
 
-            acc_info = next((a for a in accounts if a['username'] == username), None)
+            acc_info = accounts_by_username.get(username)
             if not acc_info:
                 print(f"⚠️ Saltando @{username}: No está en la DB.")
                 continue
 
-            chat_id    = acc_info['tg_group_id']
-            tag        = _account_tag(acc_info)
-            va_name    = acc_info.get('assigned_va', 'Sin Asignar')
-            category   = (acc_info.get('account_type') or 'general').strip().lower()
-            va_tz      = acc_info.get('va_timezone', 'America/Argentina/Buenos_Aires')
-
-            # Resolver slots por set (VA + categoría) para este día de la semana
+            chat_id = acc_info['tg_group_id']
+            tag = _account_tag(acc_info)
+            va_name = acc_info.get('assigned_va', 'Sin Asignar')
+            category = (acc_info.get('account_type') or 'general').strip().lower()
+            va_tz = acc_info.get('va_timezone', 'America/Argentina/Buenos_Aires')
             tiempos = get_slots_for_set(va_name, category, day_of_week, db)
 
-            t_id = get_or_create_topic(chat_id, username, tag, topics_state)
-            if not t_id:
+            has_normal_videos = any(vid.get("delivery_kind", "normal") == "normal" for vid in videos)
+            t_id = get_or_create_topic(chat_id, username, tag, topics_state) if has_normal_videos else None
+            if has_normal_videos and not t_id:
                 print(f"❌ Topic no encontrado para @{username} — saltando.")
                 continue
 
             for i, vid in enumerate(videos):
-                if controller and controller.stopped: return f"🛑 Abortado. Enviados: {global_sent}"
-                if controller: controller.paused.wait()
-
                 delivery_kind = vid.get("delivery_kind", "normal")
                 video_topic_id = t_id if delivery_kind == "normal" else get_or_create_topic(
                     chat_id, username, tag, topics_state, delivery_kind="trial"
@@ -862,27 +988,6 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     f"Formato: Reel"
                 )
 
-                print(f"📤 Enviando a @{username} [{tag}] (Día {dia_str} - {hora_et} ET)...")
-                msg_res = call_tg("sendMessage", {'chat_id': chat_id, 'text': meta, 'message_thread_id': video_topic_id}, silent=True)
-                if not msg_res.get("ok"):
-                    desc = str(msg_res.get("description", ""))
-                    if "thread not found" in desc:
-                        print(f"⚠️ Topic expirado para @{username}, recreando...")
-                        video_topic_id = get_or_create_topic(
-                            chat_id, username, tag, topics_state,
-                            force_recreate=True, delivery_kind=delivery_kind,
-                        )
-                        save_json(os.path.join(base_dir, STATE_FILE), topics_state)
-                        if not video_topic_id:
-                            print(f"❌ No se pudo recrear topic para @{username} — saltando cuenta.")
-                            break
-                        retry_res = call_tg("sendMessage", {'chat_id': chat_id, 'text': meta, 'message_thread_id': video_topic_id})
-                        if not retry_res.get("ok"):
-                            print(f"❌ Falló el reintento de metadata para @{username} [{hora_et}] — saltando video.")
-                            continue
-                    else:
-                        print(f"⚠️ Error en Telegram API (sendMessage) para @{username}: {msg_res}")
-
                 if delivery_kind == "trial":
                     trial_map = trial_caption_maps.get(
                         extract_tanda_tag_from_calendar_filename(vid["filename"]), {}
@@ -896,26 +1001,104 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                         caption_for_normal_individual_video(vid["filename"], normal_map)
                         if normal_map else caption_for_calendar_video(vid['filename'], caption_pools, caption_indexes)
                     )
-                try:
-                    ok, video_topic_id = _send_video_to_topic(chat_id, video_topic_id, cap, vid['path'], topics_state, username, tag)
-                    if ok:
-                        global_sent += 1
-                    if t_id:
-                        save_json(os.path.join(base_dir, STATE_FILE), topics_state)
-                    time.sleep(2)
-                except Exception as e: print(f"❌ Error físico: {e}")
+
+                jobs_by_chat[chat_id].append({
+                    "chat_id": chat_id,
+                    "username": username,
+                    "tag": tag,
+                    "delivery_kind": delivery_kind,
+                    "topic_id": video_topic_id,
+                    "caption": cap,
+                    "path": vid["path"],
+                    "meta": meta,
+                    "hora_et": hora_et,
+                    "dia_str": dia_str,
+                })
 
         fecha_envio += timedelta(days=1)
+
+    def send_metadata(job):
+        if express_mode:
+            return job["topic_id"]
+        msg_res = call_tg("sendMessage", {
+            'chat_id': job["chat_id"],
+            'text': job["meta"],
+            'message_thread_id': job["topic_id"],
+        }, silent=True)
+        if msg_res.get("ok"):
+            return job["topic_id"]
+        desc = str(msg_res.get("description", ""))
+        if "thread not found" not in desc:
+            print(f"⚠️ Error en Telegram API (sendMessage) para @{job['username']}: {msg_res}")
+            return job["topic_id"]
+        print(f"⚠️ Topic expirado para @{job['username']}, recreando...")
+        with state_lock:
+            topic_id = get_or_create_topic(
+                job["chat_id"], job["username"], job["tag"], topics_state,
+                force_recreate=True, delivery_kind=job["delivery_kind"],
+            )
+            save_json(os.path.join(base_dir, STATE_FILE), topics_state)
+        if not topic_id:
+            print(f"❌ No se pudo recrear topic para @{job['username']} — saltando cuenta.")
+            return None
+        retry_res = call_tg("sendMessage", {
+            'chat_id': job["chat_id"],
+            'text': job["meta"],
+            'message_thread_id': topic_id,
+        })
+        if not retry_res.get("ok"):
+            print(f"❌ Falló el reintento de metadata para @{job['username']} [{job['hora_et']}] — saltando video.")
+            return None
+        return topic_id
+
+    def send_chat_jobs(jobs):
+        sent = 0
+        aborted = False
+        for job in jobs:
+            if controller and controller.stopped:
+                aborted = True
+                break
+            if controller:
+                controller.paused.wait()
+            print(f"📤 Enviando a @{job['username']} [{job['tag']}] (Día {job['dia_str']} - {job['hora_et']} ET)...")
+            try:
+                topic_id = send_metadata(job)
+                if not topic_id:
+                    continue
+                ok, _topic_id = _send_video_to_topic(
+                    job["chat_id"], topic_id, job["caption"], job["path"],
+                    topics_state, job["username"], job["tag"],
+                )
+                if ok:
+                    sent += 1
+                with state_lock:
+                    save_json(os.path.join(base_dir, STATE_FILE), topics_state)
+                time.sleep(2)
+            except Exception as e:
+                print(f"❌ Error físico: {e}")
+        return sent, aborted
+
+    if jobs_by_chat:
+        print(f"⚡ Envío paralelo por grupo activo: {len(jobs_by_chat)} grupo(s).")
+        with ThreadPoolExecutor(max_workers=len(jobs_by_chat)) as pool:
+            futures = [pool.submit(send_chat_jobs, jobs) for jobs in jobs_by_chat.values()]
+            for future in futures:
+                sent, aborted = future.result()
+                global_sent += sent
+                if aborted:
+                    save_json(os.path.join(base_dir, STATE_FILE), topics_state)
+                    return f"🛑 Abortado. Enviados: {global_sent}"
 
     save_json(os.path.join(base_dir, STATE_FILE), topics_state)
     return f"✨ PROCESO TERMINADO. Se enviaron {global_sent} videos."
 
 # --- 4. CONTROLADOR DE HILOS Y MOTOR DE EJECUCIÓN ---
 class TelegramBotController:
-    def __init__(self, start_date_str, selected_accounts=None, reset_topics=False):
+    def __init__(self, start_date_str, selected_accounts=None, reset_topics=False, express_mode=False):
         self.start_date_str = start_date_str
         self.selected_accounts = selected_accounts
         self.reset_topics = reset_topics
+        self.express_mode = express_mode
         self._paused = threading.Event()
         self._paused.set()
         self._stopped = False
@@ -935,7 +1118,13 @@ class TelegramBotController:
         self._stopped = False
         try:
             start_date = datetime.strptime(self.start_date_str, "%Y-%m-%d")
-            result = execute_telegram_plan(start_date, self.selected_accounts, self, reset_topics=self.reset_topics)
+            result = execute_telegram_plan(
+                start_date,
+                self.selected_accounts,
+                self,
+                reset_topics=self.reset_topics,
+                express_mode=self.express_mode,
+            )
             print(result)
         finally:
             self._running = False

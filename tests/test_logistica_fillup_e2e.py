@@ -17,6 +17,7 @@ from tests.support.e2e_pipeline import (
     patched_modules,
     sha256_file,
 )
+from calendar_manifest import load_entries, manifest_path
 
 
 def _seed_and_render(run_root, colors=("teal", "brown", "gray")):
@@ -68,18 +69,17 @@ def _run_distribution(fill_up: bool) -> dict:
                 "FILLUP_TA", "PRUEBA_FILLUP_CAT", 1, fill_up, "2"
             )
 
-            calendar_files = sorted((run_root / "CALENDARIO_POSTEO").rglob("*.mp4"))
+            manifest_entries = load_entries(manifest_path(run_root))
             by_day = {}
-            for f in calendar_files:
-                day = f.parent.parent.name
-                by_day.setdefault(day, []).append(f)
+            for entry in manifest_entries:
+                by_day.setdefault(f"Dia_{entry['day']}", []).append(entry)
 
             return {
                 "result": result,
                 "output_hashes": output_hashes,
-                "total_files": len(calendar_files),
-                "by_day": {day: len(files) for day, files in by_day.items()},
-                "files": calendar_files,
+                "total_files": len(manifest_entries),
+                "by_day": {day: len(entries) for day, entries in by_day.items()},
+                "files": manifest_entries,
             }
     finally:
         shutil.rmtree(run_root, ignore_errors=True)
@@ -104,17 +104,19 @@ def test_fillup_enabled_fills_day_two_by_reusing_other_accounts_videos():
     )
     assert outcome["total_files"] == 6
 
-    for f in outcome["files"]:
-        assert "__TANDA_FILLUP_TA__" in f.name, f"fill-up file lost its tanda tag: {f.name}"
+    for entry in outcome["files"]:
+        assert "__TANDA_FILLUP_TA__" in entry["telegram_filename"], (
+            f"fill-up manifest entry lost its tanda tag: {entry['telegram_filename']}"
+        )
 
     day1_choice_by_account = {}
     day2_choice_by_account = {}
-    for f in outcome["files"]:
-        account = f.parent.name
-        day = f.parent.parent.name
+    for entry in outcome["files"]:
+        account = entry["username"]
+        day = f"Dia_{entry['day']}"
         bucket = day1_choice_by_account if day == "Dia_1" else day2_choice_by_account
-        for name, h in outcome["output_hashes"].items():
-            if f.name.startswith(name.rsplit(".", 1)[0]):
+        for name in outcome["output_hashes"]:
+            if entry["telegram_filename"].startswith(name.rsplit(".", 1)[0]):
                 bucket[account] = name
                 break
 

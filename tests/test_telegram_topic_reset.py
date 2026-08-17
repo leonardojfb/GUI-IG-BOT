@@ -268,11 +268,12 @@ def test_execute_plan_resets_selected_account_topics_before_recreating(monkeypat
 def test_controller_passes_reset_topics_to_execute_plan(monkeypatch):
     captured = {}
 
-    def fake_execute(start_date, selected_accounts=None, controller=None, reset_topics=False):
+    def fake_execute(start_date, selected_accounts=None, controller=None, reset_topics=False, express_mode=False):
         captured["start_date"] = start_date
         captured["selected_accounts"] = selected_accounts
         captured["controller"] = controller
         captured["reset_topics"] = reset_topics
+        captured["express_mode"] = express_mode
         return "done"
 
     monkeypatch.setattr(organizadortg, "execute_telegram_plan", fake_execute)
@@ -281,6 +282,7 @@ def test_controller_passes_reset_topics_to_execute_plan(monkeypatch):
         "2026-07-27",
         selected_accounts=["alpha"],
         reset_topics=True,
+        express_mode=True,
     )
     controller.start()
 
@@ -288,3 +290,4 @@ def test_controller_passes_reset_topics_to_execute_plan(monkeypatch):
     assert captured["selected_accounts"] == ["alpha"]
     assert captured["controller"] is controller
     assert captured["reset_topics"] is True
+    assert captured["express_mode"] is True

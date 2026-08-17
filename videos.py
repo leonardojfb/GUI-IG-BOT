@@ -174,6 +174,24 @@ def process_tandas(db: DatabaseManager, tandas: list, performance=None):
             }
             for fut in as_completed(futures):
                 fut.result()  # re-lanza excepciones si las hay
+                if hasattr(db, "save_video_transform_log"):
+                    path_v1, path_v2, out_path, tanda_name, p1_id, p2_id = futures[fut]
+                    details = {
+                        "p1_path": os.path.abspath(path_v1),
+                        "p2_path": os.path.abspath(path_v2),
+                        "p1_id": p1_id,
+                        "p2_id": p2_id,
+                        "tanda_name": tanda_name,
+                        "ffmpeg_threads": performance.ffmpeg_threads,
+                    }
+                    db.save_video_transform_log(
+                        "tandas",
+                        os.path.abspath(path_v1),
+                        os.path.abspath(out_path),
+                        details,
+                        tanda_name=tanda_name,
+                        source_identity=f"p1:{p1_id}|p2:{p2_id}",
+                    )
 
 def process_mix_rules(db: DatabaseManager, rules: list):
     """Procesar videos usando reglas de mezcla legacy."""

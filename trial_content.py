@@ -10,9 +10,22 @@ _COPY_SUFFIX = re.compile(r"__c\d+$", re.IGNORECASE)
 
 
 def source_key_from_filename(filename: str) -> str:
-    """Return the Forge source key, removing only a final __cNN suffix."""
+    """Return the original source key used for captions and distribution."""
     stem = os.path.splitext(os.path.basename(filename))[0]
-    return _COPY_SUFFIX.sub("", stem)
+    stem = re.sub(r"__TANDA_.+$", "", stem)
+    stem = _COPY_SUFFIX.sub("", stem)
+    parts = stem.split("__")
+    if len(parts) >= 3:
+        return parts[1]
+    return stem
+
+
+def forge_output_id_from_filename(filename: str) -> str:
+    """Return the Forge output stem while preserving Edicion P1/P2 separators."""
+    base = os.path.splitext(os.path.basename(filename))[0]
+    if len(base.split("__")) >= 3:
+        return base
+    return base.replace(" ", "_").replace("__", "_")
 
 
 def group_trial_sources(filenames: list[str]) -> list[tuple[str, list[str]]]:
@@ -21,6 +34,20 @@ def group_trial_sources(filenames: list[str]) -> list[tuple[str, list[str]]]:
     for filename in sorted(filenames):
         groups.setdefault(source_key_from_filename(filename), []).append(filename)
     return list(groups.items())
+
+
+def _interleave_trial_files(filenames: list[str]) -> list[str]:
+    """Order copies by source round: vid1c1, vid2c1, then vid1c2."""
+    groups = group_trial_sources(filenames)
+    if not groups:
+        return []
+    max_copies = max(len(copies) for _source_key, copies in groups)
+    interleaved = []
+    for copy_index in range(max_copies):
+        for _source_key, copies in groups:
+            if copy_index < len(copies):
+                interleaved.append(copies[copy_index])
+    return interleaved
 
 
 def missing_trial_caption_sources(filenames: list[str], captions: dict[str, str]) -> list[str]:
@@ -51,8 +78,12 @@ class TrialPlan:
 
 def build_trial_account_plan(assignments, files_by_tanda, videos_per_day, days):
     """Allocate each Forge output once across accounts that selected its tanda."""
-    per_account = int(videos_per_day) * int(days)
-    remaining = {tanda: list(files_by_tanda.get(tanda, ())) for tanda in set(assignments.values()) if tanda}
+    max_mode = str(days).strip().upper() == "MAX"
+    per_account = None if max_mode else int(videos_per_day) * int(days)
+    remaining = {
+        tanda: _interleave_trial_files(list(files_by_tanda.get(tanda, ())))
+        for tanda in set(assignments.values()) if tanda
+    }
     assigned, shortfalls = {}, {}
     stats = {
         tanda: {"accounts": [], "available": len(pool), "requested": 0, "assigned": 0, "shortfall": 0}
@@ -64,14 +95,19 @@ def build_trial_account_plan(assignments, files_by_tanda, videos_per_day, days):
         pool = remaining.setdefault(tanda, [])
         detail = stats.setdefault(tanda, {"accounts": [], "available": len(pool), "requested": 0, "assigned": 0, "shortfall": 0})
         detail["accounts"].append(username)
-        detail["requested"] += per_account
-        chosen, remaining[tanda] = pool[:per_account], pool[per_account:]
+        if max_mode:
+            detail["requested"] += len(pool)
+            chosen, remaining[tanda] = pool, []
+        else:
+            detail["requested"] += per_account
+            chosen, remaining[tanda] = pool[:per_account], pool[per_account:]
         assigned[username] = chosen
         detail["assigned"] += len(chosen)
-        missing = per_account - len(chosen)
-        if missing:
-            shortfalls[username] = missing
-            detail["shortfall"] += missing
+        if not max_mode:
+            missing = per_account - len(chosen)
+            if missing:
+                shortfalls[username] = missing
+                detail["shortfall"] += missing
     return TrialPlan(assigned=assigned, shortfalls=shortfalls, tanda_stats=stats)
 
 

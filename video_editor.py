@@ -32,6 +32,24 @@ def build_photo_video_pairs(videos: list[str], overlays: list[dict]) -> list[tup
     ]
 
 
+def describe_overlay_log(overlays: list[dict]) -> list[dict]:
+    result = []
+    for overlay in overlays or []:
+        result.append({
+            "photo_path": overlay.get("photo_path") or overlay.get("photo"),
+            "start_frame": overlay.get("start_frame"),
+            "end_frame": overlay.get("end_frame"),
+            "start_time": overlay.get("start_time"),
+            "end_time": overlay.get("end_time"),
+            "position": overlay.get("position"),
+            "x": overlay.get("x"),
+            "y": overlay.get("y"),
+            "size": overlay.get("size"),
+            "opacity": overlay.get("opacity"),
+        })
+    return result
+
+
 def timestamp_to_source_frame(timestamp: float, fps: float) -> int:
     """Convert a shared timeline instant into the frame number of one source."""
     return max(0, round(max(0.0, float(timestamp)) * max(0.0, float(fps))))
@@ -138,26 +156,35 @@ def render_video(input_path: str, output_path: str, overlays: list[dict], ffmpeg
     info = probe_video(input_path)
     if not overlays:
         raise ValueError("Agregá al menos una foto.")
-    cmd = [_ffmpeg_tool_command("ffmpeg"), "-y", "-i", input_path]
+    base_cmd = [_ffmpeg_tool_command("ffmpeg"), "-y", "-i", input_path]
     for item in overlays:
-        cmd += ["-loop", "1", "-i", item["photo"]]
+        base_cmd += ["-loop", "1", "-i", item["photo"]]
     filters = [f"[0:v]format=yuv420p[v0]"]
     for index, item in enumerate(overlays, start=1):
         filters.append(_overlay_filter(info, item, index))
-    cmd += ["-filter_complex", ";".join(filters), "-map", f"[v{len(overlays)}]", "-map", "0:a?",
-            "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "192k"]
-    if ffmpeg_threads:
-        cmd += ["-threads", str(ffmpeg_threads)]
-    cmd += ["-t", f"{info['duration']:.6f}", output_path]
-    result = _run(cmd)
-    if result.returncode:
-        stderr = (result.stderr or "")[-1800:]
-        raise RuntimeError(
-            f"FFmpeg no pudo renderizar '{input_path}' en '{output_path}': "
-            f"{stderr or 'sin detalle de stderr.'}"
-        )
-    return output_path
+    common_args = [
+        "-filter_complex", ";".join(filters), "-map", f"[v{len(overlays)}]", "-map", "0:a?",
+    ]
+    encoder_attempts = [
+        ["-c:v", "h264_nvenc", "-preset", "p4", "-cq:v", "20", "-pix_fmt", "yuv420p"],
+        ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p"],
+    ]
+    last_stderr = ""
+    for encoder_args in encoder_attempts:
+        cmd = base_cmd + common_args + encoder_args + ["-c:a", "aac", "-b:a", "192k"]
+        if ffmpeg_threads and "libx264" in encoder_args:
+            cmd += ["-threads", str(ffmpeg_threads)]
+        cmd += ["-t", f"{info['duration']:.6f}", output_path]
+        result = _run(cmd)
+        if result.returncode == 0:
+            return output_path
+        if os.path.exists(output_path):
+            os.remove(output_path)
+        last_stderr = (result.stderr or "")[-1800:]
+    raise RuntimeError(
+        f"FFmpeg no pudo renderizar '{input_path}' en '{output_path}': "
+        f"{last_stderr or 'sin detalle de stderr.'}"
+    )
 
 
 def render_preview(

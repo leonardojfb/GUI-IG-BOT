@@ -101,3 +101,25 @@ def test_send_video_to_topic_recompresses_from_original_after_413(tmp_path, monk
     ]
     assert responses == []
     assert all(not os.path.exists(path) for path in temp_paths)
+
+
+def test_telegram_compression_prefers_nvenc_and_falls_back_to_cpu(monkeypatch):
+    commands = []
+
+    monkeypatch.setattr(organizadortg.os.path, "getsize", lambda _path: organizadortg.TG_MAX_BYTES + 1)
+    monkeypatch.setattr(organizadortg, "_ffmpeg_tool_exists", lambda _tool: True)
+
+    def run(command, **_kwargs):
+        commands.append(command)
+        if "ffprobe" in os.path.basename(command[0]):
+            return SimpleNamespace(returncode=0, stdout="10.0", stderr="")
+        return SimpleNamespace(returncode=0 if len(commands) == 3 else 1, stdout="", stderr="nvenc failed")
+
+    monkeypatch.setattr(organizadortg.subprocess, "run", run)
+
+    compressed = organizadortg._compress_video_for_tg("source.mp4")
+
+    assert compressed is not None
+    assert commands[1][commands[1].index("-vcodec") + 1] == "h264_nvenc"
+    assert commands[2][commands[2].index("-vcodec") + 1] == "libx264"
+    os.unlink(compressed)

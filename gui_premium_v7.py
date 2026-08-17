@@ -21,6 +21,7 @@ import shutil
 import requests
 import render_performance
 
+from calendar_manifest import build_entry, manifest_path, replace_entries
 from database import DatabaseManager
 from airtable_sync import (
     AirtableConfig,
@@ -36,8 +37,9 @@ from airtable_sync import (
 )
 from trial_content import (
     group_trial_sources, missing_trial_caption_sources,
-    selected_trial_usernames, trial_calendar_root, build_trial_account_plan,
+    trial_calendar_root, build_trial_account_plan,
     reused_trial_tanda_warnings, trial_preview_path,
+    source_key_from_filename, forge_output_id_from_filename,
 )
 from updater import APP_DIR as UPDATE_APP_DIR, check_and_apply, load_config, read_local_version
 from console_encoding import ensure_stdout_utf8
@@ -69,6 +71,40 @@ def _copy_calendar_file(src, dst):
     dst_dir = os.path.dirname(os.path.abspath(os.fspath(dst)))
     os.makedirs(_windows_long_path(dst_dir), exist_ok=True)
     shutil.copy2(_windows_long_path(src), _windows_long_path(dst))
+
+
+def _save_forge_transform_log(
+    db,
+    process_kind,
+    source_path,
+    output_path,
+    tanda_name,
+    source_identity,
+    params,
+    meta,
+):
+    details = dict(params or {})
+    details["iphone_metadata"] = meta or {}
+    return db.save_video_transform_log(
+        process_kind,
+        os.path.abspath(source_path),
+        os.path.abspath(output_path),
+        details,
+        tanda_name=tanda_name,
+        source_identity=source_identity,
+    )
+
+
+def _format_transform_summary(details):
+    details = details or {}
+    trim_start = details.get("trim_start_ms") or 0
+    trim_end = details.get("trim_end_ms") or 0
+    return {
+        "rotation": f"{float(details.get('rotate_deg') or 0):.2f} deg",
+        "crop": f"{int(details.get('crop_px') or 0)} px",
+        "speed": f"x{float(details.get('speed') or 1):.4f}",
+        "trim": f"{int(trim_start)} ms / {int(trim_end)} ms",
+    }
 from styles.colors import (
     BG_APP, BG_SIDEBAR, BG_CARD, BG_CARD2, BG_INPUT, BORDER,
     NEON_CYAN, NEON_PURPLE, IG_PINK, SUCCESS, WARNING, DANGER, INFO, TELEGRAM,
@@ -1800,6 +1836,7 @@ class InstagramAutoPro(ctk.CTk):
             self._admin_refresh()
             self.refresh_dashboard()
             if hasattr(self, 'reload_dist_lists'):
+                self.refresh_transform_log_table()
                 self.reload_dist_lists()
 
     # ── Admin helpers ────────────────────────────────────────────────────────
@@ -2572,18 +2609,10 @@ class InstagramAutoPro(ctk.CTk):
 
     def _build_dist_trials_tab(self, parent):
         """Trial distribution keeps captions and calendars separate from normal work."""
-        parent.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(parent, text="Tanda Trial:", text_color=TEXT_MUTED).grid(
-            row=0, column=0, padx=16, pady=(16, 8), sticky="e"
-        )
-        self.trial_dist_tanda = ctk.CTkComboBox(
-            parent, values=[], fg_color=BG_INPUT, border_color=BORDER,
-            command=self._trial_refresh_sources,
-        )
-        self.trial_dist_tanda.grid(row=0, column=1, padx=(0, 16), pady=(16, 8), sticky="ew")
+        parent.grid_columnconfigure(0, weight=1)
 
         cfg = ctk.CTkFrame(parent, fg_color="transparent")
-        cfg.grid(row=1, column=0, columnspan=2, sticky="ew", padx=16, pady=(0, 8))
+        cfg.grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 8))
         ctk.CTkLabel(cfg, text="Videos/dia por cuenta:", text_color=TEXT_MUTED).pack(side="left")
         self.trial_dist_vpd = Stepper(cfg, value=1, min=1, max=50)
         self.trial_dist_vpd.pack(side="left", padx=(8, 20))
@@ -2594,25 +2623,26 @@ class InstagramAutoPro(ctk.CTk):
         self.trial_accounts_lbl = ctk.CTkLabel(cfg, text="0 cuentas con TRIALS ACTIVOS", text_color=TEXT_MUTED)
         self.trial_accounts_lbl.pack(side="right")
 
-        self.trial_account_scroll = ctk.CTkScrollableFrame(parent, fg_color=BG_CARD2, height=150)
-        self.trial_account_scroll.grid(row=2, column=0, columnspan=2, sticky="ew", padx=16, pady=8)
+        self.trial_account_scroll = ctk.CTkScrollableFrame(parent, fg_color=BG_CARD2)
+        self.trial_account_scroll.grid(row=1, column=0, sticky="nsew", padx=16, pady=8)
+        parent.grid_rowconfigure(1, weight=1)
         self.trial_account_vars = {}
-        self.trial_caption_scroll = ctk.CTkScrollableFrame(parent, fg_color=BG_CARD2)
-        self.trial_caption_scroll.grid(row=3, column=0, columnspan=2, sticky="nsew", padx=16, pady=8)
-        parent.grid_rowconfigure(3, weight=1)
+        self.trial_account_panel_frames = {}
+        self.trial_expanded_accounts = set()
         self.trial_caption_editors = {}
         self.trial_thumbnail_images = []
 
         buttons = ctk.CTkFrame(parent, fg_color="transparent")
-        buttons.grid(row=4, column=0, columnspan=2, pady=(4, 12))
+        buttons.grid(row=2, column=0, pady=(4, 12))
         GhostButton(buttons, text="Guardar captions Trial", command=self._save_trial_captions).pack(side="left", padx=6)
         GhostButton(buttons, text="VISTA PREVIA", command=lambda: self._trial_dist_run_per_account(True)).pack(side="left", padx=6)
         PrimaryButton(buttons, text="DISTRIBUIR TRIALS", command=lambda: self._trial_dist_run_per_account(False)).pack(side="left", padx=6)
         self.trial_dist_result = ctk.CTkTextbox(parent, height=100, fg_color=BG_INPUT, text_color=NEON_CYAN)
-        self.trial_dist_result.grid(row=5, column=0, columnspan=2, sticky="ew", padx=16, pady=(0, 16))
+        self.trial_dist_result.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 16))
 
     def _trial_tanda_files(self, tanda_name=None):
-        tanda_name = tanda_name or getattr(self, "trial_dist_tanda", None).get()
+        if not tanda_name:
+            return []
         folder = os.path.join(_BASE_DIR, "videos_finales", tanda_name)
         if not os.path.isdir(folder):
             return []
@@ -2623,14 +2653,30 @@ class InstagramAutoPro(ctk.CTk):
             widget.destroy()
         tandas = [""] + self.db.get_trial_tandas()
         self.trial_account_vars = {}
+        self.trial_account_panel_frames = {}
+        self.trial_expanded_accounts = set()
+        self.trial_caption_editors = {}
+        self.trial_thumbnail_images = []
         for account in self.db.get_trials_active_accounts():
             username = account["username"]
             row = ctk.CTkFrame(self.trial_account_scroll, fg_color=BG_CARD)
-            row.pack(fill="x", padx=4, pady=3)
-            ctk.CTkLabel(row, text=f"@{username} [{account.get('account_type', '')}]", width=220, anchor="w").pack(side="left", padx=8)
+            row.pack(fill="x", padx=4, pady=4)
+            header = ctk.CTkFrame(row, fg_color="transparent")
+            header.pack(fill="x", padx=8, pady=6)
+            ctk.CTkLabel(header, text=f"@{username} [{account.get('account_type', '')}]", width=220, anchor="w").pack(side="left", padx=8)
             var = tk.StringVar(value="")
-            ctk.CTkComboBox(row, values=tandas, variable=var, width=260, command=lambda _v: self._trial_refresh_sources()).pack(side="left", padx=8, pady=5)
+            ctk.CTkComboBox(
+                header, values=tandas, variable=var, width=260,
+                command=lambda _value, u=username: self._trial_on_account_tanda_changed(u),
+            ).pack(side="left", padx=8, pady=5)
+            GhostButton(
+                header, text="Desplegar panel de trials",
+                command=lambda u=username: self._trial_toggle_account_panel(u),
+            ).pack(side="left", padx=8, pady=5)
+            panel = ctk.CTkFrame(row, fg_color=BG_CARD2)
+            self.trial_account_panel_frames[username] = panel
             self.trial_account_vars[username] = var
+        self.trial_accounts_lbl.configure(text=f"{len(self.trial_account_vars)} cuentas con TRIALS ACTIVOS")
 
     def _trial_selected_assignments(self):
         return {u: v.get().strip() for u, v in self.trial_account_vars.items() if v.get().strip()}
@@ -2656,35 +2702,77 @@ class InstagramAutoPro(ctk.CTk):
             label.configure(text="Sin preview")
         WorkerThread(self, done, task).start()
 
-    def _trial_refresh_sources(self, _value=None):
-        tandas = sorted(set(self._trial_selected_assignments().values()))
-        if not tandas and self.trial_dist_tanda.get().strip():
-            tandas = [self.trial_dist_tanda.get().strip()]
-        for widget in self.trial_caption_scroll.winfo_children():
+    def _trial_on_account_tanda_changed(self, username):
+        for key in list(self.trial_caption_editors):
+            if len(key) == 3 and key[0] == username:
+                self.trial_caption_editors.pop(key, None)
+        if username in getattr(self, "trial_expanded_accounts", set()):
+            self._trial_render_account_panel(username)
+
+    def _trial_toggle_account_panel(self, username):
+        expanded = getattr(self, "trial_expanded_accounts", set())
+        panel = self.trial_account_panel_frames.get(username)
+        if panel is None:
+            return
+        if username in expanded:
+            expanded.remove(username)
+            panel.pack_forget()
+            for key in list(self.trial_caption_editors):
+                if len(key) == 3 and key[0] == username:
+                    self.trial_caption_editors.pop(key, None)
+            return
+        expanded.add(username)
+        panel.pack(fill="x", padx=12, pady=(0, 8))
+        self._trial_render_account_panel(username)
+
+    def _trial_render_account_panel(self, username):
+        panel = self.trial_account_panel_frames.get(username)
+        if panel is None:
+            return
+        for widget in panel.winfo_children():
             widget.destroy()
-        self.trial_caption_editors = {}
-        self.trial_thumbnail_images = []
-        for tanda in tandas:
-            captions = self.db.get_trial_source_captions(tanda)
-            folder = os.path.join(_BASE_DIR, "videos_finales", tanda)
-            for source_key, copies in group_trial_sources(self._trial_tanda_files(tanda)):
-                row = ctk.CTkFrame(self.trial_caption_scroll, fg_color=BG_CARD)
-                row.pack(fill="x", padx=4, pady=4)
-                preview_label = ctk.CTkLabel(row, text="Cargando preview", width=120, height=68)
-                preview_label.pack(side="left", padx=8, pady=8)
-                body = ctk.CTkFrame(row, fg_color="transparent")
-                body.pack(side="left", fill="both", expand=True, padx=(0, 8), pady=6)
-                ctk.CTkLabel(body, text=f"{tanda} / {source_key} ({len(copies)} copias)", text_color=TEXT_BODY).pack(anchor="w")
-                editor = ctk.CTkTextbox(body, height=72, fg_color=BG_INPUT, border_color=BORDER, border_width=1)
-                editor.pack(fill="x", pady=(2, 0))
-                editor.insert("1.0", captions.get(source_key, ""))
-                self.trial_caption_editors[(tanda, source_key)] = editor
-                self._trial_load_thumbnail(preview_label, os.path.join(folder, copies[0]))
+        for key in list(self.trial_caption_editors):
+            if len(key) == 3 and key[0] == username:
+                self.trial_caption_editors.pop(key, None)
+        variable = self.trial_account_vars.get(username)
+        tanda = variable.get().strip() if variable is not None else ""
+        if not tanda:
+            ctk.CTkLabel(panel, text="Escoge una tanda para esta cuenta.", text_color=TEXT_MUTED).pack(anchor="w", padx=10, pady=8)
+            return
+        captions = self.db.get_trial_source_captions(tanda)
+        folder = os.path.join(_BASE_DIR, "videos_finales", tanda)
+        source_groups = group_trial_sources(self._trial_tanda_files(tanda))
+        if not source_groups:
+            ctk.CTkLabel(panel, text="Esta tanda no tiene videos Forge.", text_color=TEXT_MUTED).pack(anchor="w", padx=10, pady=8)
+            return
+        for source_key, copies in source_groups:
+            row = ctk.CTkFrame(panel, fg_color=BG_CARD)
+            row.pack(fill="x", padx=4, pady=4)
+            preview_label = ctk.CTkLabel(row, text="Cargando preview", width=120, height=68)
+            preview_label.pack(side="left", padx=8, pady=8)
+            body = ctk.CTkFrame(row, fg_color="transparent")
+            body.pack(side="left", fill="both", expand=True, padx=(0, 8), pady=6)
+            ctk.CTkLabel(body, text=f"{tanda} / {source_key} ({len(copies)} copias)", text_color=TEXT_BODY).pack(anchor="w")
+            editor = ctk.CTkTextbox(body, height=72, fg_color=BG_INPUT, border_color=BORDER, border_width=1)
+            editor.pack(fill="x", pady=(2, 0))
+            editor.insert("1.0", captions.get(source_key, ""))
+            self.trial_caption_editors[(username, tanda, source_key)] = editor
+            self._trial_load_thumbnail(preview_label, os.path.join(folder, copies[0]))
+
+    def _trial_refresh_sources(self, _value=None):
+        for username in list(getattr(self, "trial_expanded_accounts", set())):
+            self._trial_render_account_panel(username)
 
     def _save_trial_captions(self):
         if not self.trial_caption_editors:
+            if getattr(self, "_trial_saving_silently", False):
+                return
             return messagebox.showwarning("Trials", "Selecciona una tanda para al menos una cuenta.")
-        for (tanda, source_key), editor in self.trial_caption_editors.items():
+        for key, editor in self.trial_caption_editors.items():
+            if len(key) == 3:
+                _username, tanda, source_key = key
+            else:
+                tanda, source_key = key
             self.db.set_trial_source_caption(tanda, source_key, editor.get("1.0", "end-1c").strip())
         if not getattr(self, "_trial_saving_silently", False):
             messagebox.showinfo("Trials", "Captions Trial guardados.")
@@ -2711,9 +2799,10 @@ class InstagramAutoPro(ctk.CTk):
         try:
             per_day = int(self.trial_dist_vpd.get())
             files_by_tanda = {t: self._trial_tanda_files(t) for t in set(assignments.values())}
-            available = sum(len(v) for v in files_by_tanda.values())
             raw_days = self.trial_dist_days.get().strip().upper()
-            days = max(1, (available + len(assignments) * per_day - 1) // (len(assignments) * per_day)) if raw_days == "MAX" else int(raw_days)
+            days = "MAX" if raw_days == "MAX" else int(raw_days)
+            if per_day < 1 or (days != "MAX" and days < 1):
+                raise ValueError
         except ValueError:
             return messagebox.showwarning("Trials", "Dias invalidos.")
         plan = build_trial_account_plan(assignments, files_by_tanda, per_day, days)
@@ -2721,83 +2810,40 @@ class InstagramAutoPro(ctk.CTk):
         result = "\n".join(warnings + [f"@{u}: {len(v)} videos" + (f" (faltan {plan.shortfalls[u]})" if u in plan.shortfalls else "") for u, v in plan.assigned.items()])
         if preview_only:
             self.trial_dist_result.delete("1.0", "end"); self.trial_dist_result.insert("1.0", result); return
-        if not messagebox.askyesno("Distribuir Trials", "\n\n".join(warnings + [f"Crear {sum(map(len, plan.assigned.values()))} videos sin reutilizar metadata?"])):
+        if not messagebox.askyesno("Distribuir Trials", "\n\n".join(warnings + [f"Calendarizar {sum(map(len, plan.assigned.values()))} videos sin reutilizar metadata?"])):
             return
         ids = {r["username"]: r["id"] for r in self.db.get_trials_active_accounts()}
-        root = self._trial_calendar_root()
         def task():
             from Organizador import build_calendar_video_filename
-            count = 0
+            entries = []
+            affected = set()
             for user, files in plan.assigned.items():
                 tanda = assignments[user]
                 for index, name in enumerate(files):
                     day, slot = index // per_day + 1, index % per_day + 1
-                    target = os.path.join(root, f"Dia_{day}", user, build_calendar_video_filename(name, tanda, ids[user], day, slot))
-                    _copy_calendar_file(os.path.join(_BASE_DIR, "videos_finales", tanda, name), target); count += 1
+                    source_path = os.path.abspath(os.path.join(_BASE_DIR, "videos_finales", tanda, name))
+                    entries.append(
+                        build_entry(
+                            username=user,
+                            account_id=ids.get(user),
+                            delivery_kind="trial",
+                            day=day,
+                            slot=slot,
+                            tanda=tanda,
+                            source_path=source_path,
+                            telegram_filename=build_calendar_video_filename(name, tanda, ids.get(user), day, slot),
+                            transform_log_id=self.db.get_video_transform_log_id(source_path),
+                        )
+                    )
+                    affected.add(user)
+            if affected:
+                replace_entries(manifest_path(_BASE_DIR), entries, affected, "trial")
+            count = len(entries)
             shortages = ", ".join(f"@{u}: faltan {n}" for u, n in plan.shortfalls.items())
             return f"OK: {count} videos Trial" + (f"\nSin reutilizar: {shortages}" if shortages else "")
         def done(success, text):
             self.trial_dist_result.delete("1.0", "end"); self.trial_dist_result.insert("1.0", text)
             if not success: messagebox.showerror("Trials", text)
-        WorkerThread(self, done, task).start()
-        tanda = self.trial_dist_tanda.get().strip()
-        if not tanda:
-            return messagebox.showwarning("Trials", "Selecciona una tanda Trial.")
-        self._save_trial_captions()
-        missing = self._trial_missing_caption_sources(tanda)
-        if missing:
-            return messagebox.showwarning(
-                "Captions Trial faltantes",
-                "Falta asignar caption a: " + ", ".join(missing),
-            )
-        accounts = selected_trial_usernames(self.db.get_trials_active_accounts())
-        if not accounts:
-            return messagebox.showwarning("Trials", "No hay cuentas con TRIALS ACTIVOS.")
-        try:
-            per_day = int(self.trial_dist_vpd.get())
-            days_text = self.trial_dist_days.get().strip().upper()
-            files = self._trial_tanda_files(tanda)
-            days = max(1, (len(files) + len(accounts) * per_day - 1) // (len(accounts) * per_day)) if days_text == "MAX" else int(days_text)
-            if per_day < 1 or days < 1:
-                raise ValueError
-        except ValueError:
-            return messagebox.showwarning("Trials", "Videos por dia y dias deben ser positivos o MAX.")
-        needed = len(accounts) * per_day * days
-        if len(files) < needed:
-            return messagebox.showwarning("Trials", f"Faltan videos: se necesitan {needed} y hay {len(files)}.")
-        planned = []
-        index = 0
-        for day in range(1, days + 1):
-            for username in accounts:
-                for slot in range(1, per_day + 1):
-                    planned.append((day, username, slot, files[index]))
-                    index += 1
-        result = "\n".join(f"Dia {day} @{user}: {name}" for day, user, _slot, name in planned)
-        if preview_only:
-            self.trial_dist_result.delete("1.0", "end")
-            self.trial_dist_result.insert("1.0", result)
-            return
-        if not messagebox.askyesno("Distribuir Trials", f"Crear {len(planned)} videos Trial en calendario separado?"):
-            return
-        account_ids = {row["username"]: row["id"] for row in self.db.get_trials_active_accounts()}
-        folder = os.path.join(_BASE_DIR, "videos_finales", tanda)
-        root = self._trial_calendar_root()
-
-        def task():
-            from Organizador import build_calendar_video_filename
-            for day, username, slot, name in planned:
-                source = os.path.join(folder, name)
-                target_dir = os.path.join(root, f"Dia_{day}", username)
-                target_name = build_calendar_video_filename(name, tanda, account_ids[username], day, slot)
-                _copy_calendar_file(source, os.path.join(target_dir, target_name))
-            return f"OK: {len(planned)} videos Trial en {root}"
-
-        def done(success, result_text):
-            self.trial_dist_result.delete("1.0", "end")
-            self.trial_dist_result.insert("1.0", result_text)
-            if not success:
-                messagebox.showerror("Trials", result_text)
-
         WorkerThread(self, done, task).start()
 
     def _build_dist_cuentas_tab(self, parent):
@@ -2973,10 +3019,7 @@ class InstagramAutoPro(ctk.CTk):
                     self.acct_dist_tanda.set(normal_tandas[0])
                 self._refresh_tanda_caption_label()
 
-            if hasattr(self, "trial_dist_tanda"):
-                self.trial_dist_tanda.configure(values=trial_tandas)
-                if not self.trial_dist_tanda.get() and trial_tandas:
-                    self.trial_dist_tanda.set(trial_tandas[0])
+            if hasattr(self, "trial_account_scroll"):
                 active_trials = len(self.db.get_trials_active_accounts())
                 self.trial_accounts_lbl.configure(text=f"{active_trials} cuentas con TRIALS ACTIVOS")
                 self._trial_refresh_account_rows()
@@ -3238,9 +3281,7 @@ class InstagramAutoPro(ctk.CTk):
             from Organizador import build_calendar_video_filename
 
             def forge_vid_id(fname):
-                base = os.path.splitext(fname)[0]
-                m = re.match(r'^(.+?)__c\d+$', base)
-                return m.group(1) if m else base
+                return source_key_from_filename(fname)
 
             if not os.path.exists(folder):
                 raise FileNotFoundError(f"Carpeta no encontrada: {folder}")
@@ -3343,7 +3384,7 @@ class InstagramAutoPro(ctk.CTk):
                 cal_root = os.path.join(_BASE_DIR, "CALENDARIO_POSTEO")
 
                 # Limpiar carpetas Dia_* existentes solo para las cuentas del plan
-                if os.path.exists(cal_root):
+                if False and os.path.exists(cal_root):
                     for day_folder in os.listdir(cal_root):
                         if not day_folder.lower().startswith("dia_"):
                             continue
@@ -3359,12 +3400,15 @@ class InstagramAutoPro(ctk.CTk):
                             pass
 
                 # Crear estructura Dia_X/<cuenta>/video.mp4
+                entries = []
+                affected = set()
+                logical_names = set()
                 total_copiados = 0
                 for acc, day_lists in plan.items():
                     for day_idx, day_vids in enumerate(day_lists):
                         day_path = os.path.join(cal_root, f"Dia_{day_idx + 1}", acc)
                         for slot_idx, vid_name in enumerate(day_vids, 1):
-                            src = os.path.join(folder, vid_name)
+                            src = os.path.abspath(os.path.join(folder, vid_name))
                             dst_name = build_calendar_video_filename(
                                 vid_name,
                                 tanda,
@@ -3373,7 +3417,7 @@ class InstagramAutoPro(ctk.CTk):
                                 slot_idx,
                             )
                             dst = os.path.join(day_path, dst_name)
-                            if _path_exists(dst):
+                            if dst_name in logical_names:
                                 dst_name = build_calendar_video_filename(
                                     vid_name,
                                     tanda,
@@ -3383,8 +3427,25 @@ class InstagramAutoPro(ctk.CTk):
                                     collision_suffix=random.randint(1000, 9999),
                                 )
                                 dst = os.path.join(day_path, dst_name)
-                            _copy_calendar_file(src, dst)
+                            logical_names.add(dst_name)
+                            entries.append(
+                                build_entry(
+                                    username=acc,
+                                    account_id=account_ids[acc],
+                                    delivery_kind="normal",
+                                    day=day_idx + 1,
+                                    slot=slot_idx,
+                                    tanda=tanda,
+                                    source_path=src,
+                                    telegram_filename=dst_name,
+                                    transform_log_id=self.db.get_video_transform_log_id(src),
+                                )
+                            )
+                            affected.add(acc)
                             total_copiados += 1
+
+                if affected:
+                    replace_entries(manifest_path(_BASE_DIR), entries, affected, "normal")
 
                 lines += ["=" * 60,
                           f"✅  Estructura creada en : {cal_root}",
@@ -3424,7 +3485,7 @@ class InstagramAutoPro(ctk.CTk):
         ctrl_card = Card(f, title="Cuentas programadas")
         ctrl_card.grid(row=1, column=0, sticky="nsew", padx=(24, 12), pady=10)
         ctrl = ctrl_card.body
-        ctrl.grid_rowconfigure(5, weight=1)
+        ctrl.grid_rowconfigure(6, weight=1)
         ctrl.grid_columnconfigure(0, weight=1)
 
         # Fila 0: título + botón cargar
@@ -3467,7 +3528,17 @@ class InstagramAutoPro(ctk.CTk):
         self.sched_panel = ctk.CTkScrollableFrame(ctrl, fg_color=BG_INPUT, height=160)
         # NO se ejecuta .grid() aquí — se invoca en _toggle_schedule_panel al expandir
 
-        # Fila 4: reset opcional de topics
+        # Fila 4: modo express
+        self._tg_express_mode = tk.BooleanVar(value=False)
+        express_toggle = ToggleRow(
+            ctrl,
+            "Envío express",
+            variable=self._tg_express_mode,
+            fg_color=BG_CARD2,
+        )
+        express_toggle.grid(row=4, column=0, sticky="ew", pady=(8, 4))
+
+        # Fila 5: reset opcional de topics
         self._tg_reset_topics = tk.BooleanVar(value=False)
         reset_topics_toggle = ToggleRow(
             ctrl,
@@ -3475,7 +3546,7 @@ class InstagramAutoPro(ctk.CTk):
             variable=self._tg_reset_topics,
             fg_color=BG_CARD2,
         )
-        reset_topics_toggle.grid(row=4, column=0, sticky="ew", pady=(8, 10))
+        reset_topics_toggle.grid(row=5, column=0, sticky="ew", pady=(4, 10))
 
         # Fila 5: listbox con selección múltiple
         self.list_tg = tk.Listbox(ctrl, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
@@ -3484,11 +3555,11 @@ class InstagramAutoPro(ctk.CTk):
                                   selectmode=tk.EXTENDED,
                                   borderwidth=0, highlightthickness=1,
                                   highlightbackground=self.themed(BORDER), font=FONT_BODY)
-        self.list_tg.grid(row=5, column=0, sticky="nsew", pady=(0, 10))
+        self.list_tg.grid(row=6, column=0, sticky="nsew", pady=(0, 10))
 
         # Controles inferiores
         bot_ctrl = ctk.CTkFrame(ctrl, fg_color="transparent")
-        bot_ctrl.grid(row=6, column=0, sticky="ew", pady=(10, 20))
+        bot_ctrl.grid(row=7, column=0, sticky="ew", pady=(10, 20))
         
         ctk.CTkLabel(bot_ctrl, text="Fecha Inicio (YYYY-MM-DD):", text_color=TEXT_MUTED).pack(side="left")
         self.e_date_tg = ctk.CTkEntry(bot_ctrl, fg_color=BG_INPUT, border_color=BORDER, width=120)
@@ -3496,7 +3567,7 @@ class InstagramAutoPro(ctk.CTk):
         self.e_date_tg.insert(0, datetime.now().strftime("%Y-%m-%d"))
 
         btn_row = ctk.CTkFrame(ctrl, fg_color="transparent")
-        btn_row.grid(row=7, column=0, sticky="ew", pady=(0, 0))
+        btn_row.grid(row=8, column=0, sticky="ew", pady=(0, 0))
         
         self.btn_start_tg = PrimaryButton(btn_row, text="▶ INICIAR", fg_color=TELEGRAM,
                                           text_color=TEXT_ON_DANGER, command=self.start_tg_bot)
@@ -3511,7 +3582,7 @@ class InstagramAutoPro(ctk.CTk):
         self.btn_stop_tg.pack(side="left", expand=True, padx=(5, 0))
 
         cleanup_row = ctk.CTkFrame(ctrl, fg_color="transparent")
-        cleanup_row.grid(row=8, column=0, sticky="ew", pady=(8, 0))
+        cleanup_row.grid(row=9, column=0, sticky="ew", pady=(8, 0))
         self.btn_delete_calendar_tg = DangerButton(
             cleanup_row,
             text="Borrar calendarizaciones",
@@ -3676,27 +3747,19 @@ class InstagramAutoPro(ctk.CTk):
 
         only_with_videos = self._tg_only_with_videos.get() if self._tg_only_with_videos else False
         accounts = self.db.get_all_accounts()
-        cal_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "CALENDARIO_POSTEO")
+        import organizadortg as telegram_bot
 
         enriched = []
         for acc in accounts:
-            total = 0
-            if os.path.isdir(cal_root):
-                for day_folder in os.listdir(cal_root):
-                    if not day_folder.lower().startswith("dia_"):
-                        continue
-                    acc_folder = os.path.join(cal_root, day_folder, acc["username"])
-                    if os.path.isdir(acc_folder):
-                        total += sum(
-                            1 for f in os.listdir(acc_folder)
-                            if f.lower().endswith((".mp4", ".mov"))
-                        )
+            video_counts = telegram_bot.count_account_calendar_videos_by_kind(acc["username"])
+            total = video_counts["normal"] + video_counts["trial"]
             if only_with_videos and total == 0:
                 continue
             enriched.append({
                 "username": acc["username"],
                 "assigned_va": acc.get("assigned_va", "Sin Asignar"),
                 "total_videos": total,
+                "video_label": telegram_bot.format_account_calendar_video_label(video_counts),
                 "account_type": acc.get("account_type", ""),
             })
 
@@ -3704,7 +3767,7 @@ class InstagramAutoPro(ctk.CTk):
         self.list_tg.delete(0, "end")
         for acc in enriched:
             tag = acc.get("account_type", "").upper() or "—"
-            self.list_tg.insert("end", f"@{acc['username']}  [{tag}]  ({acc['assigned_va']})  {acc['total_videos']} videos")
+            self.list_tg.insert("end", f"@{acc['username']}  [{tag}]  ({acc['assigned_va']})  {acc['video_label']}")
         self.list_tg.select_set(0, "end")  # seleccionar todas por defecto
 
         self.bot_log(f"Cargadas {len(enriched)} cuentas para {date_str}{'  (solo con videos)' if only_with_videos else ''}.", "INFO")
@@ -3800,6 +3863,8 @@ class InstagramAutoPro(ctk.CTk):
 
         reset_topics_var = getattr(self, "_tg_reset_topics", None)
         reset_topics = bool(reset_topics_var.get()) if reset_topics_var is not None else False
+        express_mode_var = getattr(self, "_tg_express_mode", None)
+        express_mode = bool(express_mode_var.get()) if express_mode_var is not None else False
         if reset_topics:
             if not messagebox.askyesno(
                 "Borrar topics existentes",
@@ -3813,12 +3878,15 @@ class InstagramAutoPro(ctk.CTk):
 
         import organizadortg as telegram_bot
         self.bot_log("📝 Captions: se resuelven por tanda desde Logística.", "INFO")
+        if express_mode:
+            self.bot_log("Envío express activado: se omite el mensaje de metadata.", "WARNING")
         if reset_topics:
             self.bot_log("🧹 Reset de topics activado: se borraran y recrearan antes del envio.", "WARNING")
         self.tg_controller = telegram_bot.TelegramBotController(
             date_str,
             selected_accounts,
             reset_topics=reset_topics,
+            express_mode=express_mode,
         )
         
         self.btn_start_tg.configure(state="disabled")
@@ -4759,6 +4827,18 @@ class InstagramAutoPro(ctk.CTk):
             self.editor_status.configure(text="✅ Video guardado" if success else "❌ Error de render", text_color=SUCCESS if success else DANGER)
             if success:
                 messagebox.showinfo("Edición completada", f"Video guardado en:\n{result}")
+                if hasattr(self, "db") and hasattr(self.db, "save_video_transform_log"):
+                    import video_editor
+                    self.db.save_video_transform_log(
+                        "video_editor",
+                        os.path.abspath(video),
+                        os.path.abspath(result),
+                        {
+                            "input_path": os.path.abspath(video),
+                            "overlays": video_editor.describe_overlay_log(overlays),
+                            "ffmpeg_threads": performance.ffmpeg_threads,
+                        },
+                    )
             else:
                 messagebox.showerror("Renderizar", result)
         try:
@@ -4798,6 +4878,19 @@ class InstagramAutoPro(ctk.CTk):
             if success:
                 messagebox.showinfo("Edición completada",
                                     f"{len(result)} videos guardados en:\n{os.path.dirname(result[0])}")
+                if hasattr(self, "db") and hasattr(self.db, "save_video_transform_log"):
+                    import video_editor
+                    for source, output, job_overlays in jobs:
+                        self.db.save_video_transform_log(
+                            "video_editor",
+                            os.path.abspath(source),
+                            os.path.abspath(output),
+                            {
+                                "input_path": os.path.abspath(source),
+                                "overlays": video_editor.describe_overlay_log(job_overlays),
+                                "ffmpeg_threads": performance.ffmpeg_threads,
+                            },
+                        )
             else:
                 messagebox.showerror("Renderizar lote", result)
 
@@ -4810,6 +4903,114 @@ class InstagramAutoPro(ctk.CTk):
 
     # FORGE DE METADATA
     # ══════════════════════════════════════════════════════════════════════
+    def _build_transform_log_panel(self, parent):
+        panel = ctk.CTkFrame(parent, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        panel.grid_columnconfigure(0, weight=1)
+        panel.grid_rowconfigure(1, weight=1)
+
+        header = ctk.CTkFrame(panel, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=18, pady=(14, 6))
+        header.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            header,
+            text="Logs de transformacion",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=TEXT_BODY,
+        ).grid(row=0, column=0, sticky="w")
+        GhostButton(header, text="Actualizar", command=self.refresh_transform_log_table).grid(row=0, column=1)
+
+        table_wrap = ctk.CTkFrame(panel, fg_color="transparent")
+        table_wrap.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 8))
+        table_wrap.grid_columnconfigure(0, weight=1)
+        columns = ("process", "output", "source", "tanda", "rotation", "crop", "speed", "created")
+        self.transform_log_tree = ttk.Treeview(
+            table_wrap,
+            columns=columns,
+            show="headings",
+            style="Premium.Treeview",
+            height=8,
+        )
+        widths = {
+            "process": 95,
+            "output": 220,
+            "source": 180,
+            "tanda": 130,
+            "rotation": 80,
+            "crop": 70,
+            "speed": 80,
+            "created": 145,
+        }
+        for column in columns:
+            self.transform_log_tree.heading(column, text=column.title())
+            self.transform_log_tree.column(column, width=widths[column], anchor="w")
+        self.transform_log_tree.bind("<<TreeviewSelect>>", self._on_transform_log_select)
+        self.transform_log_tree.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(table_wrap, orient="vertical", command=self.transform_log_tree.yview)
+        self.transform_log_tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.grid(row=0, column=1, sticky="ns", padx=(2, 0))
+
+        self.transform_log_detail = tk.Text(
+            panel,
+            height=8,
+            wrap="word",
+            bg=self.themed(BG_INPUT),
+            fg=self.themed(TEXT_BODY),
+            insertbackground=self.themed(TEXT_BODY),
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=self.themed(BORDER),
+            font=FONT_MONO,
+        )
+        self.transform_log_detail.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 14))
+        self._transform_log_rows = {}
+        self.refresh_transform_log_table()
+        return panel
+
+    def refresh_transform_log_table(self):
+        tree = getattr(self, "transform_log_tree", None)
+        if tree is None:
+            return
+        for item in tree.get_children():
+            tree.delete(item)
+        self._transform_log_rows = {}
+        for row in self.db.list_video_transform_logs(limit=500):
+            try:
+                details = json.loads(row["details_json"])
+            except Exception:
+                details = {}
+            summary = _format_transform_summary(details)
+            item = tree.insert(
+                "",
+                "end",
+                values=(
+                    row["process_kind"],
+                    row["output_filename"],
+                    os.path.basename(row["source_path"]),
+                    row.get("tanda_name") or "",
+                    summary["rotation"],
+                    summary["crop"],
+                    summary["speed"],
+                    row["created_at"],
+                ),
+            )
+            self._transform_log_rows[item] = row
+
+    def _on_transform_log_select(self, _event=None):
+        tree = getattr(self, "transform_log_tree", None)
+        detail = getattr(self, "transform_log_detail", None)
+        if tree is None or detail is None:
+            return
+        selection = tree.selection()
+        if not selection:
+            return
+        row = self._transform_log_rows.get(selection[0])
+        try:
+            details = json.loads(row["details_json"]) if row else {}
+        except Exception:
+            details = {}
+        detail.delete("1.0", "end")
+        detail.insert("1.0", json.dumps(details, ensure_ascii=False, indent=2))
+
     def _build_forge_frame(self):
         self.forge_video_paths = []
         self.forge_meta_assignments = []
@@ -5073,6 +5274,10 @@ class InstagramAutoPro(ctk.CTk):
                                           text_color=TEXT_MUTED)
         self.forge_pb_lbl.grid(row=1, column=0, sticky="w")
 
+        self._build_transform_log_panel(scroll).grid(
+            row=4, column=0, sticky="nsew", padx=24, pady=(0, 20)
+        )
+
         # Estado inicial "Default": ocultar toggles manuales y slider de Custom.
         self._forge_on_efectos_change("Default")
         self._forge_on_fuerza_change("Default")
@@ -5222,7 +5427,7 @@ class InstagramAutoPro(ctk.CTk):
             for vid_path in videos:
                 filename = os.path.basename(vid_path)
                 base, ext = os.path.splitext(filename)
-                vid_id = base.replace(" ", "_").replace("__", "_")
+                vid_id = forge_output_id_from_filename(filename)
                 vh = metadata_pool.get_video_hash(vid_path)
                 existing_max = 0
                 copy_pattern = re.compile(rf"^{re.escape(vid_id)}__c(\d+){re.escape(ext)}$")
@@ -5245,7 +5450,7 @@ class InstagramAutoPro(ctk.CTk):
             def process_copy(copy_job):
                 vid_path, out_path, filename, out_name, vh, meta, fingerprint = copy_job
                 try:
-                    metadata_pool.apply_variant_and_metadata(
+                    params = metadata_pool.apply_variant_and_metadata(
                         vid_path, out_path, meta,
                         enabled=fx_enabled, strength=forge_strength,
                         overrides=forge_overrides,
@@ -5253,16 +5458,27 @@ class InstagramAutoPro(ctk.CTk):
                     )
                 except Exception as error:
                     raise RuntimeError(f"Forge falló en '{filename}': {error}") from error
-                return filename, out_name, vh, fingerprint
+                return filename, out_name, vh, fingerprint, vid_path, out_path, meta, params
 
             with ThreadPoolExecutor(max_workers=performance.workers) as pool:
                 futures = [pool.submit(process_copy, copy_job) for copy_job in copy_jobs]
                 completed = [future.result() for future in futures]
 
-            for filename, out_name, vh, _fingerprint in completed:
+            process_kind = "forge_trial" if is_trial_tanda else "forge"
+            for filename, out_name, vh, fingerprint, vid_path, out_path, meta, params in completed:
                 db_ref.save_forge_video(tanda_name, filename, out_name, vh)
+                _save_forge_transform_log(
+                    db_ref,
+                    process_kind=process_kind,
+                    source_path=vid_path,
+                    output_path=out_path,
+                    tanda_name=tanda_name,
+                    source_identity=fingerprint.get("video_hash", ""),
+                    params=params,
+                    meta=meta,
+                )
             db_ref.save_metadata_fingerprints([
-                fingerprint for *_row, fingerprint in completed
+                fingerprint for _filename, _out_name, _vh, fingerprint, *_rest in completed
             ])
             existing_tanda = db_ref.get_tanda_by_name(tanda_name) or {}
             db_ref.add_tanda(
@@ -5304,21 +5520,33 @@ class InstagramAutoPro(ctk.CTk):
         active_accounts = self.db.get_trials_active_accounts()
         trial_tandas = self.db.get_trial_tandas()
         self.trial_account_vars = {}
+        self.trial_account_panel_frames = {}
+        self.trial_expanded_accounts = set()
+        self.trial_caption_editors = {}
+        self.trial_thumbnail_images = []
         for account in active_accounts:
             username = account["username"]
             row = ctk.CTkFrame(self.trial_account_scroll, fg_color=BG_CARD)
-            row.pack(fill="x", padx=4, pady=3)
+            row.pack(fill="x", padx=4, pady=4)
+            header = ctk.CTkFrame(row, fg_color="transparent")
+            header.pack(fill="x", padx=8, pady=6)
             ctk.CTkLabel(
-                row, text=f"@{username} [{account.get('account_type', '')}]",
+                header, text=f"@{username} [{account.get('account_type', '')}]",
                 text_color=TEXT_BODY, width=230, anchor="w",
             ).pack(side="left", padx=8, pady=6)
             var = tk.StringVar(value="")
             combo = ctk.CTkComboBox(
-                row, values=[""] + trial_tandas, variable=var,
+                header, values=[""] + trial_tandas, variable=var,
                 fg_color=BG_INPUT, border_color=BORDER, width=280,
-                command=lambda _value: self._trial_refresh_sources(),
+                command=lambda _value, u=username: self._trial_on_account_tanda_changed(u),
             )
             combo.pack(side="left", padx=8, pady=6)
+            GhostButton(
+                header, text="Desplegar panel de trials",
+                command=lambda u=username: self._trial_toggle_account_panel(u),
+            ).pack(side="left", padx=8, pady=6)
+            panel = ctk.CTkFrame(row, fg_color=BG_CARD2)
+            self.trial_account_panel_frames[username] = panel
             self.trial_account_vars[username] = var
         self.trial_accounts_lbl.configure(text=f"{len(active_accounts)} cuentas con TRIALS ACTIVOS")
 

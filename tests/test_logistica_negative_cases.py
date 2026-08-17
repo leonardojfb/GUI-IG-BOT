@@ -9,6 +9,7 @@ import shutil
 
 import pytest
 
+from calendar_manifest import load_entries, manifest_path
 from tests.support.e2e_pipeline import create_video, make_run_root
 
 
@@ -24,6 +25,7 @@ def isolated_organizador(monkeypatch):
         db_path,
     )
     monkeypatch.setattr(database, "DB_PATH", str(db_path))
+    monkeypatch.setattr(Organizador, "base_dir", str(run_root))
     monkeypatch.setattr(Organizador, "source_root", str(run_root / "videos_finales"))
     monkeypatch.setattr(Organizador, "output_root", str(run_root / "CALENDARIO_POSTEO"))
     try:
@@ -87,15 +89,16 @@ def test_distribute_tanda_rerun_into_existing_day_uses_collision_suffix_not_over
     assert "Error" not in first
     assert "Error" not in second
 
-    files = list((run_root / "CALENDARIO_POSTEO").rglob("*.mp4"))
-    names = [f.name for f in files]
+    entries = load_entries(manifest_path(run_root))
+    names = [entry["telegram_filename"] for entry in entries]
     assert len(names) == len(set(names)), (
-        f"a rerun into the same Dia_1/account overwrote or collided on disk: {names}"
+        f"a rerun into the same Dia_1/account created duplicate manifest names: {names}"
     )
-    assert len(files) == 2, (
-        "both runs together only had 2 distinct source videos and 1 account/day/slot=1 "
-        f"quota each -- expected 2 files total (one clobbered write per run), got {len(files)}"
+    assert len(entries) == 1, (
+        "normal manifest distribution replaces the affected account's previous run; "
+        f"expected 1 latest entry, got {len(entries)}"
     )
+    assert entries[0]["source_path"].endswith(("NEG_COLLIDE__P1__P2A.mp4", "NEG_COLLIDE__P1__P2B.mp4"))
 
 
 def test_distribute_tanda_does_not_resend_identical_video_to_same_account_across_separate_runs(
@@ -127,19 +130,19 @@ def test_distribute_tanda_does_not_resend_identical_video_to_same_account_across
     db.close()
 
     Organizador.distribute_tanda("DUP_CHECK", "PRUEBA_DUP_CAT", 1, False, "1")
-    first_run_files = {f.name.split("__TANDA")[0] for f in (run_root / "CALENDARIO_POSTEO").rglob("*.mp4")}
+    first_run_files = {
+        entry["telegram_filename"].split("__TANDA")[0]
+        for entry in load_entries(manifest_path(run_root))
+    }
     assert first_run_files == {"DUP_CHECK__P1__ONLY"}
-    shutil.rmtree(run_root / "CALENDARIO_POSTEO")
 
     Organizador.distribute_tanda("DUP_CHECK", "PRUEBA_DUP_CAT", 1, False, "1")
-    second_run_files = list((run_root / "CALENDARIO_POSTEO").rglob("*.mp4")) if (
-        run_root / "CALENDARIO_POSTEO"
-    ).exists() else []
+    second_run_files = load_entries(manifest_path(run_root))
 
     assert second_run_files == [], (
         "dup_acc already received DUP_CHECK__P1__ONLY in run 1 (recorded in "
         "fingerprint_history); with only that one source video available, run 2 must "
-        f"find no valid combo left and skip the slot, not resend it. Got: {second_run_files}"
+        f"clear the normal manifest for that account instead of resending it. Got: {second_run_files}"
     )
 
 

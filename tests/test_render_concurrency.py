@@ -1,4 +1,6 @@
 from concurrent.futures import Future
+import json
+from pathlib import Path
 from types import MethodType, SimpleNamespace
 
 import pytest
@@ -18,6 +20,13 @@ OVERLAY = {
 
 def _contains_threads(command, threads):
     return ["-threads", str(threads)] in [command[index:index + 2] for index in range(len(command) - 1)]
+
+
+def _video_codec(command):
+    try:
+        return command[command.index("-c:v") + 1]
+    except ValueError:
+        return None
 
 
 def test_cpu_tanda_fallback_uses_the_snapshot_thread_budget(monkeypatch, tmp_path):
@@ -94,14 +103,21 @@ def test_tanda_future_failure_prevents_a_success_result(monkeypatch, tmp_path):
     assert database.closed is True
 
 
-def test_editor_command_uses_requested_thread_budget(monkeypatch):
+def test_editor_prefers_nvenc_and_falls_back_to_cpu_thread_budget(monkeypatch):
     monkeypatch.setattr(video_editor, "probe_video", lambda _path: {"duration": 1.0, "width": 100, "height": 100, "fps": 30})
     captured = []
-    monkeypatch.setattr(video_editor, "_run", lambda command: captured.append(command) or SimpleNamespace(returncode=0, stderr=""))
+
+    def run(command):
+        captured.append(command)
+        return SimpleNamespace(returncode=0 if len(captured) == 2 else 1, stderr="nvenc failed")
+
+    monkeypatch.setattr(video_editor, "_run", run)
 
     video_editor.render_video("source.mp4", "out.mp4", [OVERLAY], ffmpeg_threads=2)
 
-    assert _contains_threads(captured[0], 2)
+    assert [_video_codec(command) for command in captured] == ["h264_nvenc", "libx264"]
+    assert not _contains_threads(captured[0], 2)
+    assert _contains_threads(captured[1], 2)
 
 
 def test_tandas_use_one_snapshot_for_workers_and_cpu_thread_budget(monkeypatch, tmp_path):
@@ -139,6 +155,41 @@ def test_tandas_use_one_snapshot_for_workers_and_cpu_thread_budget(monkeypatch, 
 
     assert worker_counts == [3]
     assert submissions[0][1][-1] == 5
+
+
+def test_process_tandas_logs_successful_outputs(tmp_path, monkeypatch):
+    from database import DatabaseManager
+
+    db = DatabaseManager(str(tmp_path / "organizador.db"))
+    p1_dir = tmp_path / "inputs" / "p1"
+    p2_dir = tmp_path / "inputs" / "p2"
+    p1_dir.mkdir(parents=True)
+    p2_dir.mkdir(parents=True)
+    (p1_dir / "one.mp4").write_bytes(b"p1")
+    (p2_dir / "two.mp4").write_bytes(b"p2")
+    monkeypatch.setattr(videos, "FOLDER_INPUTS", str(tmp_path / "inputs"))
+    monkeypatch.setattr(videos, "FOLDER_OUTPUT_ROOT", str(tmp_path / "videos_finales"))
+
+    def fake_render_video_pair(path_v1, path_v2, out_path, tanda_name, p1_id, p2_id, ffmpeg_threads=None):
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(out_path).write_bytes(b"rendered")
+        return out_path
+
+    monkeypatch.setattr(videos, "render_video_pair", fake_render_video_pair)
+
+    videos.process_tandas(
+        db,
+        [{"tanda_name": "TANDA", "p1_folder": "p1", "p2_folder": "p2"}],
+        SimpleNamespace(workers=1, ffmpeg_threads=2),
+    )
+
+    rows = db.list_video_transform_logs()
+    assert rows[0]["process_kind"] == "tandas"
+    details = json.loads(rows[0]["details_json"])
+    assert details["p1_id"] == "one"
+    assert details["p2_id"] == "two"
+    assert details["ffmpeg_threads"] == 2
+    db.close()
 
 
 def test_editor_batch_uses_one_snapshot_for_workers_and_cpu_thread_budget(monkeypatch):
@@ -184,7 +235,7 @@ def test_editor_single_render_uses_one_snapshot_and_blocks_repeated_clicks(monke
     import gui_premium_v7
 
     performance = RenderPerformance(4, 2, 5, 10, None)
-    snapshot_calls, render_calls, worker_callbacks = [], [], []
+    snapshot_calls, render_calls, worker_callbacks, transform_logs = [], [], [], []
 
     class Widget:
         def __init__(self):
@@ -206,6 +257,7 @@ def test_editor_single_render_uses_one_snapshot_and_blocks_repeated_clicks(monke
         _editor_collect=lambda: (["source.mp4"], [OVERLAY]),
         editor_status=Widget(),
         btn_editor_render=Widget(),
+        db=SimpleNamespace(save_video_transform_log=lambda *args, **kwargs: transform_logs.append((args, kwargs))),
     )
     monkeypatch.setattr(
         gui_premium_v7.render_performance,
@@ -231,6 +283,9 @@ def test_editor_single_render_uses_one_snapshot_and_blocks_repeated_clicks(monke
     result = task()
     done(True, result)
     assert render_calls == [("source.mp4", "out.mp4", [OVERLAY], 5)]
+    assert transform_logs
+    assert transform_logs[0][0][0] == "video_editor"
+    assert transform_logs[0][1] == {}
     assert fake.btn_editor_render.states == ["disabled", "normal"]
     assert fake._editor_render_active is False
 

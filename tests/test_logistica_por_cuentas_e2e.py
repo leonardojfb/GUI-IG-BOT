@@ -11,8 +11,10 @@ it never actually ran the algorithm. This test drives the real bound method (sam
 pattern as tests/test_dashboard_refresh.py) so the file counts, tanda tag, and caption
 routing get checked against real output instead of a string match.
 """
+import json
 import os
 import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -82,6 +84,12 @@ def _make_app():
             pass
         app.destroy()
         database.DB_PATH = original_db_path
+        try:
+            import organizadortg
+
+            organizadortg.db = database.DatabaseManager()
+        except Exception:
+            pass
         if os.path.exists(path):
             os.remove(path)
 
@@ -143,34 +151,40 @@ def test_por_cuentas_distributes_manual_cross_category_accounts_without_mixing(t
         result_text = app.acct_dist_result.get("1.0", "end")
         assert "❌" not in result_text, f"Por Cuentas run reported an error: {result_text}"
 
-        calendar_root = os.path.join(base_dir, "CALENDARIO_POSTEO")
-        produced = []
-        for day_dir in sorted(os.listdir(calendar_root)):
-            day_path = os.path.join(calendar_root, day_dir)
-            for acc_dir in os.listdir(day_path):
-                acc_path = os.path.join(day_path, acc_dir)
-                for fname in os.listdir(acc_path):
-                    produced.append((day_dir, acc_dir, fname))
+        manifest_path = Path(base_dir) / "calendar_manifest.json"
+        assert manifest_path.exists()
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        produced = [
+            row for row in payload["entries"]
+            if row["delivery_kind"] == "normal" and row["username"] in {"pc_acc_x", "pc_acc_y"}
+        ]
 
         assert len(produced) == needed, (
-            f"expected {needed} calendarized files (2 accounts x 7 days x 1/day), got {len(produced)}"
+            f"expected {needed} manifest entries (2 accounts x 7 days x 1/day), got {len(produced)}"
         )
 
-        accounts_seen = {acc for (_, acc, _) in produced}
+        accounts_seen = {row["username"] for row in produced}
         assert accounts_seen == {"pc_acc_x", "pc_acc_y"}, (
             f"Por Cuentas must only write to the manually selected accounts, got {accounts_seen}"
         )
 
-        for _, _, fname in produced:
+        for row in produced:
+            source = Path(row["source_path"])
+            assert source.exists()
+            assert "videos_finales" in source.parts
+            assert row["telegram_filename"].endswith(".mp4")
+            fname = row["telegram_filename"]
             assert f"__TANDA_{tanda_name}__" in fname, (
                 f"calendar filename lost its tanda tag: {fname}"
             )
+        assert not any((Path(base_dir) / "CALENDARIO_POSTEO").rglob("*.mp4"))
 
         import organizadortg
 
         pools = organizadortg.load_tanda_caption_pools(app.db.get_all_tandas())
         caption_indexes = {}
-        for _, _, fname in produced:
+        for row in produced:
+            fname = row["telegram_filename"]
             caption = organizadortg.caption_for_calendar_video(fname, pools, caption_indexes)
             assert caption is not None and "CAPTION_PC_UNIQUE" in caption, (
                 f"Por Cuentas file did not receive its own tanda's caption: {fname} -> {caption}"
