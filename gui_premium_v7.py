@@ -205,6 +205,13 @@ _install_customtkinter_dropdown_destroy_safety()
 ctk.set_appearance_mode("system")
 ctk.set_default_color_theme("dark-blue")
 
+DESIGN_WINDOW_W = 1400
+DESIGN_WINDOW_H = 860
+MIN_WINDOW_W = 860
+MIN_WINDOW_H = 520
+SCREEN_MARGIN_W = 80
+SCREEN_MARGIN_H = 120
+
 # ══════════════════════════════════════════════════════════════════════════════
 # PANEL DE ESTADO DE CUENTAS — Constantes y helpers
 # ══════════════════════════════════════════════════════════════════════════════
@@ -945,8 +952,7 @@ class InstagramAutoPro(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("⚡ Instagram Automation Pro  —  V7")
-        self.geometry("1400x860")
-        self.minsize(1100, 700)
+        self._apply_responsive_window()
         self.configure(fg_color=BG_APP)
 
         self.db = DatabaseManager()
@@ -979,6 +985,23 @@ class InstagramAutoPro(ctk.CTk):
         self._update_clock()
         self.after(250, self._show_startup_greeting)
         self.after(1600, self._show_update_notice)
+
+    def _apply_responsive_window(self):
+        screen_w = max(1, self.winfo_screenwidth())
+        screen_h = max(1, self.winfo_screenheight())
+        width = max(MIN_WINDOW_W, min(DESIGN_WINDOW_W, screen_w - SCREEN_MARGIN_W))
+        height = max(MIN_WINDOW_H, min(DESIGN_WINDOW_H, screen_h - SCREEN_MARGIN_H))
+
+        self.minsize(MIN_WINDOW_W, MIN_WINDOW_H)
+        self.geometry(f"{width}x{height}")
+
+    def _fit_toplevel(self, window, width, height):
+        screen_w = max(1, window.winfo_screenwidth())
+        screen_h = max(1, window.winfo_screenheight())
+        fitted_w = max(360, min(width, screen_w - SCREEN_MARGIN_W))
+        fitted_h = max(320, min(height, screen_h - SCREEN_MARGIN_H))
+        window.geometry(f"{fitted_w}x{fitted_h}")
+        return fitted_w, fitted_h
 
     def _show_startup_greeting(self):
         """Small startup toast used to verify an installed update visually."""
@@ -1143,7 +1166,8 @@ class InstagramAutoPro(ctk.CTk):
             fg_color=BG_SIDEBAR, border_width=1, border_color=BORDER
         )
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(90, weight=1)
+        self.sidebar.grid_rowconfigure(2, weight=1)
+        self.sidebar.grid_columnconfigure(0, weight=1)
         self.sidebar.grid_propagate(False)
 
         # — Logo —
@@ -1164,6 +1188,13 @@ class InstagramAutoPro(ctk.CTk):
         ctk.CTkFrame(self.sidebar, height=1, fg_color=BORDER).grid(
             row=1, column=0, sticky="ew", padx=16, pady=(4, 8))
 
+        self.sidebar_nav = ctk.CTkScrollableFrame(
+            self.sidebar, fg_color="transparent", corner_radius=0,
+            scrollbar_button_color=BORDER, scrollbar_button_hover_color=ACCENT,
+        )
+        self.sidebar_nav.grid(row=2, column=0, sticky="nsew", padx=0, pady=(0, 8))
+        self.sidebar_nav.grid_columnconfigure(0, weight=1)
+
         # — Navegación agrupada por flujo de trabajo —
         nav_groups = [
             ("Edición",       [("🖼️   Edición de video", "VideoEditor")]),
@@ -1175,37 +1206,39 @@ class InstagramAutoPro(ctk.CTk):
                               ("⬇   Actualizaciones", "Actualizaciones")]),
         ]
         self._nav_btns = {}
-        row = 2
+        row = 0
         for group_name, items in nav_groups:
-            ctk.CTkLabel(self.sidebar, text=group_name.upper(), anchor="w",
+            ctk.CTkLabel(self.sidebar_nav, text=group_name.upper(), anchor="w",
                          font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
                          text_color=TEXT_MUTED).grid(row=row, column=0, padx=18,
                                                      pady=(10, 2), sticky="w")
             row += 1
             for label, key in items:
-                btn = NavItem(self.sidebar, text=label, command=lambda k=key: self.show_frame(k))
+                btn = NavItem(self.sidebar_nav, text=label, command=lambda k=key: self.show_frame(k))
                 btn.grid(row=row, column=0, padx=10, pady=2, sticky="ew")
                 self._nav_btns[key] = btn
                 row += 1
 
         # — Selector de tema —
         self.theme_seg = ctk.CTkSegmentedButton(
-            self.sidebar, values=["Claro", "Oscuro", "Sistema"],
+            self.sidebar_nav, values=["Claro", "Oscuro", "Sistema"],
             command=self._on_theme_change,
             fg_color=SURFACE2, selected_color=ACCENT, selected_hover_color=ACCENT_HOVER,
             unselected_color=SURFACE2, text_color=TEXT_BODY,
             font=ctk.CTkFont(family="Segoe UI", size=11), height=30, corner_radius=BTN_RADIUS,
         )
         self.theme_seg.set("Sistema")
-        self.theme_seg.grid(row=91, column=0, padx=14, pady=(8, 4), sticky="ew")
+        self.theme_seg.grid(row=row, column=0, padx=14, pady=(14, 4), sticky="ew")
+        row += 1
 
         # — Status del bot (parte inferior sidebar) —
-        ctk.CTkFrame(self.sidebar, height=1, fg_color=BORDER).grid(
-            row=92, column=0, sticky="ew", padx=16, pady=(8, 4))
+        ctk.CTkFrame(self.sidebar_nav, height=1, fg_color=BORDER).grid(
+            row=row, column=0, sticky="ew", padx=16, pady=(8, 4))
+        row += 1
         self.lbl_bot_status = ctk.CTkLabel(
-            self.sidebar, text="⬤  Bot inactivo",
+            self.sidebar_nav, text="⬤  Bot inactivo",
             font=ctk.CTkFont(size=11), text_color=TEXT_MUTED)
-        self.lbl_bot_status.grid(row=93, column=0, padx=18, pady=(0, 18), sticky="sw")
+        self.lbl_bot_status.grid(row=row, column=0, padx=18, pady=(0, 18), sticky="sw")
 
     def set_bot_status(self, active: bool):
         """Actualiza indicador de bot en la sidebar."""
@@ -1224,8 +1257,9 @@ class InstagramAutoPro(ctk.CTk):
         self._container = container
 
         for name in ["Dashboard", "Equipo", "Tandas", "Logistica", "Telegram", "Cuentas", "VerifyLegacy", "AIAdvisor", "Forge", "VideoEditor", "Actualizaciones"]:
-            f = ctk.CTkFrame(container, fg_color=BG_APP, corner_radius=0)
+            f = ctk.CTkScrollableFrame(container, fg_color=BG_APP, corner_radius=0)
             f.grid(row=0, column=0, sticky="nsew")
+            f.grid_columnconfigure(0, weight=1)
             self._frames[name] = f
 
         # Construir contenido de cada frame
@@ -3107,7 +3141,7 @@ class InstagramAutoPro(ctk.CTk):
             if success:
                 win = ctk.CTkToplevel(self)
                 win.title(f"📊 Plan de Distribución: {tanda}")
-                win.geometry("950x700")
+                self._fit_toplevel(win, 950, 700)
                 win.configure(fg_color=BG_APP)
                 txt = ctk.CTkTextbox(win, fg_color=BG_CARD, text_color=NEON_CYAN, font=FONT_MONO)
                 txt.pack(fill="both", expand=True, padx=20, pady=20)
@@ -3682,7 +3716,7 @@ class InstagramAutoPro(ctk.CTk):
 
         win = ctk.CTkToplevel(self)
         win.title(f"Horarios — {va_name} / {category}")
-        win.geometry("520x420")
+        self._fit_toplevel(win, 520, 420)
         win.grab_set()
 
         ctk.CTkLabel(win, text=f"⏰ {va_name} / {category}",
@@ -5603,7 +5637,7 @@ class InstagramAutoPro(ctk.CTk):
             return messagebox.showwarning("Captions individuales", "Selecciona una tanda fuente.")
         dialog = ctk.CTkToplevel(self)
         dialog.title(f"Captions individuales - {tanda}")
-        dialog.geometry("860x680")
+        self._fit_toplevel(dialog, 860, 680)
         dialog.configure(fg_color=BG_APP)
         scroll = ctk.CTkScrollableFrame(dialog, fg_color=BG_CARD2)
         scroll.pack(fill="both", expand=True, padx=16, pady=16)

@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.28",
+    "version":  "1.0.29",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.28",
-    "asset_name":  "MetodoIG-v1.0.28.zip",
-    "sha256":  "0179f6fb22e6ada4ec2996030a0991b2c15a3031a3e686070f83c38be58140e8",
-    "notes":  "Hotfix launcher: la GUI abre aunque falle la reparacion automatica de dependencias opcionales como Pillow o tzdata; el error queda como aviso dentro de la app.",
+    "github_release_tag":  "v1.0.29",
+    "asset_name":  "MetodoIG-v1.0.29.zip",
+    "sha256":  "00474294653907a5a00a087b4a7f23ba3451436048c8df25d79e73bb56e04389",
+    "notes":  "Responsive general: ventana principal adaptada a resoluciones bajas/escala 150%, pestañas principales y sidebar scrolleables, y popups grandes ajustados al tamaño de pantalla.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",
