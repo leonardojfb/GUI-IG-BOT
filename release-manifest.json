@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.30",
+    "version":  "1.0.31",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.30",
-    "asset_name":  "MetodoIG-v1.0.30.zip",
-    "sha256":  "7c33262fe93efc474cd4f7b37b44ee1172a062050788d8bc0c65dc9826d332d1",
-    "notes":  "Hotfix layout: corrige la pantalla blanca de v1.0.29 restaurando los contenedores principales como CTkFrame y manteniendo scroll solo en sidebar/pestañas internas.",
+    "github_release_tag":  "v1.0.31",
+    "asset_name":  "MetodoIG-v1.0.31.zip",
+    "sha256":  "f9ee0a9ff453661f47787a4fc57630ea4063b217311084f6c6e9ee6cb7021ea3",
+    "notes":  "Hotfix Telegram Trials: reset de topics respeta delivery_kind del calendar_manifest.json; si el envio seleccionado es Trial solo borra/recrea el topic TRIALS y preserva el topic normal.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",
