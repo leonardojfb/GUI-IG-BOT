@@ -3921,6 +3921,7 @@ class InstagramAutoPro(ctk.CTk):
             selected_accounts,
             reset_topics=reset_topics,
             express_mode=express_mode,
+            db_manager=self.db,
         )
         
         self.btn_start_tg.configure(state="disabled")

@@ -862,7 +862,22 @@ def _account_tag(acc_info):
         return "SUICIDE"
     return category.upper() if category else "GENERAL"
 
-def execute_telegram_plan(start_date, selected_accounts=None, controller=None, reset_topics=False, express_mode=False):
+def execute_telegram_plan(start_date, selected_accounts=None, controller=None, reset_topics=False, express_mode=False, db_manager=None):
+    if db_manager is not None:
+        global db
+        previous_db = db
+        db = db_manager
+        try:
+            return execute_telegram_plan(
+                start_date,
+                selected_accounts,
+                controller,
+                reset_topics=reset_topics,
+                express_mode=express_mode,
+            )
+        finally:
+            db = previous_db
+
     caption_pools = load_tanda_caption_pools()
     trial_caption_maps = load_trial_caption_maps()
     normal_individual_caption_maps = load_normal_individual_caption_maps()
@@ -1094,11 +1109,12 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
 
 # --- 4. CONTROLADOR DE HILOS Y MOTOR DE EJECUCIÓN ---
 class TelegramBotController:
-    def __init__(self, start_date_str, selected_accounts=None, reset_topics=False, express_mode=False):
+    def __init__(self, start_date_str, selected_accounts=None, reset_topics=False, express_mode=False, db_manager=None):
         self.start_date_str = start_date_str
         self.selected_accounts = selected_accounts
         self.reset_topics = reset_topics
         self.express_mode = express_mode
+        self.db_manager = db_manager
         self._paused = threading.Event()
         self._paused.set()
         self._stopped = False
@@ -1118,12 +1134,17 @@ class TelegramBotController:
         self._stopped = False
         try:
             start_date = datetime.strptime(self.start_date_str, "%Y-%m-%d")
+            execute_kwargs = {
+                "reset_topics": self.reset_topics,
+                "express_mode": self.express_mode,
+            }
+            if self.db_manager is not None:
+                execute_kwargs["db_manager"] = self.db_manager
             result = execute_telegram_plan(
                 start_date,
                 self.selected_accounts,
                 self,
-                reset_topics=self.reset_topics,
-                express_mode=self.express_mode,
+                **execute_kwargs,
             )
             print(result)
         finally:

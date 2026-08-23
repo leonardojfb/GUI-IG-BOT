@@ -119,3 +119,60 @@ def test_trial_only_send_precreates_only_trial_topic(monkeypatch):
 
     assert result.startswith("✨ PROCESO TERMINADO")
     assert created == ["trial"]
+def test_execute_plan_can_use_gui_database_manager(monkeypatch):
+    class BrokenDb:
+        def get_all_tandas(self):
+            raise AssertionError("global telegram db should not be used")
+
+    class GuiDb:
+        def __init__(self):
+            self.schedule_calls = []
+
+        def get_all_tandas(self):
+            return []
+
+        def get_trial_tandas(self):
+            return []
+
+        def get_all_accounts(self):
+            return [{
+                "username": "eve",
+                "account_type": "MAIN",
+                "assigned_va": "Sin Asignar",
+                "trials_active": 0,
+            }]
+
+        def get_vas(self):
+            return []
+
+        def get_schedule_config(self, va_name, category, day_of_week):
+            self.schedule_calls.append((va_name, category, day_of_week))
+            return None
+
+    gui_db = GuiDb()
+    state = {}
+    monkeypatch.setattr(organizadortg, "db", BrokenDb())
+    monkeypatch.setattr(organizadortg, "scan_calendar_structure", lambda: [{
+        "path": "normal.mp4",
+        "filename": "vid1__TANDA_T__ACC1__D1__S1.mp4",
+        "category": "main",
+        "day": "Dia_1",
+        "username": "eve",
+        "delivery_kind": "normal",
+    }])
+    monkeypatch.setattr(organizadortg, "load_json", lambda _path: state)
+    monkeypatch.setattr(organizadortg, "save_json", lambda _path, _data: None)
+    monkeypatch.setattr(organizadortg, "convert_et_to_va_tz", lambda slot, _tz: (slot, slot))
+    monkeypatch.setattr(organizadortg.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(organizadortg, "call_tg", lambda *_args, **_kwargs: {"ok": True, "result": True})
+    monkeypatch.setattr(organizadortg, "_send_video_to_topic", lambda *args: (True, args[1]))
+    monkeypatch.setattr(organizadortg, "get_or_create_topic", lambda *_args, **_kwargs: 101)
+
+    result = organizadortg.execute_telegram_plan(
+        datetime(2026, 8, 14),
+        selected_accounts=["eve"],
+        db_manager=gui_db,
+    )
+
+    assert "PROCESO TERMINADO" in result
+    assert gui_db.schedule_calls == [("Sin Asignar", "main", 4)]

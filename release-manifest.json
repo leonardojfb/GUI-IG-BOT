@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.32",
+    "version":  "1.0.33",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.32",
-    "asset_name":  "MetodoIG-v1.0.32.zip",
-    "sha256":  "b15b7d3d4bdb4add8d016a24dfd3630965c6489beefbc62e79e1669e9beba9b9",
-    "notes":  "Hotfix Telegram Trials: el reset reconoce topics legacy con formato TRIALS - \u003ccuenta\u003e \u003ccategoria\u003e, borra solo el topic Trial seleccionado y preserva topics normales y topics generales.",
+    "github_release_tag":  "v1.0.33",
+    "asset_name":  "MetodoIG-v1.0.33.zip",
+    "sha256":  "6ff322f25317d4429ab5ba8760f39983766518f5a7b5f3f8869cd32617abbb68",
+    "notes":  "Hotfix Telegram: el envio usa la misma base de datos abierta por la GUI para evitar fallos al retomar despues de cancelar/cerrar.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",
