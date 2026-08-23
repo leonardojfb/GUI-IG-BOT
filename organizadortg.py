@@ -371,12 +371,36 @@ def convert_et_to_va_tz(time_str: str, va_tz_str: str) -> tuple:
 
 # --- 2. GESTIÓN DE PERSISTENCIA ---
 def load_json(path):
+    path = os.fspath(path)
     if os.path.exists(path):
-        with open(path, 'r', encoding='utf-8') as f: return json.load(f)
+        try:
+            with open(path, 'r', encoding='utf-8') as f: return json.load(f)
+        except (json.JSONDecodeError, OSError) as exc:
+            backup = f"{path}.corrupt_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            try:
+                os.replace(path, backup)
+                print(f"⚠️ Estado JSON corrupto movido a {backup}: {exc}")
+            except OSError as backup_exc:
+                print(f"⚠️ Estado JSON corrupto en {path}; no se pudo respaldar: {backup_exc}")
+            return {}
     return {}
 
 def save_json(path, data):
-    with open(path, 'w', encoding='utf-8') as f: json.dump(data, f, indent=4)
+    path = os.fspath(path)
+    directory = os.path.dirname(os.path.abspath(path)) or "."
+    os.makedirs(directory, exist_ok=True)
+    temp_path = os.path.join(directory, f".{os.path.basename(path)}.{threading.get_ident()}.tmp")
+    try:
+        with open(temp_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=4)
+            f.write("\n")
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
 
 def load_clean_captions(path=None):
     if not path or not os.path.exists(path):
