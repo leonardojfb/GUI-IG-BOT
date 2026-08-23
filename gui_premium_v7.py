@@ -67,6 +67,49 @@ def _path_isdir(path):
     return os.path.isdir(_windows_long_path(path))
 
 
+def _safe_file_status(path):
+    try:
+        exists = os.path.exists(_windows_long_path(path))
+        size = os.path.getsize(_windows_long_path(path)) if exists else 0
+        return exists, size, ""
+    except OSError as exc:
+        return False, 0, str(exc)
+
+
+def _telegram_runtime_diagnostics(db_manager, app_dir=None, version_reader=read_local_version):
+    app_path = os.path.abspath(os.fspath(app_dir or _BASE_DIR))
+    try:
+        version = version_reader(UPDATE_APP_DIR)
+    except Exception as exc:
+        version = f"desconocida ({exc})"
+    db_path = os.path.abspath(os.fspath(getattr(db_manager, "db_path", os.path.join(app_path, "organizador.db"))))
+    db_exists, db_size, db_error = _safe_file_status(db_path)
+    manifest_path_local = os.path.join(app_path, "calendar_manifest.json")
+    manifest_exists, manifest_size, manifest_error = _safe_file_status(manifest_path_local)
+    lines = [
+        f"Diagnostico Telegram: version={version}",
+        f"Diagnostico Telegram: app_dir={app_path}",
+        f"Diagnostico Telegram: db_path={db_path} db_exists={db_exists} db_size={db_size}",
+        f"Diagnostico Telegram: manifest={manifest_path_local} manifest_exists={manifest_exists} manifest_size={manifest_size}",
+    ]
+    if db_error:
+        lines.append(f"Diagnostico Telegram: db_error={db_error}")
+    if manifest_error:
+        lines.append(f"Diagnostico Telegram: manifest_error={manifest_error}")
+    return lines
+
+
+def _telegram_done_logs(success, detail):
+    if success:
+        return [("Proceso completado exitosamente.", "SUCCESS")]
+    logs = []
+    detail = str(detail or "").strip()
+    if detail:
+        logs.append((f"Error interno Telegram: {detail}", "ERROR"))
+    logs.append(("El bot se detuvo por un error o cancelacion.", "ERROR"))
+    return logs
+
+
 def _copy_calendar_file(src, dst):
     dst_dir = os.path.dirname(os.path.abspath(os.fspath(dst)))
     os.makedirs(_windows_long_path(dst_dir), exist_ok=True)
@@ -3782,6 +3825,8 @@ class InstagramAutoPro(ctk.CTk):
         only_with_videos = self._tg_only_with_videos.get() if self._tg_only_with_videos else False
         accounts = self.db.get_all_accounts()
         import organizadortg as telegram_bot
+        for diagnostic_line in _telegram_runtime_diagnostics(self.db):
+            self.bot_log(diagnostic_line, "INFO")
 
         enriched = []
         for acc in accounts:
@@ -3936,6 +3981,9 @@ class InstagramAutoPro(ctk.CTk):
         def custom_print(*args, **kwargs):
             msg = " ".join(map(str, args))
             lvl = "INFO"
+            msg_lower = msg.lower()
+            if "no se pudo" in msg_lower or "unable to open" in msg_lower or "exception" in msg_lower:
+                lvl = "ERROR"
             if "error" in msg.lower() or "falló" in msg.lower(): lvl = "ERROR"
             elif "éxito" in msg.lower() or "enviado" in msg.lower(): lvl = "SUCCESS"
             elif "esperando" in msg.lower(): lvl = "WARNING"
@@ -3948,13 +3996,17 @@ class InstagramAutoPro(ctk.CTk):
         def worker():
             self.tg_controller.start()
             
-        def done(success, _):
+        def done(success, result):
             builtins.print = self._original_print
             self.btn_start_tg.configure(state="normal")
             self.btn_pause_tg.configure(state="disabled")
             self.btn_stop_tg.configure(state="disabled")
             self.set_bot_status(False)
             self.pb_tg.set(1)
+
+            for message, level in _telegram_done_logs(success, result):
+                self.bot_log(message, level)
+            return
             
             if success: self.bot_log("✅ Proceso completado exitosamente.", "SUCCESS")
             else: self.bot_log("❌ El bot se detuvo por un error o cancelación.", "ERROR")
