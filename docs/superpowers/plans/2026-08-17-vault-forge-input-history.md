@@ -12,6 +12,8 @@
 
 - First implementation scope is Forge only.
 - Forge inputs must come from the Vault during normal use.
+- Forge variant selection must enumerate the finite effective parameter space and report exact `total`, `used`, and `available` capacity. Do not ship bounded randomized `max_attempts` search as the final algorithm.
+- Forge reservations must be durable in SQLite before FFmpeg and released if rendering fails before logging.
 - Do not make Edicion de video or Tandas require Vault inputs in this version.
 - Do not copy all media into a physical backup folder.
 - Do not change Telegram delivery or calendar behavior.
@@ -341,6 +343,13 @@ git commit -m "feat(vault): link transform logs to assets"
 ---
 
 ### Task 3: Forge Variant Signatures and Reservation
+
+Production correction: replace the original random-attempt task body below with
+deterministic enumeration over normalized effective params. The implemented
+interface is `reserve_forge_variants(..., run_id=None) -> dict` and returns
+`capacity={"total": int, "used": int, "available": int}` plus durable SQLite
+`reservation_id` values. `max_attempts` is intentionally not part of the final
+API.
 
 **Files:**
 - Modify: `vault.py`

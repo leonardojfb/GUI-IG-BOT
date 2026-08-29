@@ -109,6 +109,17 @@ CREATE TABLE IF NOT EXISTS normal_source_captions (
     FOREIGN KEY (tanda_name) REFERENCES batch_tandas(tanda_name)
 );
 
+CREATE TABLE IF NOT EXISTS vault_assets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_hash TEXT NOT NULL UNIQUE,
+    source_path TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    tags_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_seen_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS video_transform_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     process_kind TEXT NOT NULL,
@@ -117,12 +128,34 @@ CREATE TABLE IF NOT EXISTS video_transform_logs (
     output_filename TEXT NOT NULL,
     tanda_name TEXT,
     source_identity TEXT,
+    vault_asset_id INTEGER,
+    variant_signature TEXT,
     details_json TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS forge_variant_reservations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vault_asset_id INTEGER NOT NULL,
+    process_kind TEXT NOT NULL,
+    variant_signature TEXT NOT NULL,
+    params_json TEXT NOT NULL,
+    run_id TEXT,
+    status TEXT NOT NULL DEFAULT 'reserved',
+    reserved_at TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at TEXT,
+    transform_log_id INTEGER,
+    UNIQUE(vault_asset_id, process_kind, variant_signature)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vault_assets_display_name
+ON vault_assets(display_name);
+
 CREATE INDEX IF NOT EXISTS idx_video_transform_logs_process_created
 ON video_transform_logs(process_kind, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_forge_variant_reservations_asset_kind_status
+ON forge_variant_reservations(vault_asset_id, process_kind, status);
 """
 
 class DatabaseManager:
@@ -141,7 +174,33 @@ class DatabaseManager:
         except Exception as e:
             print(f"Error inicializando base de datos: {e}")
         self._migrate_columns()
+        self._ensure_vault_indexes()
         self._migrate_forge_registry_unique()
+
+    def _ensure_vault_indexes(self):
+        cur = self.conn.cursor()
+        try:
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_video_transform_logs_vault_variant
+                ON video_transform_logs(vault_asset_id, process_kind, variant_signature)
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_vault_assets_display_name
+                ON vault_assets(display_name)
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_forge_variant_reservations_asset_kind_status
+                ON forge_variant_reservations(vault_asset_id, process_kind, status)
+                """
+            )
+            self.conn.commit()
+        except Exception as e:
+            print(f"⚠️ No se pudieron crear indices de Boveda: {e}")
 
     def _migrate_forge_registry_unique(self):
         """Amplía el UNIQUE de forge_video_registry a (tanda_name, source_name,
@@ -191,6 +250,8 @@ class DatabaseManager:
             "ALTER TABLE virtual_accounts ADD COLUMN vpn_proxy TEXT DEFAULT ''",
             "ALTER TABLE virtual_accounts ADD COLUMN account_link TEXT DEFAULT ''",
             "ALTER TABLE virtual_assistants ADD COLUMN timezone TEXT DEFAULT 'America/Argentina/Buenos_Aires'",
+            "ALTER TABLE video_transform_logs ADD COLUMN vault_asset_id INTEGER",
+            "ALTER TABLE video_transform_logs ADD COLUMN variant_signature TEXT",
         ]
         cur = self.conn.cursor()
         for sql in migrations:
@@ -598,6 +659,9 @@ class DatabaseManager:
         details,
         tanda_name=None,
         source_identity=None,
+        vault_asset_id=None,
+        variant_signature=None,
+        reservation_id=None,
     ):
         source_path = os.path.abspath(source_path)
         output_path = os.path.abspath(output_path)
@@ -608,15 +672,17 @@ class DatabaseManager:
             """
             INSERT INTO video_transform_logs (
                 process_kind, source_path, output_path, output_filename,
-                tanda_name, source_identity, details_json
+                tanda_name, source_identity, vault_asset_id, variant_signature, details_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(output_path) DO UPDATE SET
                 process_kind=excluded.process_kind,
                 source_path=excluded.source_path,
                 output_filename=excluded.output_filename,
                 tanda_name=excluded.tanda_name,
                 source_identity=excluded.source_identity,
+                vault_asset_id=excluded.vault_asset_id,
+                variant_signature=excluded.variant_signature,
                 details_json=excluded.details_json,
                 created_at=datetime('now')
             """,
@@ -627,12 +693,17 @@ class DatabaseManager:
                 output_filename,
                 tanda_name,
                 source_identity,
+                vault_asset_id,
+                variant_signature,
                 details_json,
             ),
         )
         self.conn.commit()
         row = cur.execute("SELECT id FROM video_transform_logs WHERE output_path=?", (output_path,)).fetchone()
-        return int(row[0])
+        log_id = int(row[0])
+        if reservation_id is not None:
+            self.complete_forge_variant_reservation(reservation_id, log_id)
+        return log_id
 
     def get_video_transform_log_id(self, output_path):
         output_path = os.path.abspath(output_path)
@@ -646,7 +717,8 @@ class DatabaseManager:
         rows = self.conn.execute(
             """
             SELECT id, process_kind, source_path, output_path, output_filename,
-                   tanda_name, source_identity, details_json, created_at
+                   tanda_name, source_identity, vault_asset_id, variant_signature,
+                   details_json, created_at
             FROM video_transform_logs
             ORDER BY datetime(created_at) DESC, id DESC
             LIMIT ?
@@ -654,6 +726,153 @@ class DatabaseManager:
             (int(limit),),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    # ==================== VAULT / BOVEDA ====================
+    def upsert_vault_asset(self, source_path, display_name=None, tags=None):
+        from vault import hash_asset, media_type_for_path
+
+        abs_path = os.path.abspath(os.fspath(source_path))
+        asset_hash = hash_asset(abs_path)
+        name = (display_name or os.path.basename(abs_path)).strip() or os.path.basename(abs_path)
+        tags_json = json.dumps(list(tags or []), ensure_ascii=False, sort_keys=True)
+        media_type = media_type_for_path(abs_path)
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO vault_assets (
+                asset_hash, source_path, display_name, media_type, tags_json, last_seen_at
+            )
+            VALUES (?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(asset_hash) DO UPDATE SET
+                source_path=excluded.source_path,
+                display_name=excluded.display_name,
+                media_type=excluded.media_type,
+                tags_json=excluded.tags_json,
+                last_seen_at=datetime('now')
+            """,
+            (asset_hash, abs_path, name, media_type, tags_json),
+        )
+        self.conn.commit()
+        return dict(
+            cur.execute("SELECT * FROM vault_assets WHERE asset_hash=?", (asset_hash,)).fetchone()
+        )
+
+    def list_vault_assets(self, search=""):
+        term = str(search or "").strip()
+        like = f"%{term}%"
+        rows = self.conn.execute(
+            """
+            SELECT va.*,
+                   (
+                       SELECT COUNT(*)
+                       FROM video_transform_logs vtl
+                       WHERE vtl.vault_asset_id = va.id
+                   ) AS output_count
+            FROM vault_assets va
+            WHERE ? = ''
+               OR va.display_name LIKE ?
+               OR va.source_path LIKE ?
+               OR va.tags_json LIKE ?
+               OR va.asset_hash LIKE ?
+            ORDER BY datetime(va.last_seen_at) DESC, datetime(va.created_at) DESC, va.id DESC
+            """,
+            (term, like, like, like, like),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_vault_asset(self, asset_id):
+        row = self.conn.execute(
+            "SELECT * FROM vault_assets WHERE id=?",
+            (int(asset_id),),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_vault_asset_history(self, vault_asset_id, limit=200):
+        rows = self.conn.execute(
+            """
+            SELECT id, process_kind, source_path, output_path, output_filename,
+                   tanda_name, source_identity, vault_asset_id, variant_signature,
+                   details_json, created_at
+            FROM video_transform_logs
+            WHERE vault_asset_id=?
+            ORDER BY datetime(created_at) DESC, id DESC
+            LIMIT ?
+            """,
+            (int(vault_asset_id), int(limit)),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def used_variant_signatures(self, vault_asset_id, process_kind):
+        rows = self.conn.execute(
+            """
+            SELECT variant_signature
+            FROM video_transform_logs
+            WHERE vault_asset_id=? AND process_kind=? AND variant_signature IS NOT NULL
+            UNION
+            SELECT variant_signature
+            FROM forge_variant_reservations
+            WHERE vault_asset_id=? AND process_kind=?
+              AND status IN ('reserved', 'completed')
+            """,
+            (int(vault_asset_id), process_kind, int(vault_asset_id), process_kind),
+        ).fetchall()
+        return {row["variant_signature"] for row in rows}
+
+    def reserve_forge_variant_signature(
+        self,
+        vault_asset_id,
+        process_kind,
+        variant_signature,
+        params,
+        run_id=None,
+    ):
+        params_json = json.dumps(params or {}, ensure_ascii=False, sort_keys=True)
+        cur = self.conn.cursor()
+        try:
+            cur.execute("BEGIN IMMEDIATE")
+            cur.execute(
+                """
+                INSERT OR IGNORE INTO forge_variant_reservations (
+                    vault_asset_id, process_kind, variant_signature, params_json, run_id, status
+                )
+                VALUES (?, ?, ?, ?, ?, 'reserved')
+                """,
+                (int(vault_asset_id), process_kind, variant_signature, params_json, run_id),
+            )
+            inserted = cur.rowcount == 1
+            row = cur.execute(
+                """
+                SELECT id, status
+                FROM forge_variant_reservations
+                WHERE vault_asset_id=? AND process_kind=? AND variant_signature=?
+                """,
+                (int(vault_asset_id), process_kind, variant_signature),
+            ).fetchone()
+            self.conn.commit()
+            if not inserted:
+                return None
+            return int(row["id"]) if row else None
+        except Exception:
+            self.conn.rollback()
+            raise
+
+    def release_forge_variant_reservation(self, reservation_id):
+        self.conn.execute(
+            "DELETE FROM forge_variant_reservations WHERE id=? AND status='reserved'",
+            (int(reservation_id),),
+        )
+        self.conn.commit()
+
+    def complete_forge_variant_reservation(self, reservation_id, transform_log_id):
+        self.conn.execute(
+            """
+            UPDATE forge_variant_reservations
+            SET status='completed', completed_at=datetime('now'), transform_log_id=?
+            WHERE id=?
+            """,
+            (int(transform_log_id), int(reservation_id)),
+        )
+        self.conn.commit()
 
     def save_metadata_fingerprints(self, fingerprints: list):
         """Inserta batch de fingerprints (ignora duplicados por el UNIQUE constraint)."""

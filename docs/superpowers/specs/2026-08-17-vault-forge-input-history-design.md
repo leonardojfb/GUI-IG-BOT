@@ -93,24 +93,24 @@ noise does not create fake uniqueness:
 
 ## Combination search
 
-Forge currently calls `metadata_pool.generate_variant_params()` randomly inside
-`apply_variant_and_metadata()`. This must be split so Forge can reserve a valid
-candidate before rendering:
+Forge previously called `metadata_pool.generate_variant_params()` randomly inside
+`apply_variant_and_metadata()`. The production implementation must split that
+flow so Forge reserves a valid candidate before rendering:
 
 - Add a pure helper that generates candidate params from the selected enabled
   effects, strength, and custom ranges.
 - Add a helper that computes a stable `variant_signature`.
 - Add a Vault/history query that returns signatures already used for a Vault
   asset and process kind.
-- For each requested copy, try candidate params until a new signature is found.
-- Reserve signatures in memory during the current run so two parallel jobs do
-  not choose the same candidate.
-- If candidate search reaches a configured attempt limit or enumerated finite
-  space is exhausted, return an exhaustion result for that input.
+- Enumerate the finite effective parameter space deterministically.
+- Report exact `total`, `used`, and `available` capacity for each Vault input.
+- Reserve signatures transactionally in SQLite before FFmpeg so two app
+  processes cannot choose the same candidate.
+- If the finite space is exhausted, return an exhaustion result for that input.
 
 Custom ranges should behave as the user selected them. The implementation may
-start with bounded randomized search, but the user-facing behavior must be:
-try another combination until no new combination can be found in the selected
+not use bounded randomized search as the final behavior. Forge must try the
+next enumerated combination until no new combination exists in the selected
 space, then tell the user to increase or enable options.
 
 ## Forge behavior

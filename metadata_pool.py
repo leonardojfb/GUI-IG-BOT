@@ -450,6 +450,7 @@ def apply_variant_and_metadata(
     strength: float = 1.0,
     overrides: "dict | None" = None,
     ffmpeg_threads: "int | None" = None,
+    params: "dict | None" = None,
 ) -> dict:
     """
     Genera una copia realmente distinta a nivel de píxeles (recorte de bordes,
@@ -461,7 +462,7 @@ def apply_variant_and_metadata(
     Devuelve los parámetros usados (útil para logging/depuración).
     """
     width, height, duration, has_audio = _probe_video_info(input_path)
-    params = generate_variant_params(rng, enabled, strength, overrides)
+    params = dict(params) if params is not None else generate_variant_params(rng, enabled, strength, overrides)
 
     start = params["trim_start_ms"] / 1000.0
     end = params["trim_end_ms"] / 1000.0

@@ -1,5 +1,6 @@
 import os
 import json
+import hashlib
 from types import SimpleNamespace
 
 import metadata_pool
@@ -40,6 +41,8 @@ class _Database:
         self.saved_fingerprints = []
         self.saved_tandas = []
         self.saved_transform_logs = []
+        self.reserved = {}
+        self.next_reservation_id = 1
 
     def save_forge_video(self, _tanda, source, output, _video_hash):
         assert len(self.completed) == 2
@@ -62,12 +65,45 @@ class _Database:
         self.saved_transform_logs.append((args, kwargs))
         return len(self.saved_transform_logs)
 
+    def used_variant_signatures(self, vault_asset_id, process_kind):
+        return {
+            signature
+            for (asset_id, kind, signature), _reservation_id in self.reserved.items()
+            if asset_id == vault_asset_id and kind == process_kind
+        }
+
+    def reserve_forge_variant_signature(self, vault_asset_id, process_kind, variant_signature, _params, run_id=None):
+        key = (vault_asset_id, process_kind, variant_signature)
+        if key in self.reserved:
+            return None
+        reservation_id = self.next_reservation_id
+        self.next_reservation_id += 1
+        self.reserved[key] = reservation_id
+        return reservation_id
+
+    def release_forge_variant_reservation(self, reservation_id):
+        for key, value in list(self.reserved.items()):
+            if value == reservation_id:
+                del self.reserved[key]
+
+    def complete_forge_variant_reservation(self, _reservation_id, _transform_log_id):
+        pass
+
 
 def _forge_app(tmp_path, completed, video_names=None):
     video_names = video_names or ["one.mp4", "two.mp4"]
     videos = [tmp_path / name for name in video_names]
     for video in videos:
         video.touch()
+    vault_assets = [
+        {
+            "id": idx,
+            "asset_hash": hashlib.sha256(video.read_bytes()).hexdigest(),
+            "source_path": str(video),
+            "display_name": video.name,
+        }
+        for idx, video in enumerate(videos, start=1)
+    ]
     metadata = [
         {
             "iphone_model": "iPhone 15",
@@ -88,6 +124,7 @@ def _forge_app(tmp_path, completed, video_names=None):
     ]
     return SimpleNamespace(
         forge_video_paths=[str(video) for video in videos],
+        forge_vault_assets=vault_assets,
         forge_meta_assignments=metadata,
         e_forge_tanda=_Value("Concurrent"),
         e_forge_copies=_Value("1"),

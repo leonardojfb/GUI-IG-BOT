@@ -20,6 +20,7 @@ import json
 import shutil
 import requests
 import render_performance
+import metadata_pool
 
 from calendar_manifest import build_entry, manifest_path, replace_entries
 from database import DatabaseManager
@@ -43,6 +44,7 @@ from trial_content import (
 )
 from updater import APP_DIR as UPDATE_APP_DIR, check_and_apply, load_config, read_local_version
 from console_encoding import ensure_stdout_utf8
+from vault import hash_asset, reserve_forge_variants
 
 ensure_stdout_utf8()
 
@@ -67,6 +69,49 @@ def _path_isdir(path):
     return os.path.isdir(_windows_long_path(path))
 
 
+def _safe_file_status(path):
+    try:
+        exists = os.path.exists(_windows_long_path(path))
+        size = os.path.getsize(_windows_long_path(path)) if exists else 0
+        return exists, size, ""
+    except OSError as exc:
+        return False, 0, str(exc)
+
+
+def _telegram_runtime_diagnostics(db_manager, app_dir=None, version_reader=read_local_version):
+    app_path = os.path.abspath(os.fspath(app_dir or _BASE_DIR))
+    try:
+        version = version_reader(UPDATE_APP_DIR)
+    except Exception as exc:
+        version = f"desconocida ({exc})"
+    db_path = os.path.abspath(os.fspath(getattr(db_manager, "db_path", os.path.join(app_path, "organizador.db"))))
+    db_exists, db_size, db_error = _safe_file_status(db_path)
+    manifest_path_local = os.path.join(app_path, "calendar_manifest.json")
+    manifest_exists, manifest_size, manifest_error = _safe_file_status(manifest_path_local)
+    lines = [
+        f"Diagnostico Telegram: version={version}",
+        f"Diagnostico Telegram: app_dir={app_path}",
+        f"Diagnostico Telegram: db_path={db_path} db_exists={db_exists} db_size={db_size}",
+        f"Diagnostico Telegram: manifest={manifest_path_local} manifest_exists={manifest_exists} manifest_size={manifest_size}",
+    ]
+    if db_error:
+        lines.append(f"Diagnostico Telegram: db_error={db_error}")
+    if manifest_error:
+        lines.append(f"Diagnostico Telegram: manifest_error={manifest_error}")
+    return lines
+
+
+def _telegram_done_logs(success, detail):
+    if success:
+        return [("Proceso completado exitosamente.", "SUCCESS")]
+    logs = []
+    detail = str(detail or "").strip()
+    if detail:
+        logs.append((f"Error interno Telegram: {detail}", "ERROR"))
+    logs.append(("El bot se detuvo por un error o cancelacion.", "ERROR"))
+    return logs
+
+
 def _copy_calendar_file(src, dst):
     dst_dir = os.path.dirname(os.path.abspath(os.fspath(dst)))
     os.makedirs(_windows_long_path(dst_dir), exist_ok=True)
@@ -82,6 +127,9 @@ def _save_forge_transform_log(
     source_identity,
     params,
     meta,
+    vault_asset_id=None,
+    variant_signature=None,
+    reservation_id=None,
 ):
     details = dict(params or {})
     details["iphone_metadata"] = meta or {}
@@ -92,7 +140,87 @@ def _save_forge_transform_log(
         details,
         tanda_name=tanda_name,
         source_identity=source_identity,
+        vault_asset_id=vault_asset_id,
+        variant_signature=variant_signature,
+        reservation_id=reservation_id,
     )
+
+
+def _build_forge_copy_jobs(
+    db,
+    vault_assets,
+    copies,
+    output_dir,
+    process_kind,
+    fx_enabled,
+    forge_strength,
+    forge_overrides,
+    run_id=None,
+):
+    import re
+
+    os.makedirs(output_dir, exist_ok=True)
+    jobs = []
+    skipped = []
+    reserved_max = {}
+    for asset in vault_assets or []:
+        vid_path = os.path.abspath(asset["source_path"])
+        display_name = asset.get("display_name") or os.path.basename(vid_path)
+        if not os.path.exists(vid_path):
+            skipped.append({"asset": asset, "shortfall": copies, "message": f"No existe el input de Boveda: {display_name}"})
+            continue
+        try:
+            if hash_asset(vid_path) != asset["asset_hash"]:
+                skipped.append({"asset": asset, "shortfall": copies, "message": f"El input cambio en disco y debe reimportarse: {display_name}"})
+                continue
+        except OSError as exc:
+            skipped.append({"asset": asset, "shortfall": copies, "message": f"No se pudo leer el input {display_name}: {exc}"})
+            continue
+
+        filename = os.path.basename(vid_path)
+        _base, ext = os.path.splitext(filename)
+        vid_id = forge_output_id_from_filename(filename)
+        vh = metadata_pool.get_video_hash(vid_path)
+        reservation = reserve_forge_variants(
+            db, asset, process_kind, copies, fx_enabled, forge_strength, forge_overrides, run_id=run_id
+        )
+        if reservation["shortfall"]:
+            skipped.append(
+                {
+                    "asset": asset,
+                    "shortfall": reservation["shortfall"],
+                    "message": reservation["message"],
+                    "capacity": reservation.get("capacity", {}),
+                }
+            )
+
+        existing_max = 0
+        copy_pattern = re.compile(rf"^{re.escape(vid_id)}__c(\d+){re.escape(ext)}$")
+        for fname in os.listdir(output_dir):
+            match = copy_pattern.match(fname)
+            if match:
+                existing_max = max(existing_max, int(match.group(1)))
+        reservation_key = (vid_id, ext)
+        existing_max = max(existing_max, reserved_max.get(reservation_key, 0))
+        for offset, reserved in enumerate(reservation["reserved"], start=1):
+            copy_num = existing_max + offset
+            out_name = f"{vid_id}__c{copy_num:02d}{ext}"
+            out_path = os.path.join(output_dir, out_name)
+            jobs.append(
+                {
+                    "vault_asset": asset,
+                    "reservation_id": reserved.get("reservation_id"),
+                    "vid_path": vid_path,
+                    "filename": filename,
+                    "out_name": out_name,
+                    "out_path": out_path,
+                    "video_hash": vh,
+                    "variant_params": reserved["params"],
+                    "variant_signature": reserved["signature"],
+                }
+            )
+        reserved_max[reservation_key] = existing_max + len(reservation["reserved"])
+    return {"jobs": jobs, "skipped": skipped}
 
 
 def _format_transform_summary(details):
@@ -204,6 +332,13 @@ _install_customtkinter_dropdown_destroy_safety()
 # ── Configuración global de CustomTkinter ──────────────────────────────────
 ctk.set_appearance_mode("system")
 ctk.set_default_color_theme("dark-blue")
+
+DESIGN_WINDOW_W = 1400
+DESIGN_WINDOW_H = 860
+MIN_WINDOW_W = 860
+MIN_WINDOW_H = 520
+SCREEN_MARGIN_W = 80
+SCREEN_MARGIN_H = 120
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PANEL DE ESTADO DE CUENTAS — Constantes y helpers
@@ -945,8 +1080,7 @@ class InstagramAutoPro(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("⚡ Instagram Automation Pro  —  V7")
-        self.geometry("1400x860")
-        self.minsize(1100, 700)
+        self._apply_responsive_window()
         self.configure(fg_color=BG_APP)
 
         self.db = DatabaseManager()
@@ -979,6 +1113,23 @@ class InstagramAutoPro(ctk.CTk):
         self._update_clock()
         self.after(250, self._show_startup_greeting)
         self.after(1600, self._show_update_notice)
+
+    def _apply_responsive_window(self):
+        screen_w = max(1, self.winfo_screenwidth())
+        screen_h = max(1, self.winfo_screenheight())
+        width = max(MIN_WINDOW_W, min(DESIGN_WINDOW_W, screen_w - SCREEN_MARGIN_W))
+        height = max(MIN_WINDOW_H, min(DESIGN_WINDOW_H, screen_h - SCREEN_MARGIN_H))
+
+        self.minsize(MIN_WINDOW_W, MIN_WINDOW_H)
+        self.geometry(f"{width}x{height}")
+
+    def _fit_toplevel(self, window, width, height):
+        screen_w = max(1, window.winfo_screenwidth())
+        screen_h = max(1, window.winfo_screenheight())
+        fitted_w = max(360, min(width, screen_w - SCREEN_MARGIN_W))
+        fitted_h = max(320, min(height, screen_h - SCREEN_MARGIN_H))
+        window.geometry(f"{fitted_w}x{fitted_h}")
+        return fitted_w, fitted_h
 
     def _show_startup_greeting(self):
         """Small startup toast used to verify an installed update visually."""
@@ -1143,7 +1294,8 @@ class InstagramAutoPro(ctk.CTk):
             fg_color=BG_SIDEBAR, border_width=1, border_color=BORDER
         )
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(90, weight=1)
+        self.sidebar.grid_rowconfigure(2, weight=1)
+        self.sidebar.grid_columnconfigure(0, weight=1)
         self.sidebar.grid_propagate(False)
 
         # — Logo —
@@ -1164,10 +1316,17 @@ class InstagramAutoPro(ctk.CTk):
         ctk.CTkFrame(self.sidebar, height=1, fg_color=BORDER).grid(
             row=1, column=0, sticky="ew", padx=16, pady=(4, 8))
 
+        self.sidebar_nav = ctk.CTkScrollableFrame(
+            self.sidebar, fg_color="transparent", corner_radius=0,
+            scrollbar_button_color=BORDER, scrollbar_button_hover_color=ACCENT,
+        )
+        self.sidebar_nav.grid(row=2, column=0, sticky="nsew", padx=0, pady=(0, 8))
+        self.sidebar_nav.grid_columnconfigure(0, weight=1)
+
         # — Navegación agrupada por flujo de trabajo —
         nav_groups = [
             ("Edición",       [("🖼️   Edición de video", "VideoEditor")]),
-            ("Contenido",    [("🔮   Forge", "Forge"), ("🎬   Tandas", "Tandas")]),
+            ("Contenido",    [("Boveda", "Boveda"), ("🔮   Forge", "Forge"), ("🎬   Tandas", "Tandas")]),
             ("Distribución", [("🚀   Logística", "Logistica"), ("📡   Cuentas", "Cuentas"),
                               ("📲   Telegram", "Telegram")]),
             ("Control",      [("📊   Dashboard", "Dashboard")]),
@@ -1175,37 +1334,39 @@ class InstagramAutoPro(ctk.CTk):
                               ("⬇   Actualizaciones", "Actualizaciones")]),
         ]
         self._nav_btns = {}
-        row = 2
+        row = 0
         for group_name, items in nav_groups:
-            ctk.CTkLabel(self.sidebar, text=group_name.upper(), anchor="w",
+            ctk.CTkLabel(self.sidebar_nav, text=group_name.upper(), anchor="w",
                          font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
                          text_color=TEXT_MUTED).grid(row=row, column=0, padx=18,
                                                      pady=(10, 2), sticky="w")
             row += 1
             for label, key in items:
-                btn = NavItem(self.sidebar, text=label, command=lambda k=key: self.show_frame(k))
+                btn = NavItem(self.sidebar_nav, text=label, command=lambda k=key: self.show_frame(k))
                 btn.grid(row=row, column=0, padx=10, pady=2, sticky="ew")
                 self._nav_btns[key] = btn
                 row += 1
 
         # — Selector de tema —
         self.theme_seg = ctk.CTkSegmentedButton(
-            self.sidebar, values=["Claro", "Oscuro", "Sistema"],
+            self.sidebar_nav, values=["Claro", "Oscuro", "Sistema"],
             command=self._on_theme_change,
             fg_color=SURFACE2, selected_color=ACCENT, selected_hover_color=ACCENT_HOVER,
             unselected_color=SURFACE2, text_color=TEXT_BODY,
             font=ctk.CTkFont(family="Segoe UI", size=11), height=30, corner_radius=BTN_RADIUS,
         )
         self.theme_seg.set("Sistema")
-        self.theme_seg.grid(row=91, column=0, padx=14, pady=(8, 4), sticky="ew")
+        self.theme_seg.grid(row=row, column=0, padx=14, pady=(14, 4), sticky="ew")
+        row += 1
 
         # — Status del bot (parte inferior sidebar) —
-        ctk.CTkFrame(self.sidebar, height=1, fg_color=BORDER).grid(
-            row=92, column=0, sticky="ew", padx=16, pady=(8, 4))
+        ctk.CTkFrame(self.sidebar_nav, height=1, fg_color=BORDER).grid(
+            row=row, column=0, sticky="ew", padx=16, pady=(8, 4))
+        row += 1
         self.lbl_bot_status = ctk.CTkLabel(
-            self.sidebar, text="⬤  Bot inactivo",
+            self.sidebar_nav, text="⬤  Bot inactivo",
             font=ctk.CTkFont(size=11), text_color=TEXT_MUTED)
-        self.lbl_bot_status.grid(row=93, column=0, padx=18, pady=(0, 18), sticky="sw")
+        self.lbl_bot_status.grid(row=row, column=0, padx=18, pady=(0, 18), sticky="sw")
 
     def set_bot_status(self, active: bool):
         """Actualiza indicador de bot en la sidebar."""
@@ -1223,9 +1384,10 @@ class InstagramAutoPro(ctk.CTk):
         container.grid_columnconfigure(0, weight=1)
         self._container = container
 
-        for name in ["Dashboard", "Equipo", "Tandas", "Logistica", "Telegram", "Cuentas", "VerifyLegacy", "AIAdvisor", "Forge", "VideoEditor", "Actualizaciones"]:
+        for name in ["Dashboard", "Equipo", "Tandas", "Logistica", "Telegram", "Cuentas", "VerifyLegacy", "AIAdvisor", "Boveda", "Forge", "VideoEditor", "Actualizaciones"]:
             f = ctk.CTkFrame(container, fg_color=BG_APP, corner_radius=0)
             f.grid(row=0, column=0, sticky="nsew")
+            f.grid_columnconfigure(0, weight=1)
             self._frames[name] = f
 
         # Construir contenido de cada frame
@@ -1237,6 +1399,7 @@ class InstagramAutoPro(ctk.CTk):
         self._build_cuentas_frame()
         self._build_verify_legacy_frame()
         self._build_ai_frame()
+        self._build_vault_frame()
         self._build_forge_frame()
         self._build_video_editor_frame()
         self._build_updates_frame()
@@ -3107,7 +3270,7 @@ class InstagramAutoPro(ctk.CTk):
             if success:
                 win = ctk.CTkToplevel(self)
                 win.title(f"📊 Plan de Distribución: {tanda}")
-                win.geometry("950x700")
+                self._fit_toplevel(win, 950, 700)
                 win.configure(fg_color=BG_APP)
                 txt = ctk.CTkTextbox(win, fg_color=BG_CARD, text_color=NEON_CYAN, font=FONT_MONO)
                 txt.pack(fill="both", expand=True, padx=20, pady=20)
@@ -3682,7 +3845,7 @@ class InstagramAutoPro(ctk.CTk):
 
         win = ctk.CTkToplevel(self)
         win.title(f"Horarios — {va_name} / {category}")
-        win.geometry("520x420")
+        self._fit_toplevel(win, 520, 420)
         win.grab_set()
 
         ctk.CTkLabel(win, text=f"⏰ {va_name} / {category}",
@@ -3748,6 +3911,8 @@ class InstagramAutoPro(ctk.CTk):
         only_with_videos = self._tg_only_with_videos.get() if self._tg_only_with_videos else False
         accounts = self.db.get_all_accounts()
         import organizadortg as telegram_bot
+        for diagnostic_line in _telegram_runtime_diagnostics(self.db):
+            self.bot_log(diagnostic_line, "INFO")
 
         enriched = []
         for acc in accounts:
@@ -3887,6 +4052,7 @@ class InstagramAutoPro(ctk.CTk):
             selected_accounts,
             reset_topics=reset_topics,
             express_mode=express_mode,
+            db_manager=self.db,
         )
         
         self.btn_start_tg.configure(state="disabled")
@@ -3901,6 +4067,9 @@ class InstagramAutoPro(ctk.CTk):
         def custom_print(*args, **kwargs):
             msg = " ".join(map(str, args))
             lvl = "INFO"
+            msg_lower = msg.lower()
+            if "no se pudo" in msg_lower or "unable to open" in msg_lower or "exception" in msg_lower:
+                lvl = "ERROR"
             if "error" in msg.lower() or "falló" in msg.lower(): lvl = "ERROR"
             elif "éxito" in msg.lower() or "enviado" in msg.lower(): lvl = "SUCCESS"
             elif "esperando" in msg.lower(): lvl = "WARNING"
@@ -3913,13 +4082,17 @@ class InstagramAutoPro(ctk.CTk):
         def worker():
             self.tg_controller.start()
             
-        def done(success, _):
+        def done(success, result):
             builtins.print = self._original_print
             self.btn_start_tg.configure(state="normal")
             self.btn_pause_tg.configure(state="disabled")
             self.btn_stop_tg.configure(state="disabled")
             self.set_bot_status(False)
             self.pb_tg.set(1)
+
+            for message, level in _telegram_done_logs(success, result):
+                self.bot_log(message, level)
+            return
             
             if success: self.bot_log("✅ Proceso completado exitosamente.", "SUCCESS")
             else: self.bot_log("❌ El bot se detuvo por un error o cancelación.", "ERROR")
@@ -5011,8 +5184,154 @@ class InstagramAutoPro(ctk.CTk):
         detail.delete("1.0", "end")
         detail.insert("1.0", json.dumps(details, ensure_ascii=False, indent=2))
 
+    def _build_vault_frame(self):
+        f = self._frames["Boveda"]
+        f.grid_columnconfigure(0, weight=1)
+        f.grid_rowconfigure(1, weight=1)
+        PageHeader(
+            f,
+            kicker="CONTENIDO",
+            title="Boveda",
+            description="Historial de inputs y outputs usados por Forge.",
+        ).grid(row=0, column=0, sticky="ew", padx=24, pady=(22, 8))
+
+        body = ctk.CTkFrame(f, fg_color="transparent")
+        body.grid(row=1, column=0, sticky="nsew", padx=24, pady=(0, 16))
+        body.grid_columnconfigure(0, weight=1)
+        body.grid_rowconfigure(1, weight=1)
+
+        actions = ctk.CTkFrame(body, fg_color="transparent")
+        actions.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        actions.grid_columnconfigure(0, weight=1)
+        self.vault_search_var = tk.StringVar(value="")
+        self.vault_search_var.trace_add("write", lambda *_: self.refresh_vault_table())
+        ctk.CTkEntry(
+            actions,
+            textvariable=self.vault_search_var,
+            placeholder_text="Buscar en boveda",
+            fg_color=BG_INPUT,
+            border_color=BORDER,
+        ).grid(row=0, column=0, sticky="ew")
+        PrimaryButton(actions, text="Importar videos", command=self.vault_import_files).grid(row=0, column=1, padx=(8, 0))
+
+        columns = ("name", "hash", "type", "outputs", "path")
+        self.vault_tree = ttk.Treeview(body, columns=columns, show="headings", style="Premium.Treeview")
+        for col, label in (("name", "Nombre"), ("hash", "Hash"), ("type", "Tipo"), ("outputs", "Outputs"), ("path", "Ruta")):
+            self.vault_tree.heading(col, text=label)
+        self.vault_tree.column("name", width=220, anchor="w")
+        self.vault_tree.column("hash", width=90, anchor="w")
+        self.vault_tree.column("type", width=70, anchor="center")
+        self.vault_tree.column("outputs", width=70, anchor="center")
+        self.vault_tree.column("path", width=520, anchor="w")
+        self.vault_tree.grid(row=1, column=0, sticky="nsew")
+        self.vault_tree.bind("<<TreeviewSelect>>", lambda _event: self.refresh_vault_history())
+
+        self.vault_history = tk.Text(
+            body,
+            height=8,
+            wrap="word",
+            bg=self.themed(BG_INPUT),
+            fg=self.themed(TEXT_BODY),
+            insertbackground=self.themed(TEXT_BODY),
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=self.themed(BORDER),
+            font=FONT_MONO,
+        )
+        self.vault_history.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        self.refresh_vault_table()
+
+    def vault_import_files(self):
+        paths = filedialog.askopenfilenames(
+            title="Importar a Boveda",
+            filetypes=[("Videos", "*.mp4 *.mov *.avi *.mkv"), ("Todos los archivos", "*.*")],
+        )
+        for path in paths:
+            self.db.upsert_vault_asset(path)
+        self.refresh_vault_table()
+
+    def refresh_vault_table(self):
+        tree = getattr(self, "vault_tree", None)
+        if tree is None:
+            return
+        for item in tree.get_children():
+            tree.delete(item)
+        search_var = getattr(self, "vault_search_var", None)
+        search = search_var.get() if search_var is not None else ""
+        for row in self.db.list_vault_assets(search):
+            tree.insert(
+                "",
+                "end",
+                iid=str(row["id"]),
+                values=(
+                    row["display_name"],
+                    row["asset_hash"][:10],
+                    row["media_type"],
+                    row.get("output_count", 0),
+                    row["source_path"],
+                ),
+            )
+
+    def refresh_vault_history(self):
+        tree = getattr(self, "vault_tree", None)
+        detail = getattr(self, "vault_history", None)
+        if tree is None or detail is None:
+            return
+        selection = tree.selection()
+        if not selection:
+            return
+        rows = self.db.list_vault_asset_history(int(selection[0]))
+        detail.delete("1.0", "end")
+        for row in rows:
+            detail.insert(
+                "end",
+                f"{row['created_at']} | {row['process_kind']} | {row['output_filename']} | {row.get('variant_signature') or ''}\n",
+            )
+
+    def _set_forge_vault_assets(self, assets):
+        self.forge_vault_assets = list(assets or [])
+        self.forge_video_paths = [asset["source_path"] for asset in self.forge_vault_assets]
+        self.forge_lst.delete(0, tk.END)
+        for asset in self.forge_vault_assets:
+            self.forge_lst.insert(tk.END, asset["display_name"])
+        self.forge_lbl_count.configure(text=f"{len(self.forge_vault_assets)} videos")
+
+    def forge_select_from_vault(self):
+        assets = self.db.list_vault_assets()
+        if not assets:
+            messagebox.showwarning("Boveda", "Primero importa videos en la Boveda.", parent=self)
+            return
+        win = ctk.CTkToplevel(self)
+        win.title("Seleccionar desde Boveda")
+        win.geometry("820x520")
+        win.transient(self)
+        win.grab_set()
+        tree = ttk.Treeview(
+            win,
+            columns=("name", "hash", "path"),
+            show="headings",
+            style="Premium.Treeview",
+            selectmode="extended",
+        )
+        for col, label in (("name", "Nombre"), ("hash", "Hash"), ("path", "Ruta")):
+            tree.heading(col, text=label)
+        tree.column("name", width=220, anchor="w")
+        tree.column("hash", width=90, anchor="w")
+        tree.column("path", width=480, anchor="w")
+        tree.pack(fill="both", expand=True, padx=14, pady=14)
+        for asset in assets:
+            tree.insert("", "end", iid=str(asset["id"]), values=(asset["display_name"], asset["asset_hash"][:10], asset["source_path"]))
+
+        def accept():
+            selected = [self.db.get_vault_asset(int(item)) for item in tree.selection()]
+            self._set_forge_vault_assets([asset for asset in selected if asset])
+            win.destroy()
+
+        PrimaryButton(win, text="Usar seleccionados", command=accept).pack(pady=(0, 14))
+
     def _build_forge_frame(self):
         self.forge_video_paths = []
+        self.forge_vault_assets = []
         self.forge_meta_assignments = []
 
         f = self._frames["Forge"]
@@ -5070,8 +5389,10 @@ class InstagramAutoPro(ctk.CTk):
 
         btn_v = ctk.CTkFrame(card_vids, fg_color="transparent")
         btn_v.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 16))
-        PrimaryButton(btn_v, text="＋  Agregar Videos",
+        PrimaryButton(btn_v, text="＋  Importar a Boveda",
                       command=self.forge_add_videos).pack(side="left", padx=(0, 8))
+        GhostButton(btn_v, text="Seleccionar desde Boveda",
+                    command=self.forge_select_from_vault).pack(side="left", padx=(0, 8))
         GhostButton(btn_v, text="−  Quitar",
                     command=self.forge_remove_video).pack(side="left")
 
@@ -5300,25 +5621,32 @@ class InstagramAutoPro(ctk.CTk):
 
     def forge_add_videos(self):
         paths = filedialog.askopenfilenames(
-            title="Seleccionar Videos",
+            title="Importar a Boveda",
             filetypes=[("Video", "*.mp4 *.mov"), ("Todos los archivos", "*.*")]
         )
+        assets = []
         for p in paths:
-            if p not in self.forge_video_paths:
-                self.forge_video_paths.append(p)
-                self.forge_lst.insert(tk.END, os.path.basename(p))
-        self.forge_lbl_count.configure(text=f"{len(self.forge_video_paths)} videos")
+            asset = self.db.upsert_vault_asset(p, tags=["forge"])
+            if asset["id"] not in {row["id"] for row in assets}:
+                assets.append(asset)
+        if assets:
+            self._set_forge_vault_assets(assets)
+            self.refresh_vault_table()
 
     def forge_remove_video(self):
         for idx in reversed(self.forge_lst.curselection()):
             self.forge_lst.delete(idx)
             self.forge_video_paths.pop(idx)
+            if idx < len(getattr(self, "forge_vault_assets", [])):
+                self.forge_vault_assets.pop(idx)
         self.forge_lbl_count.configure(text=f"{len(self.forge_video_paths)} videos")
 
     def forge_preview_metadata(self):
         n_videos = len(self.forge_video_paths)
         if n_videos == 0:
             return messagebox.showwarning("⚠️", "Agrega al menos un video primero.")
+        if not getattr(self, "forge_vault_assets", None):
+            return messagebox.showwarning("Boveda", "Selecciona los inputs desde la Boveda antes de generar el preview.")
         try:
             copies = int(self.e_forge_copies.get())
             if copies < 1:
@@ -5360,6 +5688,8 @@ class InstagramAutoPro(ctk.CTk):
         performance = render_performance.get_render_performance()
         if not self.forge_video_paths:
             return messagebox.showwarning("⚠️", "No hay videos en la lista.")
+        if not getattr(self, "forge_vault_assets", None):
+            return messagebox.showwarning("Boveda", "Selecciona los inputs desde la Boveda antes de procesar.")
         if not self.forge_meta_assignments:
             return messagebox.showwarning("⚠️", "Generá el preview primero.")
 
@@ -5402,11 +5732,12 @@ class InstagramAutoPro(ctk.CTk):
         )):
             return
 
-        videos    = self.forge_video_paths[:]
+        vault_assets = list(getattr(self, "forge_vault_assets", []))
         meta_list = self.forge_meta_assignments[:]
         base_dir  = os.path.dirname(os.path.abspath(__file__))
         output_dir = os.path.join(base_dir, "videos_finales", tanda_name)
         db_ref    = self.db
+        process_kind = "forge_trial" if is_trial_tanda else "forge"
 
         self.btn_forge_process.configure(state="disabled")
         self.btn_forge_reshuffle.configure(state="disabled")
@@ -5418,67 +5749,74 @@ class InstagramAutoPro(ctk.CTk):
         )
 
         def task():
-            import re
-            import metadata_pool
-            os.makedirs(output_dir, exist_ok=True)
+            plan = _build_forge_copy_jobs(
+                db_ref,
+                vault_assets=vault_assets,
+                copies=copies,
+                output_dir=output_dir,
+                process_kind=process_kind,
+                fx_enabled=fx_enabled,
+                forge_strength=forge_strength,
+                forge_overrides=forge_overrides,
+            )
             copy_jobs = []
-            meta_idx = 0
-            reserved_max = {}
-            for vid_path in videos:
-                filename = os.path.basename(vid_path)
-                base, ext = os.path.splitext(filename)
-                vid_id = forge_output_id_from_filename(filename)
-                vh = metadata_pool.get_video_hash(vid_path)
-                existing_max = 0
-                copy_pattern = re.compile(rf"^{re.escape(vid_id)}__c(\d+){re.escape(ext)}$")
-                for fname in os.listdir(output_dir):
-                    m = copy_pattern.match(fname)
-                    if m:
-                        existing_max = max(existing_max, int(m.group(1)))
-                reservation_key = (vid_id, ext)
-                existing_max = max(existing_max, reserved_max.get(reservation_key, 0))
-                for offset in range(1, copies + 1):
-                    copy_num = existing_max + offset
-                    meta = meta_list[meta_idx]
-                    out_name = f"{vid_id}__c{copy_num:02d}{ext}"
-                    out_path = os.path.join(output_dir, out_name)
-                    fingerprint = {"video_hash": f"{vh}_{copy_num}", **meta}
-                    copy_jobs.append((vid_path, out_path, filename, out_name, vh, meta, fingerprint))
-                    meta_idx += 1
-                reserved_max[reservation_key] = existing_max + copies
+            for idx, job in enumerate(plan["jobs"]):
+                if idx >= len(meta_list):
+                    db_ref.release_forge_variant_reservation(job["reservation_id"])
+                    continue
+                meta = meta_list[idx]
+                copy_num = int(os.path.splitext(job["out_name"])[0].rsplit("__c", 1)[1])
+                fingerprint = {"video_hash": f"{job['video_hash']}_{copy_num}", **meta}
+                job["meta"] = meta
+                job["fingerprint"] = fingerprint
+                copy_jobs.append(job)
+
+            if not copy_jobs:
+                skipped_only = "\n".join(item["message"] for item in plan["skipped"]) or "No hay variantes disponibles."
+                return f"No se genero ningun archivo.\n{skipped_only}"
 
             def process_copy(copy_job):
-                vid_path, out_path, filename, out_name, vh, meta, fingerprint = copy_job
                 try:
                     params = metadata_pool.apply_variant_and_metadata(
-                        vid_path, out_path, meta,
+                        copy_job["vid_path"], copy_job["out_path"], copy_job["meta"],
                         enabled=fx_enabled, strength=forge_strength,
                         overrides=forge_overrides,
                         ffmpeg_threads=performance.ffmpeg_threads,
+                        params=copy_job["variant_params"],
                     )
                 except Exception as error:
-                    raise RuntimeError(f"Forge falló en '{filename}': {error}") from error
-                return filename, out_name, vh, fingerprint, vid_path, out_path, meta, params
+                    raise RuntimeError(f"Forge falló en '{copy_job['filename']}': {error}") from error
+                copy_job["params"] = params
+                return copy_job
 
-            with ThreadPoolExecutor(max_workers=performance.workers) as pool:
-                futures = [pool.submit(process_copy, copy_job) for copy_job in copy_jobs]
-                completed = [future.result() for future in futures]
+            try:
+                with ThreadPoolExecutor(max_workers=performance.workers) as pool:
+                    futures = [pool.submit(process_copy, copy_job) for copy_job in copy_jobs]
+                    completed = [future.result() for future in futures]
+            except Exception:
+                for job in copy_jobs:
+                    reservation_id = job.get("reservation_id")
+                    if reservation_id is not None:
+                        db_ref.release_forge_variant_reservation(reservation_id)
+                raise
 
-            process_kind = "forge_trial" if is_trial_tanda else "forge"
-            for filename, out_name, vh, fingerprint, vid_path, out_path, meta, params in completed:
-                db_ref.save_forge_video(tanda_name, filename, out_name, vh)
+            for job in completed:
+                db_ref.save_forge_video(tanda_name, job["filename"], job["out_name"], job["video_hash"])
                 _save_forge_transform_log(
                     db_ref,
                     process_kind=process_kind,
-                    source_path=vid_path,
-                    output_path=out_path,
+                    source_path=job["vid_path"],
+                    output_path=job["out_path"],
                     tanda_name=tanda_name,
-                    source_identity=fingerprint.get("video_hash", ""),
-                    params=params,
-                    meta=meta,
+                    source_identity=job["fingerprint"].get("video_hash", ""),
+                    params=job["params"],
+                    meta=job["meta"],
+                    vault_asset_id=job["vault_asset"]["id"],
+                    variant_signature=job["variant_signature"],
+                    reservation_id=job.get("reservation_id"),
                 )
             db_ref.save_metadata_fingerprints([
-                fingerprint for _filename, _out_name, _vh, fingerprint, *_rest in completed
+                job["fingerprint"] for job in completed
             ])
             existing_tanda = db_ref.get_tanda_by_name(tanda_name) or {}
             db_ref.add_tanda(
@@ -5487,10 +5825,13 @@ class InstagramAutoPro(ctk.CTk):
             db_ref.set_tanda_trial(tanda_name, is_trial_tanda)
 
             msg = (
-                f"✅ {n_total} archivos generados ({len(videos)} vídeos × {copies} copias).\n"
+                f"✅ {len(completed)} archivos generados ({len(vault_assets)} vídeos × {copies} copias solicitadas).\n"
                 f"📁 Guardados en: videos_finales/{tanda_name}/\n"
                 f"🔮 Tanda '{tanda_name}' registrada en la DB."
             )
+            if plan["skipped"]:
+                skipped_lines = "\n".join(item["message"] for item in plan["skipped"])
+                msg += f"\n\nSaltados:\n{skipped_lines}"
             return msg
 
         def done(success, result):
@@ -5603,7 +5944,7 @@ class InstagramAutoPro(ctk.CTk):
             return messagebox.showwarning("Captions individuales", "Selecciona una tanda fuente.")
         dialog = ctk.CTkToplevel(self)
         dialog.title(f"Captions individuales - {tanda}")
-        dialog.geometry("860x680")
+        self._fit_toplevel(dialog, 860, 680)
         dialog.configure(fg_color=BG_APP)
         scroll = ctk.CTkScrollableFrame(dialog, fg_color=BG_CARD2)
         scroll.pack(fill="both", expand=True, padx=16, pady=16)
