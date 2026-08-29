@@ -57,3 +57,13 @@ def test_forge_uses_vault_selection_controls():
     assert "self._set_forge_vault_assets" in add
     assert "self.db.list_vault_assets" in picker
     assert "vault_assets" in process
+
+
+def test_forge_preview_surfaces_exact_vault_capacity():
+    forge = _source("_build_forge_frame")
+    preview = _source("forge_preview_metadata")
+
+    assert '"Capacidad"' in forge
+    assert "forge_variant_capacity" in preview
+    assert "available" in preview
+    assert "No quedan variantes nuevas" in preview

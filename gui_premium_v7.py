@@ -44,7 +44,7 @@ from trial_content import (
 )
 from updater import APP_DIR as UPDATE_APP_DIR, check_and_apply, load_config, read_local_version
 from console_encoding import ensure_stdout_utf8
-from vault import hash_asset, reserve_forge_variants
+from vault import forge_variant_capacity, hash_asset, reserve_forge_variants
 
 ensure_stdout_utf8()
 
@@ -5550,10 +5550,10 @@ class InstagramAutoPro(ctk.CTk):
         tree_wrap.grid_rowconfigure(0, weight=1)
         tree_wrap.grid_columnconfigure(0, weight=1)
 
-        cols = ("Video", "Modelo iPhone", "Ciudad", "Carrier", "iOS")
+        cols = ("Video", "Modelo iPhone", "Ciudad", "Carrier", "iOS", "Capacidad")
         self.forge_tree = ttk.Treeview(tree_wrap, columns=cols, show="headings",
                                        style="Premium.Treeview", height=10)
-        col_w = {"Video": 200, "Modelo iPhone": 190, "Ciudad": 140, "Carrier": 170, "iOS": 70}
+        col_w = {"Video": 200, "Modelo iPhone": 190, "Ciudad": 140, "Carrier": 170, "iOS": 70, "Capacidad": 190}
         for col in cols:
             self.forge_tree.heading(col, text=col)
             self.forge_tree.column(col, width=col_w[col], anchor="center")
@@ -5654,9 +5654,38 @@ class InstagramAutoPro(ctk.CTk):
         except ValueError:
             return messagebox.showwarning("⚠️", "Copias por vídeo debe ser un número >= 1.")
 
-        n_total = n_videos * copies
+        process_kind = "forge_trial" if self.forge_trial_mode_var.get() == "Trials" else "forge"
+        fx_vals = {key: var.get() for key, var in self.forge_fx_vars.items()}
+        fx_enabled = metadata_pool.efectos_to_enabled(self.forge_efectos_var.get(), fx_vals)
+        fuerza_level = self.forge_fuerza_var.get()
+        if fuerza_level == "Custom":
+            forge_strength = metadata_pool.fuerza_to_strength("Custom", self.forge_strength_slider.get())
+            forge_overrides = metadata_pool.parse_custom_ranges(
+                {p: (mn.get(), mx.get()) for p, (mn, mx) in self.forge_range_entries.items()})
+            fx_enabled["mirror"] = bool(self.forge_custom_mirror_var.get())
+        else:
+            forge_strength = metadata_pool.fuerza_to_strength(fuerza_level)
+            forge_overrides = None
+
+        capacity_rows = []
+        n_total = 0
+        for asset in self.forge_vault_assets:
+            capacity = forge_variant_capacity(
+                self.db, asset, process_kind, fx_enabled, forge_strength, forge_overrides
+            )
+            usable = min(copies, int(capacity["available"]))
+            n_total += usable
+            capacity_rows.append({"asset": asset, "capacity": capacity, "usable": usable})
+
+        if n_total <= 0:
+            self.btn_forge_process.configure(state="disabled")
+            self.btn_forge_reshuffle.configure(state="disabled")
+            return messagebox.showwarning(
+                "Sin variantes disponibles",
+                "No quedan variantes nuevas para los inputs seleccionados con los rangos actuales. Aumenta fuerza, activa mas efectos o amplia rangos custom.",
+            )
+
         try:
-            import metadata_pool
             self.forge_meta_assignments = metadata_pool.generate_unique_metadata(self.db, n_total)
         except ValueError as e:
             return messagebox.showerror("Sin combinaciones disponibles", str(e))
@@ -5664,20 +5693,28 @@ class InstagramAutoPro(ctk.CTk):
         for item in self.forge_tree.get_children():
             self.forge_tree.delete(item)
         row_idx = 0
-        for path in self.forge_video_paths:
-            name = os.path.basename(path)
+        for row in capacity_rows:
+            name = row["asset"]["display_name"]
+            capacity = row["capacity"]
+            capacity_text = f"{capacity['available']}/{copies} disponibles · usadas {capacity['used']}/{capacity['total']}"
             for c in range(1, copies + 1):
+                if c > row["usable"]:
+                    tag = "even" if row_idx % 2 == 0 else "odd"
+                    self.forge_tree.insert("", tk.END, tags=(tag,), values=(
+                        f"{name}  (c{c:02d})", "-", "-", "-", "-", "No quedan variantes nuevas"
+                    ))
+                    continue
                 m = self.forge_meta_assignments[row_idx]
                 tag = "even" if row_idx % 2 == 0 else "odd"
                 self.forge_tree.insert("", tk.END, tags=(tag,), values=(
                     f"{name}  (c{c:02d})", m["iphone_model"], m["city"],
-                    m["carrier"], m["ios_version"]
+                    m["carrier"], m["ios_version"], capacity_text
                 ))
                 row_idx += 1
         self.btn_forge_process.configure(state="normal")
         self.btn_forge_reshuffle.configure(state="normal")
         self.forge_pb_lbl.configure(
-            text=f"✅ {n_total} asignaciones generadas ({n_videos} vídeos × {copies} copias). Revisá y presioná Procesar.",
+            text=f"✅ {n_total} asignaciones generadas con capacidad exacta ({n_videos} vídeos × {copies} copias solicitadas). Revisá y presioná Procesar.",
             text_color=SUCCESS
         )
 

@@ -26,6 +26,7 @@ LEGACY_UPDATEABLE_FILES = {
     "video_editor.py",
     "render_performance.py",
     "metadata_pool.py",
+    "vault.py",
     "telegram_core.py",
     "cleaner.py",
     "vercuentas.py",
@@ -79,6 +80,14 @@ def test_release_allowlist_includes_local_modules_imported_by_shipped_files():
 
     missing = {file: modules for file, modules in missing.items() if modules}
     assert missing == {}
+
+
+def test_vault_module_is_shipped_and_updateable():
+    release_files = _release_files_from_build_script()
+    updater = (REPO_ROOT / "updater.py").read_text(encoding="utf-8")
+
+    assert "vault.py" in release_files
+    assert '"vault.py"' in updater
 
 
 def test_release_packages_clean_pc_video_dependencies():
