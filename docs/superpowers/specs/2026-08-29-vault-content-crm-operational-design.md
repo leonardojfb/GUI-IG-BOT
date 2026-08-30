@@ -125,6 +125,9 @@ and linked to its input assets. Forge keeps its existing input
   `failure_reason`, `created_at`, `updated_at`.
 - `calendar_entry_key` is a stable key derived from the manifest entry. It
   makes a re-scan idempotent instead of creating a second use record.
+- One manifest entry may project to several roots. The durable uniqueness is
+  therefore `(calendar_entry_key, content_root_id)`; an unresolved root uses
+  the same key with a null-root sentinel in the repository layer.
 - `state` is one of `assigned`, `scheduled`, `sent_telegram`,
   `published_confirmed`, `failed`, or `cancelled`.
 
@@ -225,8 +228,8 @@ or account performance.
   with its historic relationships.
 - Hash mismatch is a new identity until the operator explicitly resolves it;
   it cannot silently replace an old asset.
-- A calendar entry already represented by `calendar_entry_key` is updated, not
-  inserted again.
+- A calendar entry/root pair already represented by `calendar_entry_key` is
+  updated, not inserted again.
 - Removing/cancelling a calendar assignment changes the CRM use to `cancelled`;
   it does not erase its audit trail.
 - Failed render or Telegram delivery does not mark a root used successfully.
