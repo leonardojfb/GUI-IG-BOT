@@ -120,6 +120,41 @@ CREATE TABLE IF NOT EXISTS vault_assets (
     last_seen_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS vault_collections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS vault_collection_assets (
+    collection_id INTEGER NOT NULL,
+    vault_asset_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (collection_id, vault_asset_id)
+);
+
+CREATE TABLE IF NOT EXISTS content_roots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'archived')),
+    tags_json TEXT NOT NULL DEFAULT '[]',
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    archived_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS content_root_assets (
+    content_root_id INTEGER NOT NULL,
+    vault_asset_id INTEGER NOT NULL,
+    role TEXT NOT NULL CHECK(role IN (
+        'original_video', 'original_image', 'overlay', 'p1', 'p2',
+        'forge_output', 'edited_output', 'tanda_output', 'reference'
+    )),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (content_root_id, vault_asset_id, role)
+);
+
 CREATE TABLE IF NOT EXISTS video_transform_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     process_kind TEXT NOT NULL,
@@ -175,6 +210,7 @@ class DatabaseManager:
             print(f"Error inicializando base de datos: {e}")
         self._migrate_columns()
         self._ensure_vault_indexes()
+        self._ensure_content_library_indexes()
         self._migrate_forge_registry_unique()
 
     def _ensure_vault_indexes(self):
@@ -201,6 +237,31 @@ class DatabaseManager:
             self.conn.commit()
         except Exception as e:
             print(f"⚠️ No se pudieron crear indices de Boveda: {e}")
+
+    def _ensure_content_library_indexes(self):
+        cur = self.conn.cursor()
+        try:
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_vault_collection_assets_asset
+                ON vault_collection_assets(vault_asset_id)
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_content_root_assets_asset
+                ON content_root_assets(vault_asset_id)
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_content_roots_status
+                ON content_roots(status)
+                """
+            )
+            self.conn.commit()
+        except Exception as e:
+            print(f"No se pudieron crear indices de Biblioteca: {e}")
 
     def _migrate_forge_registry_unique(self):
         """Amplía el UNIQUE de forge_video_registry a (tanda_name, source_name,
@@ -728,6 +789,141 @@ class DatabaseManager:
         return [dict(row) for row in rows]
 
     # ==================== VAULT / BOVEDA ====================
+    def create_vault_collection(self, name):
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            raise ValueError("El nombre de la coleccion es obligatorio.")
+        cur = self.conn.cursor()
+        cur.execute("INSERT INTO vault_collections (name) VALUES (?)", (clean_name,))
+        self.conn.commit()
+        return dict(
+            cur.execute(
+                "SELECT * FROM vault_collections WHERE name=?", (clean_name,)
+            ).fetchone()
+        )
+
+    def list_vault_collections(self):
+        rows = self.conn.execute(
+            """
+            SELECT vc.*, COUNT(vca.vault_asset_id) AS asset_count
+            FROM vault_collections vc
+            LEFT JOIN vault_collection_assets vca ON vca.collection_id = vc.id
+            GROUP BY vc.id
+            ORDER BY vc.name COLLATE NOCASE, vc.id
+            """
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_collection_assets(self, collection_id):
+        rows = self.conn.execute(
+            """
+            SELECT va.*, vca.created_at AS collection_added_at
+            FROM vault_collection_assets vca
+            JOIN vault_assets va ON va.id = vca.vault_asset_id
+            WHERE vca.collection_id=?
+            ORDER BY datetime(vca.created_at), va.id
+            """,
+            (int(collection_id),),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def create_content_root(self, name, tags=None, notes=""):
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            raise ValueError("El nombre de la familia es obligatorio.")
+        self.conn.execute(
+            "INSERT INTO content_roots (name, tags_json, notes) VALUES (?, ?, ?)",
+            (clean_name, json.dumps(list(tags or []), ensure_ascii=False, sort_keys=True), str(notes or "")),
+        )
+        self.conn.commit()
+        return self.get_content_root_by_name(clean_name)
+
+    def get_content_root(self, root_id):
+        row = self.conn.execute(
+            "SELECT * FROM content_roots WHERE id=?", (int(root_id),)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_content_root_by_name(self, name):
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            return None
+        row = self.conn.execute(
+            "SELECT * FROM content_roots WHERE name=?", (clean_name,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_content_roots(self, search="", status="active"):
+        clean_status = str(status or "active").strip().lower()
+        if clean_status not in {"active", "archived", "all"}:
+            raise ValueError("El estado de la familia es invalido.")
+        term = str(search or "").strip()
+        like = f"%{term}%"
+        rows = self.conn.execute(
+            """
+            SELECT cr.*,
+                   COUNT(DISTINCT cra.vault_asset_id) AS asset_count,
+                   COUNT(DISTINCT CASE
+                       WHEN cra.role IN ('forge_output', 'edited_output', 'tanda_output')
+                       THEN cra.vault_asset_id
+                   END) AS output_count
+            FROM content_roots cr
+            LEFT JOIN content_root_assets cra ON cra.content_root_id = cr.id
+            WHERE (? = 'all' OR cr.status = ?)
+              AND (? = '' OR LOWER(cr.name) LIKE LOWER(?) OR LOWER(cr.tags_json) LIKE LOWER(?))
+            GROUP BY cr.id
+            ORDER BY cr.name COLLATE NOCASE, cr.id
+            """,
+            (clean_status, clean_status, term, like, like),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def add_asset_to_collection(self, collection_id, asset_id):
+        self.conn.execute(
+            """
+            INSERT OR IGNORE INTO vault_collection_assets (collection_id, vault_asset_id)
+            VALUES (?, ?)
+            """,
+            (int(collection_id), int(asset_id)),
+        )
+        self.conn.commit()
+
+    def add_asset_to_content_root(self, root_id, asset_id, role):
+        self.conn.execute(
+            """
+            INSERT OR IGNORE INTO content_root_assets (content_root_id, vault_asset_id, role)
+            VALUES (?, ?, ?)
+            """,
+            (int(root_id), int(asset_id), str(role or "").strip()),
+        )
+        self.conn.commit()
+
+    def list_root_assets(self, root_id):
+        rows = self.conn.execute(
+            """
+            SELECT va.*, cra.role, cra.created_at AS root_added_at
+            FROM content_root_assets cra
+            JOIN vault_assets va ON va.id = cra.vault_asset_id
+            WHERE cra.content_root_id=?
+            ORDER BY datetime(cra.created_at), va.id, cra.role
+            """,
+            (int(root_id),),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_asset_roots(self, asset_id):
+        rows = self.conn.execute(
+            """
+            SELECT cr.*, cra.role, cra.created_at AS root_added_at
+            FROM content_root_assets cra
+            JOIN content_roots cr ON cr.id = cra.content_root_id
+            WHERE cra.vault_asset_id=?
+            ORDER BY cr.name COLLATE NOCASE, cr.id, cra.role
+            """,
+            (int(asset_id),),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def upsert_vault_asset(self, source_path, display_name=None, tags=None):
         from vault import hash_asset, media_type_for_path
 
