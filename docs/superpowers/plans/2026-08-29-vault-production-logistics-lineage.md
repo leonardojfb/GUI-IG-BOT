@@ -80,7 +80,7 @@ Add this schema and indexes:
 ~~~sql
 CREATE TABLE IF NOT EXISTS content_account_uses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    calendar_entry_key TEXT NOT NULL UNIQUE,
+    calendar_entry_key TEXT NOT NULL,
     content_root_id INTEGER,
     vault_asset_id INTEGER,
     account_id INTEGER,
@@ -101,6 +101,8 @@ CREATE INDEX IF NOT EXISTS idx_content_uses_account_state_day
 ON content_account_uses(account_id, state, day, slot);
 CREATE INDEX IF NOT EXISTS idx_content_uses_root_state
 ON content_account_uses(content_root_id, state);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_content_uses_entry_root
+ON content_account_uses(calendar_entry_key, COALESCE(content_root_id, 0));
 ~~~
 
 Use a deterministic key based on scheduling fields, not the per-write manifest UUID:
@@ -119,7 +121,7 @@ def calendar_entry_key(entry):
     return hashlib.sha256(json.dumps(fields, sort_keys=True, ensure_ascii=True).encode("utf-8")).hexdigest()
 ~~~
 
-`reconcile_calendar_entries()` resolves a log's `output_vault_asset_id` and its roots. It upserts each active entry as `scheduled`, including one null-root record when no root is known. It marks only rows from affected account IDs and delivery kind as `cancelled` when their keys are absent. Do not delete any use record.
+`reconcile_calendar_entries()` resolves a log's `output_vault_asset_id` and its roots. It upserts one `scheduled` use per `(calendar_entry_key, content_root_id)`, including one null-root record when no root is known. For null roots, use `COALESCE(content_root_id, 0)` in the lookup before insert/update so SQLite null uniqueness cannot create duplicate review rows. It marks only rows from affected account IDs and delivery kind as `cancelled` when their keys are absent. Do not delete any use record.
 
 - [ ] **Step 4: Run usage and manifest tests**
 
