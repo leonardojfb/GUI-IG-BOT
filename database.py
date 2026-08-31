@@ -155,6 +155,15 @@ CREATE TABLE IF NOT EXISTS content_root_assets (
     PRIMARY KEY (content_root_id, vault_asset_id, role)
 );
 
+CREATE TABLE IF NOT EXISTS vault_asset_links (
+    parent_asset_id INTEGER NOT NULL,
+    child_asset_id INTEGER NOT NULL,
+    relation_kind TEXT NOT NULL CHECK(relation_kind IN ('source', 'overlay', 'p1', 'p2', 'derived')),
+    transform_log_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (parent_asset_id, child_asset_id, relation_kind, transform_log_id)
+);
+
 CREATE TABLE IF NOT EXISTS video_transform_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     process_kind TEXT NOT NULL,
@@ -165,6 +174,7 @@ CREATE TABLE IF NOT EXISTS video_transform_logs (
     source_identity TEXT,
     vault_asset_id INTEGER,
     variant_signature TEXT,
+    output_vault_asset_id INTEGER,
     details_json TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -313,6 +323,7 @@ class DatabaseManager:
             "ALTER TABLE virtual_assistants ADD COLUMN timezone TEXT DEFAULT 'America/Argentina/Buenos_Aires'",
             "ALTER TABLE video_transform_logs ADD COLUMN vault_asset_id INTEGER",
             "ALTER TABLE video_transform_logs ADD COLUMN variant_signature TEXT",
+            "ALTER TABLE video_transform_logs ADD COLUMN output_vault_asset_id INTEGER",
         ]
         cur = self.conn.cursor()
         for sql in migrations:
@@ -722,6 +733,7 @@ class DatabaseManager:
         source_identity=None,
         vault_asset_id=None,
         variant_signature=None,
+        output_vault_asset_id=None,
         reservation_id=None,
     ):
         source_path = os.path.abspath(source_path)
@@ -733,9 +745,10 @@ class DatabaseManager:
             """
             INSERT INTO video_transform_logs (
                 process_kind, source_path, output_path, output_filename,
-                tanda_name, source_identity, vault_asset_id, variant_signature, details_json
+                tanda_name, source_identity, vault_asset_id, variant_signature,
+                output_vault_asset_id, details_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(output_path) DO UPDATE SET
                 process_kind=excluded.process_kind,
                 source_path=excluded.source_path,
@@ -744,6 +757,10 @@ class DatabaseManager:
                 source_identity=excluded.source_identity,
                 vault_asset_id=excluded.vault_asset_id,
                 variant_signature=excluded.variant_signature,
+                output_vault_asset_id=COALESCE(
+                    excluded.output_vault_asset_id,
+                    video_transform_logs.output_vault_asset_id
+                ),
                 details_json=excluded.details_json,
                 created_at=datetime('now')
             """,
@@ -756,6 +773,7 @@ class DatabaseManager:
                 source_identity,
                 vault_asset_id,
                 variant_signature,
+                output_vault_asset_id,
                 details_json,
             ),
         )
@@ -779,7 +797,7 @@ class DatabaseManager:
             """
             SELECT id, process_kind, source_path, output_path, output_filename,
                    tanda_name, source_identity, vault_asset_id, variant_signature,
-                   details_json, created_at
+                   output_vault_asset_id, details_json, created_at
             FROM video_transform_logs
             ORDER BY datetime(created_at) DESC, id DESC
             LIMIT ?
@@ -924,7 +942,120 @@ class DatabaseManager:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def _output_root_role(self, process_kind):
+        roles = {
+            "forge": "forge_output",
+            "forge_trial": "forge_output",
+            "video_editor": "edited_output",
+            "tandas": "tanda_output",
+        }
+        role = roles.get(str(process_kind or "").strip())
+        if not role:
+            raise ValueError("No se puede asignar una familia a este tipo de proceso.")
+        return role
+
+    def _link_vault_assets(self, parent_asset_id, child_asset_id, relation_kind, transform_log_id=None):
+        parent_id = int(parent_asset_id)
+        child_id = int(child_asset_id)
+        clean_kind = str(relation_kind or "").strip()
+        if parent_id == child_id:
+            raise ValueError("Un activo no puede ser padre de si mismo.")
+        if clean_kind not in {"source", "overlay", "p1", "p2", "derived"}:
+            raise ValueError("El tipo de relacion entre activos no es valido.")
+        self.conn.execute(
+            """
+            INSERT OR IGNORE INTO vault_asset_links (
+                parent_asset_id, child_asset_id, relation_kind, transform_log_id
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (parent_id, child_id, clean_kind, transform_log_id),
+        )
+
+    def link_vault_assets(self, parent_asset_id, child_asset_id, relation_kind, transform_log_id=None):
+        with self.conn:
+            self._require_vault_assets([parent_asset_id, child_asset_id])
+            self._link_vault_assets(
+                parent_asset_id, child_asset_id, relation_kind, transform_log_id
+            )
+
+    def _require_vault_assets(self, asset_ids):
+        ids = {int(asset_id) for asset_id in asset_ids}
+        if not ids:
+            return
+        placeholders = ", ".join("?" for _ in ids)
+        rows = self.conn.execute(
+            f"SELECT id FROM vault_assets WHERE id IN ({placeholders})", tuple(ids)
+        ).fetchall()
+        if {int(row["id"]) for row in rows} != ids:
+            raise ValueError("Uno de los activos padre no existe en la boveda.")
+
+    def _require_content_roots(self, root_ids):
+        ids = {int(root_id) for root_id in root_ids}
+        if not ids:
+            return
+        placeholders = ", ".join("?" for _ in ids)
+        rows = self.conn.execute(
+            f"SELECT id FROM content_roots WHERE id IN ({placeholders})", tuple(ids)
+        ).fetchall()
+        if {int(row["id"]) for row in rows} != ids:
+            raise ValueError("Una de las familias indicadas no existe.")
+
+    def list_vault_asset_links(self, asset_id):
+        rows = self.conn.execute(
+            """
+            SELECT parent_asset_id, child_asset_id, relation_kind, transform_log_id, created_at
+            FROM vault_asset_links
+            WHERE parent_asset_id=? OR child_asset_id=?
+            ORDER BY datetime(created_at), parent_asset_id, child_asset_id, relation_kind
+            """,
+            (int(asset_id), int(asset_id)),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def register_transform_output(self, transform_log_id, output_path, parent_links, root_ids=None):
+        roots = list(root_ids or [])
+        links = list(parent_links or [])
+        with self.conn:
+            log = self.conn.execute(
+                "SELECT process_kind FROM video_transform_logs WHERE id=?",
+                (int(transform_log_id),),
+            ).fetchone()
+            if not log:
+                raise ValueError("No existe el registro de transformacion indicado.")
+
+            role = self._output_root_role(log["process_kind"]) if roots else None
+            self._require_content_roots(roots)
+            self._require_vault_assets(parent_asset_id for parent_asset_id, _ in links)
+
+            output = self._upsert_vault_asset(output_path)
+            self.conn.execute(
+                "UPDATE video_transform_logs SET output_vault_asset_id=? WHERE id=?",
+                (output["id"], int(transform_log_id)),
+            )
+            for parent_asset_id, relation_kind in links:
+                self._link_vault_assets(
+                    parent_asset_id, output["id"], relation_kind, transform_log_id
+                )
+            if roots:
+                for root_id in roots:
+                    self.conn.execute(
+                        """
+                        INSERT OR IGNORE INTO content_root_assets (
+                            content_root_id, vault_asset_id, role
+                        )
+                        VALUES (?, ?, ?)
+                        """,
+                        (int(root_id), output["id"], role),
+                    )
+        return output
+
     def upsert_vault_asset(self, source_path, display_name=None, tags=None):
+        asset = self._upsert_vault_asset(source_path, display_name, tags)
+        self.conn.commit()
+        return asset
+
+    def _upsert_vault_asset(self, source_path, display_name=None, tags=None):
         from vault import hash_asset, media_type_for_path
 
         abs_path = os.path.abspath(os.fspath(source_path))
@@ -948,7 +1079,6 @@ class DatabaseManager:
             """,
             (asset_hash, abs_path, name, media_type, tags_json),
         )
-        self.conn.commit()
         return dict(
             cur.execute("SELECT * FROM vault_assets WHERE asset_hash=?", (asset_hash,)).fetchone()
         )
