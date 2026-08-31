@@ -973,6 +973,106 @@ class DatabaseManager:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_root_operational_summary(self, search="", include_archived=False):
+        term = str(search or "").strip()
+        like = f"%{term}%"
+        rows = self.conn.execute(
+            """
+            SELECT cr.id, cr.name, cr.status,
+                   (
+                       SELECT COUNT(DISTINCT cra.vault_asset_id)
+                       FROM content_root_assets cra
+                       WHERE cra.content_root_id=cr.id
+                   ) AS asset_count,
+                   (
+                       SELECT COUNT(*)
+                       FROM content_account_uses cua
+                       WHERE cua.content_root_id=cr.id AND cua.state='scheduled'
+                   ) AS scheduled_count,
+                   (
+                       SELECT COUNT(*)
+                       FROM content_account_uses cua
+                       WHERE cua.content_root_id=cr.id AND cua.state='sent_telegram'
+                   ) AS sent_telegram_count,
+                   (
+                       SELECT COUNT(*)
+                       FROM content_account_uses cua
+                       WHERE cua.content_root_id=cr.id
+                         AND cua.state IN ('sent_telegram', 'published_confirmed')
+                   ) AS successful_use_count,
+                   (
+                       SELECT MAX(cua.updated_at)
+                       FROM content_account_uses cua
+                       WHERE cua.content_root_id=cr.id
+                         AND cua.state IN ('sent_telegram', 'published_confirmed')
+                   ) AS last_successful_use_at
+            FROM content_roots cr
+            WHERE (? OR cr.status='active')
+              AND (?='' OR LOWER(cr.name) LIKE LOWER(?) OR LOWER(cr.tags_json) LIKE LOWER(?))
+            ORDER BY cr.name COLLATE NOCASE, cr.id
+            """,
+            (int(bool(include_archived)), term, like, like),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_root_usable_outputs(self, root_id):
+        rows = self.conn.execute(
+            """
+            SELECT va.*
+            FROM content_root_assets cra
+            JOIN vault_assets va ON va.id=cra.vault_asset_id
+            WHERE cra.content_root_id=?
+              AND cra.role IN ('forge_output', 'edited_output', 'tanda_output')
+            GROUP BY va.id
+            ORDER BY datetime(va.created_at), va.id
+            """,
+            (int(root_id),),
+        ).fetchall()
+        return [dict(row) for row in rows if os.path.isfile(row["source_path"])]
+
+    def list_active_uses_for_root(self, root_id):
+        rows = self.conn.execute(
+            """
+            SELECT * FROM content_account_uses
+            WHERE content_root_id=?
+              AND state IN ('assigned', 'scheduled', 'sent_telegram', 'published_confirmed')
+            ORDER BY account_id, day, slot, id
+            """,
+            (int(root_id),),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_active_uses_for_assets(self, asset_ids):
+        ids = [int(asset_id) for asset_id in asset_ids]
+        if not ids:
+            return []
+        placeholders = ", ".join("?" for _ in ids)
+        rows = self.conn.execute(
+            f"""
+            SELECT * FROM content_account_uses
+            WHERE vault_asset_id IN ({placeholders})
+              AND state IN ('assigned', 'scheduled', 'sent_telegram', 'published_confirmed')
+            ORDER BY account_id, day, slot, id
+            """,
+            tuple(ids),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_accounts_by_ids(self, account_ids):
+        ids = [int(account_id) for account_id in account_ids]
+        if not ids:
+            return []
+        placeholders = ", ".join("?" for _ in ids)
+        rows = self.conn.execute(
+            f"""
+            SELECT * FROM virtual_accounts
+            WHERE id IN ({placeholders})
+            ORDER BY id
+            """,
+            tuple(ids),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def add_asset_to_collection(self, collection_id, asset_id):
         self.conn.execute(
             """
