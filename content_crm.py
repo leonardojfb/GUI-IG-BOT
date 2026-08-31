@@ -72,6 +72,20 @@ def evaluate_reuse(db, root_id, account_ids, delivery_kind="normal"):
     return {"eligible": eligible, "excluded": excluded}
 
 
+def build_reuse_request(db, root_id, account_ids, delivery_kind="normal"):
+    """Build the explicit handoff that Logistics may schedule for a content root."""
+    decision = evaluate_reuse(db, root_id, account_ids, delivery_kind)
+    if not decision["eligible"]:
+        raise ValueError("No hay cuentas elegibles para reutilizar esta familia.")
+    return {
+        "root_id": int(root_id),
+        "delivery_kind": str(delivery_kind),
+        "eligible_account_ids": [item["account_id"] for item in decision["eligible"]],
+        "asset_ids": [asset["id"] for asset in db.list_root_usable_outputs(root_id)],
+        "decision": decision,
+    }
+
+
 def _uses_by_account(uses):
     grouped = {}
     for use in uses:

@@ -5,9 +5,9 @@ import random
 import string
 import math
 from collections import defaultdict
-from calendar_manifest import build_entry, manifest_path, replace_entries
+from calendar_manifest import build_entry, load_entries, manifest_path, replace_entries
 from database import DatabaseManager
-from vault_usage import reconcile_calendar_entries
+from vault_usage import calendar_entry_key, reconcile_calendar_entries
 from console_encoding import ensure_stdout_utf8
 
 ensure_stdout_utf8()
@@ -1105,6 +1105,114 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
         f"Regla aplicada: no repetir PT1 en la misma cuenta el mismo día.\n"
         f"Shuffle aplicado entre tandas + día + slot + cuenta."
     )
+def _next_reuse_day_slot(entries, account_id, delivery_kind):
+    occupied = {
+        (int(entry.get("day", 0)), int(entry.get("slot", 0)))
+        for entry in entries
+        if entry.get("delivery_kind") == delivery_kind and entry.get("account_id") == account_id
+    }
+    day = 1
+    while (day, 1) in occupied:
+        day += 1
+    return day, 1
+
+
+def distribute_root_reuse(request):
+    """Schedule approved root outputs through the manifest without copying media."""
+    from content_crm import evaluate_reuse
+
+    root_id = int(request["root_id"])
+    delivery_kind = str(request.get("delivery_kind") or "normal")
+    requested_ids = [int(value) for value in request.get("eligible_account_ids", [])]
+    requested_assets = [int(value) for value in request.get("asset_ids", [])]
+    if not requested_ids:
+        raise ValueError("No hay cuentas elegibles para reutilizar esta familia.")
+
+    db = DatabaseManager()
+    try:
+        decision = evaluate_reuse(db, root_id, requested_ids, delivery_kind)
+        eligible_ids = [item["account_id"] for item in decision["eligible"]]
+        if not eligible_ids:
+            raise ValueError("No hay cuentas elegibles para reutilizar esta familia.")
+        accounts = {account["id"]: account for account in db.list_accounts_by_ids(eligible_ids)}
+        ordered_accounts = [accounts[account_id] for account_id in eligible_ids if account_id in accounts]
+        usable_assets = {asset["id"]: asset for asset in db.list_root_usable_outputs(root_id)}
+        video_items = [usable_assets[asset_id] for asset_id in requested_assets if asset_id in usable_assets]
+        if not video_items:
+            return "Error: No hay outputs utilizables para reutilizar esta familia."
+
+        path = manifest_path(base_dir)
+        current_entries = load_entries(path, require_source=False)
+        affected_usernames = {account["username"] for account in ordered_accounts}
+        preserved_entries = [
+            entry for entry in current_entries
+            if entry.get("username") in affected_usernames and entry.get("delivery_kind") == delivery_kind
+        ]
+        manifest_entries = list(preserved_entries)
+        scheduled_entries = []
+        logical_filenames = {entry.get("telegram_filename") for entry in current_entries}
+        tanda_name = f"REUSE_ROOT_{root_id}"
+
+        for index, asset in enumerate(video_items):
+            account = ordered_accounts[index % len(ordered_accounts)]
+            source_path = asset["source_path"]
+            day, slot = _next_reuse_day_slot(manifest_entries, account["id"], delivery_kind)
+            filename = build_calendar_video_filename(
+                asset["display_name"], tanda_name, account["id"], day, slot
+            )
+            collision_suffix = 1
+            while filename in logical_filenames:
+                filename = build_calendar_video_filename(
+                    asset["display_name"], tanda_name, account["id"], day, slot, collision_suffix
+                )
+                collision_suffix += 1
+            logical_filenames.add(filename)
+            entry = build_entry(
+                username=account["username"],
+                account_id=account["id"],
+                delivery_kind=delivery_kind,
+                day=day,
+                slot=slot,
+                tanda=tanda_name,
+                source_path=source_path,
+                telegram_filename=filename,
+                transform_log_id=db.get_video_transform_log_id(source_path),
+            )
+            manifest_entries.append(entry)
+            scheduled_entries.append((entry, asset))
+            db.add_video_to_history(
+                account["id"], source_path, None, None, f"Reutilizacion / {tanda_name}", day
+            )
+
+        merged_entries = replace_entries(path, manifest_entries, affected_usernames, delivery_kind)
+        reconcile_calendar_entries(db, merged_entries, set(eligible_ids), delivery_kind)
+        for entry, asset in scheduled_entries:
+            db.upsert_content_account_use(
+                {
+                    "calendar_entry_key": calendar_entry_key(entry),
+                    "content_root_id": root_id,
+                    "vault_asset_id": asset["id"],
+                    "account_id": entry["account_id"],
+                    "username": entry["username"],
+                    "delivery_kind": delivery_kind,
+                    "tanda_name": tanda_name,
+                    "transform_log_id": entry["transform_log_id"],
+                    "day": entry["day"],
+                    "slot": entry["slot"],
+                    "state": "scheduled",
+                }
+            )
+    finally:
+        db.close()
+
+    return (
+        "Logistica terminada.\n"
+        f"{len(scheduled_entries)} outputs reutilizados.\n"
+        f"Familia reutilizada: {root_id}.\n"
+        f"Cuentas elegibles: {len(eligible_ids)}."
+    )
+
+
 if __name__ == "__main__":
     print("--- INICIANDO ORGANIZACION CON ANTI-CHOQUE GLOBAL ---")
 

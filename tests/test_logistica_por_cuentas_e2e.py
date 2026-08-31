@@ -21,6 +21,8 @@ import pytest
 ctk = pytest.importorskip("customtkinter")
 
 import database
+from calendar_manifest import build_entry, manifest_path
+from content_crm import build_reuse_request
 
 
 class _SyncWorkerThread:
@@ -191,3 +193,65 @@ def test_por_cuentas_distributes_manual_cross_category_accounts_without_mixing(t
             )
     finally:
         cleanup()
+
+
+def test_root_reuse_schedules_only_eligible_accounts_and_preserves_existing_manifest_entries(tmp_path, monkeypatch):
+    import Organizador
+
+    original_db_path = database.DB_PATH
+    db_path = tmp_path / "organizador.db"
+    database.DB_PATH = str(db_path)
+    db = database.DatabaseManager()
+    try:
+        db.conn.executemany(
+            "INSERT INTO virtual_accounts (username, account_type, trials_active) VALUES (?, ?, ?)",
+            [("eligible", "promo", 0), ("blocked", "promo", 0), ("unrelated", "promo", 0)],
+        )
+        db.conn.commit()
+        accounts = {account["username"]: account for account in db.get_all_accounts()}
+        root = db.create_content_root("Reuse root")
+        output_path = tmp_path / "usable.mp4"
+        output_path.write_bytes(b"usable-output")
+        output = db.upsert_vault_asset(output_path)
+        db.add_asset_to_content_root(root["id"], output["id"], "tanda_output")
+        db.upsert_content_account_use(
+            {
+                "calendar_entry_key": "blocked-root", "content_root_id": root["id"],
+                "vault_asset_id": output["id"], "account_id": accounts["blocked"]["id"],
+                "username": "blocked", "delivery_kind": "normal", "tanda_name": "old",
+                "transform_log_id": None, "day": 1, "slot": 1, "state": "scheduled",
+            }
+        )
+        existing_source = tmp_path / "existing.mp4"
+        existing_source.write_bytes(b"existing")
+        existing = [
+            build_entry("eligible", accounts["eligible"]["id"], "normal", 1, 1, "existing", existing_source, "existing.mp4"),
+            build_entry("unrelated", accounts["unrelated"]["id"], "normal", 1, 1, "unrelated", existing_source, "unrelated.mp4"),
+        ]
+        path = manifest_path(tmp_path)
+        path.write_text(json.dumps({"version": 1, "entries": existing}), encoding="utf-8")
+        request = build_reuse_request(
+            db, root["id"], [accounts["eligible"]["id"], accounts["blocked"]["id"]]
+        )
+    finally:
+        db.close()
+
+    try:
+        monkeypatch.setattr(Organizador, "base_dir", str(tmp_path))
+
+        result = Organizador.distribute_root_reuse(request)
+
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        entries = payload["entries"]
+        reused = [entry for entry in entries if entry["tanda"] == f"REUSE_ROOT_{request['root_id']}"]
+        assert "Logistica terminada" in result
+        assert request["decision"]["excluded"] == [{
+            "account_id": accounts["blocked"]["id"], "username": "blocked", "reason": "already_scheduled_root",
+        }]
+        assert [entry["username"] for entry in reused] == ["eligible"]
+        assert reused[0]["source_path"] == str(output_path.resolve())
+        assert (reused[0]["day"], reused[0]["slot"]) != (1, 1)
+        assert {entry["telegram_filename"] for entry in entries} >= {"existing.mp4", "unrelated.mp4"}
+        assert not list((tmp_path / "CALENDARIO_POSTEO").rglob("*.mp4"))
+    finally:
+        database.DB_PATH = original_db_path

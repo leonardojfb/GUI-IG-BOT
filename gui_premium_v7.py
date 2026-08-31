@@ -21,7 +21,7 @@ import shutil
 import requests
 import render_performance
 import metadata_pool
-from content_crm import evaluate_reuse, list_account_content, list_root_cards
+from content_crm import build_reuse_request, evaluate_reuse, list_account_content, list_root_cards
 
 from calendar_manifest import build_entry, manifest_path, replace_entries
 from database import DatabaseManager
@@ -5912,15 +5912,61 @@ class InstagramAutoPro(ctk.CTk):
             decision = evaluate_reuse(self.db, root_id, account_ids)
         except ValueError as exc:
             return messagebox.showwarning("CRM de contenido", str(exc), parent=self)
-        eligible = ", ".join(f"@{item['username']}" for item in decision["eligible"]) or "Ninguna"
-        excluded = ", ".join(
-            f"@{item['username']} ({item['reason']})" for item in decision["excluded"]
-        ) or "Ninguna"
-        messagebox.showinfo(
-            "Disponibilidad de reutilizacion",
-            f"Permitidas: {eligible}\n\nNo disponibles: {excluded}",
-            parent=self,
+        request = None
+        if decision["eligible"]:
+            try:
+                request = build_reuse_request(self.db, root_id, account_ids)
+            except ValueError as exc:
+                return messagebox.showwarning("CRM de contenido", str(exc), parent=self)
+        self._show_content_crm_reuse_modal(decision, request)
+
+    def _show_content_crm_reuse_modal(self, decision, request):
+        win = ctk.CTkToplevel(self)
+        win.title("Programar reutilizacion")
+        self._fit_toplevel(win, 560, 430)
+        win.configure(fg_color=BG_APP)
+        win.transient(self)
+        win.grab_set()
+        body = ctk.CTkTextbox(
+            win, wrap="word", fg_color=BG_CARD, text_color=TEXT_BODY, font=FONT_BODY, corner_radius=8
         )
+        body.pack(fill="both", expand=True, padx=16, pady=(16, 10))
+        eligible = [f"- @{item['username']}" for item in decision["eligible"]] or ["- Ninguna"]
+        excluded = [
+            f"- @{item['username']}: {item['reason']}" for item in decision["excluded"]
+        ] or ["- Ninguna"]
+        body.insert("end", "\n".join([
+            "CUENTAS ELEGIBLES", *eligible, "", "EXCLUSIONES", *excluded,
+            "", "La reutilizacion se programara en Logistica. No envia a Telegram ni copia archivos.",
+        ]))
+        body.configure(state="disabled")
+        actions = ctk.CTkFrame(win, fg_color="transparent")
+        actions.pack(fill="x", padx=16, pady=(0, 16))
+
+        def schedule():
+            schedule_button.configure(state="disabled")
+
+            def task():
+                import Organizador
+                return Organizador.distribute_root_reuse(request)
+
+            def done(success, result):
+                if success:
+                    win.destroy()
+                    self.refresh_content_crm()
+                    self.reload_dist_lists()
+                    messagebox.showinfo("CRM de contenido", result, parent=self)
+                else:
+                    schedule_button.configure(state="normal")
+                    messagebox.showerror("CRM de contenido", result, parent=win)
+
+            WorkerThread(self, done, task).start()
+
+        schedule_button = PrimaryButton(actions, text="Programar reutilizacion", command=schedule)
+        schedule_button.pack(side="right")
+        if request is None:
+            schedule_button.configure(state="disabled")
+        GhostButton(actions, text="Cancelar", command=win.destroy).pack(side="right", padx=(0, 8))
 
     def _toggle_content_crm_technical(self):
         if self.content_crm_technical_visible:

@@ -1,6 +1,6 @@
 import pytest
 
-from content_crm import evaluate_reuse, list_account_content, list_root_cards
+from content_crm import build_reuse_request, evaluate_reuse, list_account_content, list_root_cards
 from database import DatabaseManager
 
 
@@ -126,4 +126,38 @@ def test_reuse_rejects_missing_or_archived_root(tmp_path):
         evaluate_reuse(db, archived["id"], [5])
     with pytest.raises(ValueError, match="familia seleccionada"):
         evaluate_reuse(db, 99999, [5])
+    db.close()
+
+
+def test_reuse_request_contains_only_eligible_accounts_and_real_output_assets(tmp_path):
+    db = seeded_crm_db(tmp_path)
+    root = db.create_content_root("Reusable request")
+    output = add_usable_output(db, tmp_path, root["id"])
+    add_use(db, root["id"], output["id"], 2, "scheduled-root", "scheduled", "already-scheduled")
+
+    request = build_reuse_request(db, root["id"], [2, 5])
+
+    assert request["root_id"] == root["id"]
+    assert request["delivery_kind"] == "normal"
+    assert request["eligible_account_ids"] == [5]
+    assert request["asset_ids"] == [output["id"]]
+    assert request["decision"] == {
+        "eligible": [{"account_id": 5, "username": "free"}],
+        "excluded": [{
+            "account_id": 2,
+            "username": "scheduled-root",
+            "reason": "already_scheduled_root",
+        }],
+    }
+    db.close()
+
+
+def test_reuse_request_rejects_when_no_account_is_eligible(tmp_path):
+    db = seeded_crm_db(tmp_path)
+    root = db.create_content_root("No reuse")
+    output = add_usable_output(db, tmp_path, root["id"])
+    add_use(db, root["id"], output["id"], 5, "free", "scheduled", "already-scheduled")
+
+    with pytest.raises(ValueError, match="^No hay cuentas elegibles para reutilizar esta familia\\.$"):
+        build_reuse_request(db, root["id"], [5])
     db.close()
