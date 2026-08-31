@@ -24,6 +24,7 @@ import metadata_pool
 
 from calendar_manifest import build_entry, manifest_path, replace_entries
 from database import DatabaseManager
+from vault_usage import backfill_vault_provenance
 from airtable_sync import (
     AirtableConfig,
     AirtableSyncError,
@@ -5304,6 +5305,12 @@ class InstagramAutoPro(ctk.CTk):
             text="Agregar a coleccion",
             command=self.vault_assign_selected_assets_to_collection,
         ).grid(row=0, column=4, padx=(8, 0))
+        self.vault_backfill_button = PrimaryButton(
+            actions,
+            text="Completar trazabilidad",
+            command=self.vault_run_provenance_backfill,
+        )
+        self.vault_backfill_button.grid(row=0, column=5, padx=(8, 0))
 
         columns = ("name", "hash", "type", "outputs", "path")
         self.vault_tree = ttk.Treeview(
@@ -5342,6 +5349,43 @@ class InstagramAutoPro(ctk.CTk):
         self.vault_history = self.vault_detail
         self.refresh_vault_table()
         self.refresh_vault_roots()
+
+    def vault_run_provenance_backfill(self):
+        if not messagebox.askyesno(
+            "Completar trazabilidad",
+            "Se vincularan solo renders historicos con rutas exactas verificables. "
+            "Los casos ambiguos quedaran para revision. Continuar?",
+            parent=self,
+        ):
+            return
+
+        button = getattr(self, "vault_backfill_button", None)
+        if button is not None:
+            button.configure(state="disabled", text="Verificando...")
+
+        def done(success, result):
+            if button is not None:
+                button.configure(state="normal", text="Completar trazabilidad")
+            if not success:
+                messagebox.showerror("Completar trazabilidad", result, parent=self)
+                return
+
+            self.refresh_vault_table()
+            self.refresh_vault_roots()
+            self.refresh_vault_asset_detail()
+            review = result["review"][:10]
+            review_text = "\n".join(
+                f"#{item['transform_log_id']} {item['reason']}: {item['path']}"
+                for item in review
+            ) or "Sin casos para revision."
+            messagebox.showinfo(
+                "Completar trazabilidad",
+                f"Vinculados: {result['linked']}\nOmitidos: {result['skipped']}\n\n"
+                f"Revision (primeros 10):\n{review_text}",
+                parent=self,
+            )
+
+        WorkerThread(self, done, lambda: backfill_vault_provenance(self.db)).start()
 
     def vault_import_files(self):
         paths = filedialog.askopenfilenames(

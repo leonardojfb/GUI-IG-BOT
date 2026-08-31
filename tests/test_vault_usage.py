@@ -1,5 +1,36 @@
 from database import DatabaseManager
-from vault_usage import reconcile_calendar_entries
+from vault_usage import backfill_vault_provenance, reconcile_calendar_entries
+
+
+def test_backfill_never_guesses_when_legacy_source_is_not_resolved(tmp_path):
+    db = DatabaseManager(str(tmp_path / "organizador.db"))
+    output = tmp_path / "out.mp4"
+    output.write_bytes(b"out")
+    db.save_video_transform_log("tandas", "C:/legacy/P1.mp4", output, {"p1_id": "P1"})
+
+    result = backfill_vault_provenance(db)
+
+    assert result["linked"] == 0
+    assert result["review"][0]["reason"] == "source_not_resolved"
+    db.close()
+
+
+def test_backfill_rejects_an_unreadable_legacy_overlay_record(tmp_path):
+    db = DatabaseManager(str(tmp_path / "organizador.db"))
+    source = tmp_path / "source.mp4"
+    output = tmp_path / "out.mp4"
+    source.write_bytes(b"source")
+    output.write_bytes(b"out")
+    db.upsert_vault_asset(source)
+    db.save_video_transform_log(
+        "video_editor", source, output, {"overlays": ["legacy overlay without path"]}
+    )
+
+    result = backfill_vault_provenance(db)
+
+    assert result["linked"] == 0
+    assert result["review"][0]["reason"] == "source_not_resolved"
+    db.close()
 
 
 def test_reconcile_manifest_is_idempotent_and_cancels_replaced_slot(tmp_path):

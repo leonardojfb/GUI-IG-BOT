@@ -5,6 +5,98 @@ import hashlib
 import json
 import os
 
+from vault import hash_asset
+
+
+def _provenance_review(log, reason):
+    return {
+        "transform_log_id": int(log["id"]),
+        "path": log["output_path"],
+        "reason": reason,
+    }
+
+
+def _legacy_parent_paths(log, details):
+    process_kind = log["process_kind"]
+    if process_kind == "tandas":
+        return [(details.get("p1_path"), "p1"), (details.get("p2_path"), "p2")]
+    if process_kind == "video_editor":
+        parents = [(details.get("input_path") or log["source_path"], "source")]
+        overlays = details.get("overlays", [])
+        if not isinstance(overlays, list):
+            return []
+        if any(not isinstance(overlay, dict) for overlay in overlays):
+            return []
+        parents.extend((overlay.get("photo_path"), "overlay") for overlay in overlays)
+        return parents
+    return [(log["source_path"], "source")]
+
+
+def backfill_vault_provenance(db):
+    """Link only legacy transform records whose output and parents are exact facts."""
+    logs = db.conn.execute(
+        """
+        SELECT id, process_kind, source_path, output_path, details_json
+        FROM video_transform_logs
+        WHERE output_vault_asset_id IS NULL
+        ORDER BY id ASC
+        """
+    ).fetchall()
+    linked = 0
+    skipped = 0
+    review = []
+
+    for row in logs:
+        log = dict(row)
+        output_path = log["output_path"]
+        try:
+            if not os.path.isfile(output_path):
+                raise OSError("output_missing")
+            hash_asset(output_path)
+        except OSError:
+            skipped += 1
+            review.append(_provenance_review(log, "output_not_readable"))
+            continue
+
+        try:
+            details = json.loads(log["details_json"] or "{}")
+        except json.JSONDecodeError:
+            skipped += 1
+            review.append(_provenance_review(log, "details_not_readable"))
+            continue
+        if not isinstance(details, dict):
+            skipped += 1
+            review.append(_provenance_review(log, "details_not_readable"))
+            continue
+
+        expected_parents = _legacy_parent_paths(log, details)
+        parent_paths = [path for path, _kind in expected_parents]
+        if (
+            not expected_parents
+            or any(not isinstance(path, str) or not path.strip() for path in parent_paths)
+            or len({os.path.abspath(path) for path in parent_paths}) != len(parent_paths)
+        ):
+            skipped += 1
+            review.append(_provenance_review(log, "source_not_resolved"))
+            continue
+
+        parent_links = []
+        for path, relation_kind in expected_parents:
+            asset = db.find_vault_asset_by_path(path)
+            if asset is None:
+                parent_links = []
+                break
+            parent_links.append((asset["id"], relation_kind))
+        if not parent_links:
+            skipped += 1
+            review.append(_provenance_review(log, "source_not_resolved"))
+            continue
+
+        db.register_transform_output(log["id"], output_path, parent_links)
+        linked += 1
+
+    return {"linked": linked, "review": review, "skipped": skipped}
+
 
 def calendar_entry_key(entry: dict) -> str:
     fields = {
