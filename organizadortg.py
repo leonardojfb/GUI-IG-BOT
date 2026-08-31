@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from calendar_manifest import load_entries, manifest_path, remove_entries_for_accounts
 from database import DatabaseManager
 from trial_content import source_key_from_filename
+from vault_usage import mark_manifest_delivery
 from console_encoding import ensure_stdout_utf8
 
 ensure_stdout_utf8()
@@ -142,6 +143,7 @@ def _scan_manifest_calendar_structure(manifest_file=None):
             "delivery_kind": entry.get("delivery_kind", "normal"),
             "account_id": entry.get("account_id"),
             "transform_log_id": entry.get("transform_log_id"),
+            "manifest_entry": entry,
         })
     rows.sort(key=lambda row: (int(str(row["day"]).split("_")[1]), row.get("slot", 0), row["username"], row["filename"]))
     return rows
@@ -862,7 +864,15 @@ def _account_tag(acc_info):
         return "SUICIDE"
     return category.upper() if category else "GENERAL"
 
-def execute_telegram_plan(start_date, selected_accounts=None, controller=None, reset_topics=False, express_mode=False):
+def execute_telegram_plan(
+    start_date,
+    selected_accounts=None,
+    controller=None,
+    reset_topics=False,
+    express_mode=False,
+    delivery_observer=None,
+):
+    delivery_observer = delivery_observer or (lambda entry, state, reason=None: None)
     caption_pools = load_tanda_caption_pools()
     trial_caption_maps = load_trial_caption_maps()
     normal_individual_caption_maps = load_normal_individual_caption_maps()
@@ -1013,6 +1023,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     "meta": meta,
                     "hora_et": hora_et,
                     "dia_str": dia_str,
+                    "manifest_entry": vid.get("manifest_entry"),
                 })
 
         fecha_envio += timedelta(days=1)
@@ -1051,6 +1062,15 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
             return None
         return topic_id
 
+    def observe_delivery(job, state, failure_reason=None):
+        manifest_entry = job.get("manifest_entry")
+        if not manifest_entry:
+            return
+        try:
+            delivery_observer(manifest_entry, state, failure_reason)
+        except Exception as error:
+            print(f"Error al guardar entrega de Telegram: {error}")
+
     def send_chat_jobs(jobs):
         sent = 0
         aborted = False
@@ -1065,17 +1085,26 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                 topic_id = send_metadata(job)
                 if not topic_id:
                     continue
+            except Exception as e:
+                print(f"❌ Error físico: {e}")
+                continue
+            try:
                 ok, _topic_id = _send_video_to_topic(
                     job["chat_id"], topic_id, job["caption"], job["path"],
                     topics_state, job["username"], job["tag"],
                 )
-                if ok:
-                    sent += 1
-                with state_lock:
-                    save_json(os.path.join(base_dir, STATE_FILE), topics_state)
-                time.sleep(2)
             except Exception as e:
+                observe_delivery(job, "failed", f"Error al enviar por Telegram: {e}")
                 print(f"❌ Error físico: {e}")
+                continue
+            if ok:
+                sent += 1
+                observe_delivery(job, "sent_telegram")
+            else:
+                observe_delivery(job, "failed", "Telegram no confirmo el envio del video.")
+            with state_lock:
+                save_json(os.path.join(base_dir, STATE_FILE), topics_state)
+            time.sleep(2)
         return sent, aborted
 
     if jobs_by_chat:
@@ -1118,12 +1147,21 @@ class TelegramBotController:
         self._stopped = False
         try:
             start_date = datetime.strptime(self.start_date_str, "%Y-%m-%d")
+
+            def record_delivery(manifest_entry, state, failure_reason=None):
+                delivery_db = DatabaseManager()
+                try:
+                    mark_manifest_delivery(delivery_db, manifest_entry, state, failure_reason)
+                finally:
+                    delivery_db.close()
+
             result = execute_telegram_plan(
                 start_date,
                 self.selected_accounts,
                 self,
                 reset_topics=self.reset_topics,
                 express_mode=self.express_mode,
+                delivery_observer=record_delivery,
             )
             print(result)
         finally:

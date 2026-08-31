@@ -7,6 +7,7 @@ import math
 from collections import defaultdict
 from calendar_manifest import build_entry, manifest_path, replace_entries
 from database import DatabaseManager
+from vault_usage import reconcile_calendar_entries
 from console_encoding import ensure_stdout_utf8
 
 ensure_stdout_utf8()
@@ -1081,10 +1082,16 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
 
                     total_movidos += 1
         if affected_usernames:
-            replace_entries(
+            merged_entries = replace_entries(
                 manifest_path(base_dir),
                 manifest_entries,
                 affected_usernames,
+                "normal",
+            )
+            reconcile_calendar_entries(
+                db,
+                merged_entries,
+                {account["id"] for account in accounts},
                 "normal",
             )
     finally:

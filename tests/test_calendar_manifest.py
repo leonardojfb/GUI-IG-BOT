@@ -71,3 +71,74 @@ def test_remove_entries_for_accounts_removes_all_kinds(tmp_path):
 
     assert removed == 2
     assert [e["username"] for e in load_entries(manifest)] == ["bob"]
+
+
+def test_manifest_scan_keeps_entry_for_delivery_state(tmp_path, monkeypatch):
+    import organizadortg
+
+    source = tmp_path / "a.mp4"
+    source.write_bytes(b"a")
+    entry = build_entry(
+        "ana",
+        7,
+        "normal",
+        1,
+        1,
+        "T1",
+        str(source),
+        "a__TANDA_T1.mp4",
+    )
+    replace_entries(tmp_path / "calendar_manifest.json", [entry], {"ana"}, "normal")
+    monkeypatch.setattr(organizadortg, "base_dir", str(tmp_path))
+    monkeypatch.setattr(organizadortg, "get_accounts_with_va_info", lambda: [
+        {"username": "ana", "account_type": "main"},
+    ])
+
+    scanned = organizadortg.scan_calendar_structure()
+
+    assert scanned[0]["manifest_entry"] == entry
+
+
+def test_distribute_reconciles_only_affected_normal_manifest_entries(tmp_path, monkeypatch):
+    import Organizador
+
+    class FakeDatabase:
+        def __init__(self):
+            self.closed = False
+
+        def get_all_accounts(self):
+            return [{"id": 7, "username": "ana", "account_type": "MAIN"}]
+
+        def get_video_transform_log_id(self, _path):
+            return 33
+
+        def add_video_to_history(self, *_args):
+            return None
+
+        def close(self):
+            self.closed = True
+
+    db = FakeDatabase()
+    tanda_dir = tmp_path / "videos_finales" / "T1"
+    tanda_dir.mkdir(parents=True)
+    (tanda_dir / "T1__P1__P2.mp4").write_bytes(b"clip")
+    calls = []
+
+    def fake_reconcile(received_db, entries, account_ids, delivery_kind):
+        calls.append((received_db, entries, account_ids, delivery_kind, received_db.closed))
+
+    monkeypatch.setattr(Organizador, "DatabaseManager", lambda: db)
+    monkeypatch.setattr(Organizador, "base_dir", str(tmp_path))
+    monkeypatch.setattr(Organizador, "source_root", str(tmp_path / "videos_finales"))
+    monkeypatch.setattr(Organizador, "get_account_used_combinations_for_tandas", lambda *_args: set())
+    monkeypatch.setattr(Organizador, "reconcile_calendar_entries", fake_reconcile, raising=False)
+
+    Organizador.distribute_tanda("T1", "MAIN", 1, False, "1")
+
+    assert len(calls) == 1
+    received_db, entries, account_ids, delivery_kind, db_was_closed = calls[0]
+    assert received_db is db
+    assert account_ids == {7}
+    assert delivery_kind == "normal"
+    assert db_was_closed is False
+    assert [(entry["username"], entry["delivery_kind"]) for entry in entries] == [("ana", "normal")]
