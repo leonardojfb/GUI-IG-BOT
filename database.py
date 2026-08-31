@@ -240,6 +240,7 @@ class DatabaseManager:
             print(f"Error inicializando base de datos: {e}")
         self._migrate_columns()
         self._ensure_vault_indexes()
+        self._ensure_vault_asset_link_integrity()
         self._ensure_content_library_indexes()
         self._ensure_content_use_indexes()
         self._migrate_forge_registry_unique()
@@ -268,6 +269,36 @@ class DatabaseManager:
             self.conn.commit()
         except Exception as e:
             print(f"⚠️ No se pudieron crear indices de Boveda: {e}")
+
+    def _ensure_vault_asset_link_integrity(self):
+        """Hace idempotentes los enlaces manuales de bases ya existentes."""
+        try:
+            with self.conn:
+                self.conn.execute(
+                    """
+                    DELETE FROM vault_asset_links
+                    WHERE transform_log_id IS NULL
+                      AND rowid NOT IN (
+                          SELECT MIN(rowid)
+                          FROM vault_asset_links
+                          WHERE transform_log_id IS NULL
+                          GROUP BY parent_asset_id, child_asset_id, relation_kind
+                      )
+                    """
+                )
+                self.conn.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_vault_asset_links_identity
+                    ON vault_asset_links(
+                        parent_asset_id,
+                        child_asset_id,
+                        relation_kind,
+                        COALESCE(transform_log_id, -1)
+                    )
+                    """
+                )
+        except sqlite3.Error as e:
+            print(f"No se pudo asegurar la integridad de enlaces de Boveda: {e}")
 
     def _ensure_content_library_indexes(self):
         cur = self.conn.cursor()

@@ -153,3 +153,54 @@ def test_register_transform_output_rejects_unknown_log_and_self_parent(tmp_path)
 
     assert db.list_video_transform_logs()[0]["output_vault_asset_id"] is None
     db.close()
+
+
+def test_manual_vault_asset_links_are_idempotent_but_keep_distinct_logs(tmp_path):
+    db = DatabaseManager(str(tmp_path / "organizador.db"))
+    parent_path = tmp_path / "parent.mp4"
+    child_path = tmp_path / "child.mp4"
+    parent_path.write_bytes(b"parent")
+    child_path.write_bytes(b"child")
+    parent = db.upsert_vault_asset(parent_path)
+    child = db.upsert_vault_asset(child_path)
+
+    db.link_vault_assets(parent["id"], child["id"], "derived")
+    db.link_vault_assets(parent["id"], child["id"], "derived")
+    db.link_vault_assets(parent["id"], child["id"], "derived", transform_log_id=101)
+    db.link_vault_assets(parent["id"], child["id"], "derived", transform_log_id=102)
+
+    links = db.list_vault_asset_links(child["id"])
+    assert len(links) == 3
+    assert sum(link["transform_log_id"] is None for link in links) == 1
+    assert {link["transform_log_id"] for link in links if link["transform_log_id"] is not None} == {101, 102}
+    db.close()
+
+
+def test_existing_database_dedupes_nullable_vault_asset_links_before_unique_index(tmp_path):
+    db_path = tmp_path / "organizador.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE vault_asset_links (
+            parent_asset_id INTEGER NOT NULL,
+            child_asset_id INTEGER NOT NULL,
+            relation_kind TEXT NOT NULL,
+            transform_log_id INTEGER,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (parent_asset_id, child_asset_id, relation_kind, transform_log_id)
+        );
+        INSERT INTO vault_asset_links (parent_asset_id, child_asset_id, relation_kind, transform_log_id)
+        VALUES (1, 2, 'derived', NULL), (1, 2, 'derived', NULL);
+        """
+    )
+    conn.close()
+
+    db = DatabaseManager(str(db_path))
+
+    assert db.conn.execute(
+        "SELECT COUNT(*) FROM vault_asset_links WHERE transform_log_id IS NULL"
+    ).fetchone()[0] == 1
+    assert db.conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_vault_asset_links_identity'"
+    ).fetchone()
+    db.close()
