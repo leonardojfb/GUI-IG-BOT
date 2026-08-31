@@ -5191,16 +5191,68 @@ class InstagramAutoPro(ctk.CTk):
         PageHeader(
             f,
             kicker="CONTENIDO",
-            title="Boveda",
-            description="Historial de inputs y outputs usados por Forge.",
+            title="Biblioteca",
+            description="Organiza activos, familias y trazabilidad sin mover archivos.",
         ).grid(row=0, column=0, sticky="ew", padx=24, pady=(22, 8))
 
         body = ctk.CTkFrame(f, fg_color="transparent")
         body.grid(row=1, column=0, sticky="nsew", padx=24, pady=(0, 16))
-        body.grid_columnconfigure(0, weight=1)
-        body.grid_rowconfigure(1, weight=1)
+        body.grid_columnconfigure(0, minsize=220)
+        body.grid_columnconfigure(1, weight=1)
+        body.grid_columnconfigure(2, minsize=300)
+        body.grid_rowconfigure(0, weight=1)
 
-        actions = ctk.CTkFrame(body, fg_color="transparent")
+        library = ctk.CTkFrame(body, fg_color=BG_CARD, corner_radius=8)
+        library.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        library.grid_columnconfigure(0, weight=1)
+        library.grid_rowconfigure(2, weight=1)
+        ctk.CTkLabel(library, text="FAMILIAS", font=FONT_OVERLINE, text_color=TEXT_MUTED).grid(
+            row=0, column=0, sticky="w", padx=14, pady=(14, 6)
+        )
+        root_actions = ctk.CTkFrame(library, fg_color="transparent")
+        root_actions.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 8))
+        root_actions.grid_columnconfigure(0, weight=1)
+        self.vault_root_name_var = tk.StringVar(value="")
+        ctk.CTkEntry(
+            root_actions,
+            textvariable=self.vault_root_name_var,
+            placeholder_text="Nueva familia",
+            fg_color=BG_INPUT,
+            border_color=BORDER,
+        ).grid(row=0, column=0, sticky="ew")
+        PrimaryButton(root_actions, text="+", width=32, command=self.vault_create_root).grid(
+            row=0, column=1, padx=(6, 0)
+        )
+
+        self.vault_roots_tree = ttk.Treeview(
+            library, columns=("name", "assets"), show="headings", height=12, style="Premium.Treeview"
+        )
+        self.vault_roots_tree.heading("name", text="Familia")
+        self.vault_roots_tree.heading("assets", text="Activos")
+        self.vault_roots_tree.column("name", width=150, anchor="w")
+        self.vault_roots_tree.column("assets", width=52, anchor="center")
+        self.vault_roots_tree.grid(row=2, column=0, sticky="nsew", padx=10)
+        self.vault_roots_tree.bind("<<TreeviewSelect>>", self._on_vault_root_selected)
+
+        ctk.CTkLabel(library, text="COLECCIONES", font=FONT_OVERLINE, text_color=TEXT_MUTED).grid(
+            row=3, column=0, sticky="w", padx=14, pady=(14, 6)
+        )
+        self.vault_collections_tree = ttk.Treeview(
+            library, columns=("name", "assets"), show="headings", height=7, style="Premium.Treeview"
+        )
+        self.vault_collections_tree.heading("name", text="Coleccion")
+        self.vault_collections_tree.heading("assets", text="Activos")
+        self.vault_collections_tree.column("name", width=150, anchor="w")
+        self.vault_collections_tree.column("assets", width=52, anchor="center")
+        self.vault_collections_tree.grid(row=4, column=0, sticky="ew", padx=10, pady=(0, 12))
+        self.vault_collections_tree.bind("<<TreeviewSelect>>", self._on_vault_collection_selected)
+
+        assets = ctk.CTkFrame(body, fg_color="transparent")
+        assets.grid(row=0, column=1, sticky="nsew", padx=(0, 10))
+        assets.grid_columnconfigure(0, weight=1)
+        assets.grid_rowconfigure(1, weight=1)
+
+        actions = ctk.CTkFrame(assets, fg_color="transparent")
         actions.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         actions.grid_columnconfigure(0, weight=1)
         self.vault_search_var = tk.StringVar(value="")
@@ -5212,10 +5264,22 @@ class InstagramAutoPro(ctk.CTk):
             fg_color=BG_INPUT,
             border_color=BORDER,
         ).grid(row=0, column=0, sticky="ew")
-        PrimaryButton(actions, text="Importar videos", command=self.vault_import_files).grid(row=0, column=1, padx=(8, 0))
+        PrimaryButton(actions, text="Importar", command=self.vault_import_files).grid(row=0, column=1, padx=(8, 0))
+        self.vault_role_var = tk.StringVar(value="original_video")
+        self.vault_role_menu = ttk.Combobox(
+            actions,
+            textvariable=self.vault_role_var,
+            state="readonly",
+            width=16,
+            values=("original_video", "original_image", "overlay", "p1", "p2", "reference"),
+        )
+        self.vault_role_menu.grid(row=0, column=2, padx=(8, 0))
+        PrimaryButton(actions, text="Agregar a familia", command=self.vault_assign_selected_asset).grid(
+            row=0, column=3, padx=(8, 0)
+        )
 
         columns = ("name", "hash", "type", "outputs", "path")
-        self.vault_tree = ttk.Treeview(body, columns=columns, show="headings", style="Premium.Treeview")
+        self.vault_tree = ttk.Treeview(assets, columns=columns, show="headings", style="Premium.Treeview")
         for col, label in (("name", "Nombre"), ("hash", "Hash"), ("type", "Tipo"), ("outputs", "Outputs"), ("path", "Ruta")):
             self.vault_tree.heading(col, text=label)
         self.vault_tree.column("name", width=220, anchor="w")
@@ -5224,31 +5288,110 @@ class InstagramAutoPro(ctk.CTk):
         self.vault_tree.column("outputs", width=70, anchor="center")
         self.vault_tree.column("path", width=520, anchor="w")
         self.vault_tree.grid(row=1, column=0, sticky="nsew")
-        self.vault_tree.bind("<<TreeviewSelect>>", lambda _event: self.refresh_vault_history())
+        self.vault_tree.bind("<<TreeviewSelect>>", lambda _event: self.refresh_vault_asset_detail())
 
-        self.vault_history = tk.Text(
-            body,
-            height=8,
-            wrap="word",
-            bg=self.themed(BG_INPUT),
-            fg=self.themed(TEXT_BODY),
-            insertbackground=self.themed(TEXT_BODY),
-            borderwidth=0,
-            highlightthickness=1,
-            highlightbackground=self.themed(BORDER),
-            font=FONT_MONO,
+        detail = ctk.CTkFrame(body, fg_color=BG_CARD, corner_radius=8)
+        detail.grid(row=0, column=2, sticky="nsew")
+        detail.grid_columnconfigure(0, weight=1)
+        detail.grid_rowconfigure(1, weight=1)
+        ctk.CTkLabel(detail, text="DETALLE DEL ACTIVO", font=FONT_OVERLINE, text_color=TEXT_MUTED).grid(
+            row=0, column=0, sticky="w", padx=14, pady=(14, 8)
         )
-        self.vault_history.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        self.vault_detail = ctk.CTkTextbox(
+            detail,
+            wrap="word",
+            fg_color=BG_INPUT,
+            text_color=TEXT_BODY,
+            font=FONT_MONO,
+            corner_radius=6,
+        )
+        self.vault_detail.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        self.vault_history = self.vault_detail
         self.refresh_vault_table()
+        self.refresh_vault_roots()
 
     def vault_import_files(self):
         paths = filedialog.askopenfilenames(
-            title="Importar a Boveda",
-            filetypes=[("Videos", "*.mp4 *.mov *.avi *.mkv"), ("Todos los archivos", "*.*")],
+            title="Importar a Biblioteca",
+            filetypes=[
+                ("Medios", "*.mp4 *.mov *.avi *.mkv *.png *.jpg *.jpeg *.webp"),
+                ("Todos los archivos", "*.*"),
+            ],
         )
         for path in paths:
             self.db.upsert_vault_asset(path)
         self.refresh_vault_table()
+        self.refresh_vault_roots()
+
+    def _selected_vault_root_id(self):
+        tree = getattr(self, "vault_roots_tree", None)
+        selection = tree.selection() if tree is not None else ()
+        return int(selection[0]) if selection else None
+
+    def _selected_vault_collection_id(self):
+        tree = getattr(self, "vault_collections_tree", None)
+        selection = tree.selection() if tree is not None else ()
+        return int(selection[0]) if selection else None
+
+    def _on_vault_root_selected(self, _event=None):
+        if self._selected_vault_root_id() is not None:
+            self.vault_collections_tree.selection_remove(self.vault_collections_tree.selection())
+        self.refresh_vault_table()
+
+    def _on_vault_collection_selected(self, _event=None):
+        if self._selected_vault_collection_id() is not None:
+            self.vault_roots_tree.selection_remove(self.vault_roots_tree.selection())
+        self.refresh_vault_table()
+
+    def vault_create_root(self):
+        name = self.vault_root_name_var.get().strip()
+        if not name:
+            return messagebox.showwarning("Biblioteca", "Indica un nombre para la familia.", parent=self)
+        try:
+            root = self.db.create_content_root(name)
+        except ValueError as exc:
+            return messagebox.showwarning("Biblioteca", str(exc), parent=self)
+        self.vault_root_name_var.set("")
+        self.refresh_vault_roots(selected_root_id=root["id"])
+
+    def vault_assign_selected_asset(self):
+        asset_selection = self.vault_tree.selection()
+        root_id = self._selected_vault_root_id()
+        if len(asset_selection) != 1:
+            return messagebox.showwarning("Biblioteca", "Selecciona un activo para agregar.", parent=self)
+        if root_id is None:
+            return messagebox.showwarning("Biblioteca", "Selecciona una familia de destino.", parent=self)
+        role = self.vault_role_var.get().strip()
+        if not role:
+            return messagebox.showwarning("Biblioteca", "Selecciona el rol del activo.", parent=self)
+        if not messagebox.askyesno(
+            "Agregar a familia",
+            "El activo se mantendra en su ruta actual. Deseas agregarlo a la familia seleccionada?",
+            parent=self,
+        ):
+            return
+        self.db.add_asset_to_content_root(root_id, int(asset_selection[0]), role)
+        self.refresh_vault_roots(selected_root_id=root_id)
+        self.refresh_vault_table()
+        self.refresh_vault_asset_detail()
+
+    def refresh_vault_roots(self, selected_root_id=None):
+        roots_tree = getattr(self, "vault_roots_tree", None)
+        collections_tree = getattr(self, "vault_collections_tree", None)
+        if roots_tree is None or collections_tree is None:
+            return
+        for tree in (roots_tree, collections_tree):
+            for item in tree.get_children():
+                tree.delete(item)
+        for root in self.db.list_content_roots(status="all"):
+            roots_tree.insert("", "end", iid=str(root["id"]), values=(root["name"], root["asset_count"]))
+        for collection in self.db.list_vault_collections():
+            collections_tree.insert(
+                "", "end", iid=str(collection["id"]), values=(collection["name"], collection["asset_count"])
+            )
+        if selected_root_id is not None and roots_tree.exists(str(selected_root_id)):
+            roots_tree.selection_set(str(selected_root_id))
+            roots_tree.focus(str(selected_root_id))
 
     def refresh_vault_table(self):
         tree = getattr(self, "vault_tree", None)
@@ -5258,7 +5401,16 @@ class InstagramAutoPro(ctk.CTk):
             tree.delete(item)
         search_var = getattr(self, "vault_search_var", None)
         search = search_var.get() if search_var is not None else ""
-        for row in self.db.list_vault_assets(search):
+        collection_id = self._selected_vault_collection_id()
+        if collection_id is not None:
+            rows = self.db.list_collection_assets(collection_id)
+        else:
+            rows = self.db.list_vault_assets(search)
+        for row in rows:
+            if search and search.lower() not in " ".join(
+                (str(row.get("display_name", "")), str(row.get("source_path", "")), str(row.get("asset_hash", "")))
+            ).lower():
+                continue
             tree.insert(
                 "",
                 "end",
@@ -5273,20 +5425,61 @@ class InstagramAutoPro(ctk.CTk):
             )
 
     def refresh_vault_history(self):
+        self.refresh_vault_asset_detail()
+
+    def refresh_vault_asset_detail(self):
         tree = getattr(self, "vault_tree", None)
-        detail = getattr(self, "vault_history", None)
+        detail = getattr(self, "vault_detail", None)
         if tree is None or detail is None:
             return
         selection = tree.selection()
-        if not selection:
-            return
-        rows = self.db.list_vault_asset_history(int(selection[0]))
         detail.delete("1.0", "end")
-        for row in rows:
-            detail.insert(
-                "end",
-                f"{row['created_at']} | {row['process_kind']} | {row['output_filename']} | {row.get('variant_signature') or ''}\n",
-            )
+        if not selection:
+            detail.insert("end", "Selecciona un activo para ver su organizacion y trazabilidad.")
+            return
+        asset_id = int(selection[0])
+        asset = self.db.get_vault_asset(asset_id)
+        if not asset:
+            return
+        collections = self.db.list_vault_collections()
+        collection_names = [
+            collection["name"] for collection in collections
+            if any(row["id"] == asset_id for row in self.db.list_collection_assets(collection["id"]))
+        ]
+        roots = self.db.list_asset_roots(asset_id)
+        links = self.db.list_vault_asset_links(asset_id)
+        history = self.db.list_vault_asset_history(asset_id)
+        roots_text = ", ".join(
+            f"{root['name']} ({root['role']})" for root in roots
+        ) or "Sin familia"
+        lines = [
+            asset["display_name"],
+            "",
+            f"Ruta: {asset['source_path']}",
+            f"Hash: {asset['asset_hash']}",
+            f"Tipo: {asset['media_type']}",
+            f"Colecciones: {', '.join(collection_names) or 'Sin coleccion'}",
+            f"Familias: {roots_text}",
+            "",
+            "Relaciones:",
+        ]
+        if links:
+            for link in links:
+                direction = "Padre" if link["parent_asset_id"] == asset_id else "Hijo"
+                other_id = link["child_asset_id"] if direction == "Padre" else link["parent_asset_id"]
+                lines.append(f"{direction} #{other_id} | {link['relation_kind']}")
+        else:
+            lines.append("Sin relaciones registradas")
+        lines.append("")
+        lines.append("Transformaciones recientes:")
+        if history:
+            for row in history[:12]:
+                lines.append(
+                    f"{row['created_at']} | {row['process_kind']} | {row['output_filename']}"
+                )
+        else:
+            lines.append("Sin transformaciones registradas")
+        detail.insert("end", "\n".join(lines))
 
     def _set_forge_vault_assets(self, assets):
         self.forge_vault_assets = list(assets or [])

@@ -1117,14 +1117,14 @@ class DatabaseManager:
         rows = self.conn.execute(
             """
             SELECT id, process_kind, source_path, output_path, output_filename,
-                   tanda_name, source_identity, vault_asset_id, variant_signature,
+                   tanda_name, source_identity, vault_asset_id, output_vault_asset_id, variant_signature,
                    details_json, created_at
             FROM video_transform_logs
-            WHERE vault_asset_id=?
+            WHERE vault_asset_id=? OR output_vault_asset_id=?
             ORDER BY datetime(created_at) DESC, id DESC
             LIMIT ?
             """,
-            (int(vault_asset_id), int(limit)),
+            (int(vault_asset_id), int(vault_asset_id), int(limit)),
         ).fetchall()
         return [dict(row) for row in rows]
 

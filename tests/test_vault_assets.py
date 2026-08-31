@@ -108,6 +108,7 @@ def test_register_transform_output_links_two_parents_and_a_root(tmp_path):
     assert {link["relation_kind"] for link in db.list_vault_asset_links(output["id"])} == {"p1", "p2"}
     assert db.list_root_assets(root["id"])[0]["role"] == "tanda_output"
     assert db.list_video_transform_logs()[0]["output_vault_asset_id"] == output["id"]
+    assert db.list_vault_asset_history(output["id"])[0]["id"] == log_id
     db.close()
 
 

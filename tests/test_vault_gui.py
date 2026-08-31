@@ -36,13 +36,22 @@ def test_sidebar_and_content_register_vault_frame():
 def test_vault_frame_lists_assets_and_history_without_root_scroll():
     frame = _source("_build_vault_frame")
     table = _source("refresh_vault_table")
-    history = _source("refresh_vault_history")
+    detail = _source("refresh_vault_asset_detail")
 
     assert "CTkScrollableFrame" not in frame
     assert "self.vault_tree" in frame
     assert "self.db.list_vault_assets" in table
     assert "output_count" in table
-    assert "self.db.list_vault_asset_history" in history
+    assert "self.db.list_vault_asset_history" in detail
+
+
+def test_biblioteca_exposes_import_roots_collections_and_asset_detail():
+    source = GUI.read_text(encoding="utf-8")
+    for token in (
+        'title="Biblioteca"', "vault_create_root", "vault_assign_selected_asset",
+        "refresh_vault_roots", "list_content_roots", "list_collection_assets",
+    ):
+        assert token in source
 
 
 def test_forge_uses_vault_selection_controls():
