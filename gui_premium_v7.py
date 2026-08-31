@@ -21,6 +21,7 @@ import shutil
 import requests
 import render_performance
 import metadata_pool
+from content_crm import evaluate_reuse, list_account_content, list_root_cards
 
 from calendar_manifest import build_entry, manifest_path, replace_entries
 from database import DatabaseManager
@@ -1327,7 +1328,7 @@ class InstagramAutoPro(ctk.CTk):
         # — Navegación agrupada por flujo de trabajo —
         nav_groups = [
             ("Edición",       [("🖼️   Edición de video", "VideoEditor")]),
-            ("Contenido",    [("Boveda", "Boveda"), ("🔮   Forge", "Forge"), ("🎬   Tandas", "Tandas")]),
+            ("Contenido",    [("Boveda", "Boveda"), ("CRM de contenido", "ContentCRM"), ("🔮   Forge", "Forge"), ("🎬   Tandas", "Tandas")]),
             ("Distribución", [("🚀   Logística", "Logistica"), ("📡   Cuentas", "Cuentas"),
                               ("📲   Telegram", "Telegram")]),
             ("Control",      [("📊   Dashboard", "Dashboard")]),
@@ -1385,7 +1386,7 @@ class InstagramAutoPro(ctk.CTk):
         container.grid_columnconfigure(0, weight=1)
         self._container = container
 
-        for name in ["Dashboard", "Equipo", "Tandas", "Logistica", "Telegram", "Cuentas", "VerifyLegacy", "AIAdvisor", "Boveda", "Forge", "VideoEditor", "Actualizaciones"]:
+        for name in ["Dashboard", "Equipo", "Tandas", "Logistica", "Telegram", "Cuentas", "VerifyLegacy", "AIAdvisor", "Boveda", "ContentCRM", "Forge", "VideoEditor", "Actualizaciones"]:
             f = ctk.CTkFrame(container, fg_color=BG_APP, corner_radius=0)
             f.grid(row=0, column=0, sticky="nsew")
             f.grid_columnconfigure(0, weight=1)
@@ -1401,6 +1402,7 @@ class InstagramAutoPro(ctk.CTk):
         self._build_verify_legacy_frame()
         self._build_ai_frame()
         self._build_vault_frame()
+        self._build_content_crm_frame()
         self._build_forge_frame()
         self._build_video_editor_frame()
         self._build_updates_frame()
@@ -5594,6 +5596,346 @@ class InstagramAutoPro(ctk.CTk):
         else:
             lines.append("Sin transformaciones registradas")
         detail.insert("end", "\n".join(lines))
+
+    def _build_content_crm_frame(self):
+        f = self._frames["ContentCRM"]
+        f.grid_columnconfigure(0, weight=1)
+        f.grid_rowconfigure(1, weight=1)
+        PageHeader(
+            f,
+            kicker="OPERACION",
+            title="CRM de contenido",
+            description="Consulta la disponibilidad y el uso operativo de cada familia por cuenta.",
+        ).grid(row=0, column=0, sticky="ew", padx=24, pady=(22, 8))
+
+        body = ctk.CTkFrame(f, fg_color="transparent")
+        body.grid(row=1, column=0, sticky="nsew", padx=24, pady=(0, 16))
+        body.grid_columnconfigure(0, weight=1)
+        body.grid_columnconfigure(1, minsize=360)
+        body.grid_rowconfigure(1, weight=1)
+
+        toolbar = ctk.CTkFrame(body, fg_color="transparent")
+        toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        toolbar.grid_columnconfigure(0, weight=1)
+        self.content_crm_search_var = tk.StringVar(value="")
+        self.content_crm_search_var.trace_add("write", lambda *_: self.refresh_content_crm())
+        ctk.CTkEntry(
+            toolbar,
+            textvariable=self.content_crm_search_var,
+            placeholder_text="Buscar familia",
+            fg_color=BG_INPUT,
+            border_color=BORDER,
+        ).grid(row=0, column=0, sticky="ew")
+        self.content_crm_view_var = tk.StringVar(value="Familias")
+        self.content_crm_view_switch = ctk.CTkSegmentedButton(
+            toolbar,
+            values=["Familias", "Cuentas"],
+            variable=self.content_crm_view_var,
+            command=lambda _value: self.refresh_content_crm(),
+            fg_color=BG_INPUT,
+            selected_color=ACCENT,
+            selected_hover_color=ACCENT_HOVER,
+            unselected_color=BG_CARD2,
+        )
+        self.content_crm_view_switch.grid(row=0, column=1, padx=(10, 0))
+        GhostButton(toolbar, text="Actualizar", command=self.refresh_content_crm).grid(
+            row=0, column=2, padx=(8, 0)
+        )
+
+        table_panel = ctk.CTkFrame(body, fg_color=BG_CARD, corner_radius=8)
+        table_panel.grid(row=1, column=0, sticky="nsew", padx=(0, 10))
+        table_panel.grid_columnconfigure(0, weight=1)
+        table_panel.grid_rowconfigure(1, weight=1)
+        self.content_crm_table_label = ctk.CTkLabel(
+            table_panel, text="FAMILIAS", font=FONT_SMALL, text_color=TEXT_MUTED
+        )
+        self.content_crm_table_label.grid(row=0, column=0, sticky="w", padx=14, pady=(14, 8))
+        self.content_crm_tree = ttk.Treeview(
+            table_panel, columns=(), show="headings", style="Premium.Treeview", selectmode="browse"
+        )
+        self.content_crm_tree.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        self.content_crm_tree.bind("<<TreeviewSelect>>", self._on_content_crm_selected)
+        self.content_crm_tree.bind("<Double-1>", self._on_content_crm_selected)
+
+        detail = ctk.CTkFrame(body, fg_color=BG_CARD, corner_radius=8)
+        detail.grid(row=1, column=1, sticky="nsew")
+        detail.grid_columnconfigure(0, weight=1)
+        detail.grid_rowconfigure(1, weight=1)
+        self.content_crm_detail_title = ctk.CTkLabel(
+            detail, text="DETALLE OPERATIVO", font=FONT_SMALL, text_color=TEXT_MUTED
+        )
+        self.content_crm_detail_title.grid(row=0, column=0, sticky="w", padx=14, pady=(14, 8))
+        self.content_crm_detail = ctk.CTkTextbox(
+            detail, wrap="word", fg_color=BG_INPUT, text_color=TEXT_BODY, font=FONT_BODY, corner_radius=6
+        )
+        self.content_crm_detail.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 8))
+        detail_actions = ctk.CTkFrame(detail, fg_color="transparent")
+        detail_actions.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 8))
+        self.content_crm_reuse_button = GhostButton(
+            detail_actions, text="Evaluar reutilizacion", command=self.review_content_crm_reuse
+        )
+        self.content_crm_reuse_button.pack(side="left")
+        self.content_crm_technical_button = GhostButton(
+            detail_actions, text="Trazabilidad tecnica", command=self._toggle_content_crm_technical
+        )
+        self.content_crm_technical_button.pack(side="right")
+        self.content_crm_technical = ctk.CTkTextbox(
+            detail, height=110, wrap="word", fg_color=BG_APP, text_color=TEXT_MUTED, font=FONT_MONO,
+            corner_radius=6,
+        )
+        self.content_crm_technical_visible = False
+        self.content_crm_technical_lines = []
+        self.content_crm_root_cards = []
+        self.content_crm_account_rows = []
+        self.refresh_content_crm_roots()
+
+    def refresh_content_crm(self):
+        if self.content_crm_view_var.get() == "Cuentas":
+            self.refresh_content_crm_accounts()
+        else:
+            self.refresh_content_crm_roots()
+
+    def _configure_content_crm_columns(self, columns):
+        tree = self.content_crm_tree
+        tree.configure(columns=tuple(column[0] for column in columns))
+        for column, label, width in columns:
+            tree.heading(column, text=label)
+            tree.column(column, width=width, anchor="w" if column in {"family", "account", "last", "action"} else "center")
+
+    def _clear_content_crm_tree(self):
+        for item in self.content_crm_tree.get_children():
+            self.content_crm_tree.delete(item)
+
+    def refresh_content_crm_roots(self):
+        search = self.content_crm_search_var.get().strip()
+        self.content_crm_root_cards = list_root_cards(self.db, search=search)
+        self.content_crm_table_label.configure(text="FAMILIAS")
+        columns = (
+            ("family", "Familia", 230),
+            ("usable", "Outputs utilizables", 125),
+            ("scheduled", "Programado", 90),
+            ("sent", "Enviado", 80),
+            ("last", "Ultimo uso", 145),
+            ("action", "Accion", 95),
+        )
+        self._configure_content_crm_columns(columns)
+        self._clear_content_crm_tree()
+        for card in self.content_crm_root_cards:
+            last_use = card["last_successful_use_at"] or "Sin uso"
+            self.content_crm_tree.insert(
+                "", "end", iid=f"root:{card['id']}",
+                values=(
+                    card["name"], card["usable_output_count"], card["scheduled_count"],
+                    card["sent_telegram_count"], last_use, "Ver detalle",
+                ),
+            )
+        if not self.content_crm_root_cards:
+            self._set_content_crm_empty_state()
+
+    def refresh_content_crm_accounts(self):
+        search = self.content_crm_search_var.get().strip().lower()
+        cards = list_root_cards(self.db)
+        active_states = {"assigned", "scheduled", "sent_telegram", "published_confirmed"}
+        self.content_crm_table_label.configure(text="CUENTAS")
+        columns = (
+            ("account", "Cuenta", 220),
+            ("scheduled", "Programado", 95),
+            ("sent", "Enviado", 80),
+            ("available", "Disponible", 90),
+            ("action", "Accion", 110),
+        )
+        self._configure_content_crm_columns(columns)
+        self._clear_content_crm_tree()
+        self.content_crm_account_rows = []
+        for account in self.db.get_all_accounts():
+            if search and search not in account["username"].lower():
+                continue
+            content = list_account_content(self.db, account["id"])
+            active_root_ids = {
+                item["content_root_id"] for item in content
+                if item.get("content_root_id") is not None and item.get("state") in active_states
+            }
+            row = {
+                "id": account["id"],
+                "username": account["username"],
+                "content": content,
+                "scheduled": sum(item.get("state") == "scheduled" for item in content),
+                "sent": sum(item.get("state") == "sent_telegram" for item in content),
+                "available": sum(
+                    card["usable_output_count"] > 0 and card["id"] not in active_root_ids for card in cards
+                ),
+            }
+            self.content_crm_account_rows.append(row)
+            self.content_crm_tree.insert(
+                "", "end", iid=f"account:{row['id']}",
+                values=(row["username"], row["scheduled"], row["sent"], row["available"], "Ver contenido"),
+            )
+        if not self.content_crm_account_rows:
+            self._set_content_crm_empty_state("No hay cuentas disponibles para consultar contenido.")
+
+    def _on_content_crm_selected(self, _event=None):
+        selection = self.content_crm_tree.selection()
+        if not selection:
+            return
+        kind, identifier = selection[0].split(":", 1)
+        if kind == "root":
+            self.show_content_crm_detail(int(identifier))
+        else:
+            self._show_content_crm_account_detail(int(identifier))
+
+    def _set_content_crm_empty_state(self, text=None):
+        self.content_crm_detail_title.configure(text="DETALLE OPERATIVO")
+        self.content_crm_detail.delete("1.0", "end")
+        self.content_crm_detail.insert(
+            "end", text or "Todavia no hay familias. Ve a Biblioteca para importar activos y clasificarlos en una familia."
+        )
+        self.content_crm_reuse_button.configure(state="disabled")
+        self.content_crm_technical_lines = []
+        self._hide_content_crm_technical()
+
+    def show_content_crm_detail(self, root_id):
+        card = next((item for item in self.content_crm_root_cards if item["id"] == int(root_id)), None)
+        if card is None:
+            card = next((item for item in list_root_cards(self.db) if item["id"] == int(root_id)), None)
+        if card is None:
+            return self._set_content_crm_empty_state("La familia seleccionada ya no esta disponible.")
+
+        output_roles = {"forge_output", "edited_output", "tanda_output"}
+        root_assets = self.db.list_root_assets(root_id)
+        sources = [asset for asset in root_assets if asset.get("role") not in output_roles]
+        outputs = self.db.list_root_usable_outputs(root_id)
+        asset_names = {asset["id"]: asset["display_name"] for asset in root_assets}
+        history = []
+        for account in self.db.get_all_accounts():
+            for use in list_account_content(self.db, account["id"]):
+                if use.get("content_root_id") == int(root_id):
+                    history.append(use)
+        history.sort(key=lambda item: (item.get("updated_at") or "", item.get("id") or 0), reverse=True)
+        state_labels = {
+            "available": "Disponible", "assigned": "En produccion", "processing": "En produccion",
+            "scheduled": "Programado", "sent_telegram": "Enviado a Telegram",
+            "published_confirmed": "Confirmado manualmente", "failed": "Fallido",
+            "discarded": "Descartado", "archived": "Archivado",
+        }
+        scheduled = [item for item in history if item.get("state") in {"assigned", "scheduled"}]
+        chains = []
+        technical_lines = []
+        for output in outputs:
+            parents = [
+                link for link in self.db.list_vault_asset_links(output["id"])
+                if link["child_asset_id"] == output["id"]
+            ]
+            parent_names = [
+                f"{asset_names.get(link['parent_asset_id'], '#' + str(link['parent_asset_id']))} ({link['relation_kind']})"
+                for link in parents
+            ]
+            chains.append(f"{' + '.join(parent_names) or 'Sin padres registrados'} -> {output['display_name']}")
+            for transform in self.db.list_vault_asset_history(output["id"], limit=12):
+                try:
+                    details = json.loads(transform.get("details_json") or "{}")
+                except (TypeError, ValueError):
+                    details = {}
+                technical_lines.append(
+                    f"{output['display_name']} | {transform['process_kind']} | {json.dumps(details, ensure_ascii=False, sort_keys=True)}"
+                )
+
+        source_lines = [
+            f"- {asset['display_name']} ({asset['role']})" for asset in sources
+        ] or ["- Sin sources clasificados"]
+        output_lines = [f"- {asset['display_name']}" for asset in outputs] or ["- Sin outputs utilizables"]
+        history_lines = [
+            f"- @{item.get('username') or 'sin cuenta'} | {state_labels.get(item.get('state'), item.get('state', 'Disponible'))}"
+            for item in history[:16]
+        ] or ["- Sin usos registrados"]
+        scheduled_lines = [
+            f"- @{item.get('username') or 'sin cuenta'} | dia {item.get('day', '-')}, slot {item.get('slot', '-')}"
+            for item in scheduled
+        ] or ["- Sin programaciones activas"]
+        chain_lines = [f"- {chain}" for chain in chains] or ["- Sin cadena registrada"]
+        lines = [
+            card["name"],
+            "",
+            "Sources:",
+            *source_lines,
+            "",
+            "Outputs utilizables:",
+            *output_lines,
+            "",
+            "Historial por cuenta / estado:",
+            *history_lines,
+            "",
+            "Programados:",
+            *scheduled_lines,
+            "",
+            "Cadena:",
+            *chain_lines,
+            "",
+            "Estados: Disponible | En produccion | Programado | Enviado a Telegram | Confirmado manualmente | Fallido | Descartado | Archivado",
+        ]
+        self.content_crm_detail_title.configure(text=f"FAMILIA: {card['name']}")
+        self.content_crm_detail.delete("1.0", "end")
+        self.content_crm_detail.insert("end", "\n".join(lines))
+        self.content_crm_selected_root_id = int(root_id)
+        self.content_crm_reuse_button.configure(state="normal")
+        self.content_crm_technical_lines = technical_lines or ["Sin parametros tecnicos registrados."]
+        self._hide_content_crm_technical()
+
+    def _show_content_crm_account_detail(self, account_id):
+        row = next((item for item in self.content_crm_account_rows if item["id"] == int(account_id)), None)
+        if row is None:
+            return
+        state_labels = {
+            "assigned": "En produccion", "scheduled": "Programado",
+            "sent_telegram": "Enviado a Telegram", "published_confirmed": "Confirmado manualmente",
+            "failed": "Fallido", "discarded": "Descartado", "archived": "Archivado",
+        }
+        lines = [row["username"], "", "Contenido por cuenta:"]
+        lines.extend(
+            f"- {item.get('root_name') or 'Sin familia'} | {state_labels.get(item.get('state'), 'Disponible')}"
+            for item in row["content"]
+        )
+        if not row["content"]:
+            lines.append("- Sin historial operativo para esta cuenta")
+        self.content_crm_detail_title.configure(text=f"CUENTA: {row['username']}")
+        self.content_crm_detail.delete("1.0", "end")
+        self.content_crm_detail.insert("end", "\n".join(lines))
+        self.content_crm_reuse_button.configure(state="disabled")
+        self.content_crm_technical_lines = []
+        self._hide_content_crm_technical()
+
+    def review_content_crm_reuse(self):
+        root_id = getattr(self, "content_crm_selected_root_id", None)
+        if root_id is None:
+            return messagebox.showwarning("CRM de contenido", "Selecciona una familia primero.", parent=self)
+        account_ids = [account["id"] for account in self.db.get_all_accounts()]
+        try:
+            decision = evaluate_reuse(self.db, root_id, account_ids)
+        except ValueError as exc:
+            return messagebox.showwarning("CRM de contenido", str(exc), parent=self)
+        eligible = ", ".join(f"@{item['username']}" for item in decision["eligible"]) or "Ninguna"
+        excluded = ", ".join(
+            f"@{item['username']} ({item['reason']})" for item in decision["excluded"]
+        ) or "Ninguna"
+        messagebox.showinfo(
+            "Disponibilidad de reutilizacion",
+            f"Permitidas: {eligible}\n\nNo disponibles: {excluded}",
+            parent=self,
+        )
+
+    def _toggle_content_crm_technical(self):
+        if self.content_crm_technical_visible:
+            self._hide_content_crm_technical()
+            return
+        self.content_crm_technical.delete("1.0", "end")
+        self.content_crm_technical.insert("end", "\n".join(self.content_crm_technical_lines))
+        self.content_crm_technical.grid(row=3, column=0, sticky="ew", padx=10, pady=(0, 10))
+        self.content_crm_technical_visible = True
+        self.content_crm_technical_button.configure(text="Ocultar trazabilidad tecnica")
+
+    def _hide_content_crm_technical(self):
+        self.content_crm_technical.grid_remove()
+        self.content_crm_technical_visible = False
+        self.content_crm_technical_button.configure(text="Trazabilidad tecnica")
 
     def _set_forge_vault_assets(self, assets):
         self.forge_vault_assets = list(assets or [])
