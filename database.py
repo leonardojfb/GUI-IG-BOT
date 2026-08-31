@@ -164,6 +164,26 @@ CREATE TABLE IF NOT EXISTS vault_asset_links (
     PRIMARY KEY (parent_asset_id, child_asset_id, relation_kind, transform_log_id)
 );
 
+CREATE TABLE IF NOT EXISTS content_account_uses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    calendar_entry_key TEXT NOT NULL,
+    content_root_id INTEGER,
+    vault_asset_id INTEGER,
+    account_id INTEGER,
+    username TEXT NOT NULL,
+    delivery_kind TEXT NOT NULL,
+    tanda_name TEXT,
+    transform_log_id INTEGER,
+    day INTEGER NOT NULL,
+    slot INTEGER NOT NULL,
+    state TEXT NOT NULL CHECK(state IN (
+        'assigned', 'scheduled', 'sent_telegram', 'published_confirmed', 'failed', 'cancelled'
+    )),
+    failure_reason TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS video_transform_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     process_kind TEXT NOT NULL,
@@ -221,6 +241,7 @@ class DatabaseManager:
         self._migrate_columns()
         self._ensure_vault_indexes()
         self._ensure_content_library_indexes()
+        self._ensure_content_use_indexes()
         self._migrate_forge_registry_unique()
 
     def _ensure_vault_indexes(self):
@@ -272,6 +293,31 @@ class DatabaseManager:
             self.conn.commit()
         except Exception as e:
             print(f"No se pudieron crear indices de Biblioteca: {e}")
+
+    def _ensure_content_use_indexes(self):
+        cur = self.conn.cursor()
+        try:
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_content_uses_account_state_day
+                ON content_account_uses(account_id, state, day, slot)
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_content_uses_root_state
+                ON content_account_uses(content_root_id, state)
+                """
+            )
+            cur.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_content_uses_entry_root
+                ON content_account_uses(calendar_entry_key, COALESCE(content_root_id, 0))
+                """
+            )
+            self.conn.commit()
+        except Exception as e:
+            print(f"No se pudieron crear indices de usos de contenido: {e}")
 
     def _migrate_forge_registry_unique(self):
         """Amplía el UNIQUE de forge_video_registry a (tanda_name, source_name,
@@ -941,6 +987,164 @@ class DatabaseManager:
             (int(asset_id),),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def get_transform_output_context(self, transform_log_id):
+        row = self.conn.execute(
+            """
+            SELECT output_vault_asset_id
+            FROM video_transform_logs
+            WHERE id=?
+            """,
+            (int(transform_log_id),),
+        ).fetchone()
+        asset_id = int(row["output_vault_asset_id"]) if row and row["output_vault_asset_id"] else None
+        return {
+            "vault_asset_id": asset_id,
+            "roots": self.list_asset_roots(asset_id) if asset_id is not None else [],
+        }
+
+    def upsert_content_account_use(self, record):
+        root_id = record.get("content_root_id")
+        root_id = int(root_id) if root_id is not None else None
+        calendar_key = str(record["calendar_entry_key"])
+        account_id = record.get("account_id")
+        account_id = int(account_id) if account_id is not None else None
+        vault_asset_id = record.get("vault_asset_id")
+        vault_asset_id = int(vault_asset_id) if vault_asset_id is not None else None
+        transform_log_id = record.get("transform_log_id")
+        transform_log_id = int(transform_log_id) if transform_log_id is not None else None
+        state = str(record.get("state") or "scheduled")
+        values = (
+            vault_asset_id,
+            account_id,
+            str(record.get("username") or ""),
+            str(record.get("delivery_kind") or ""),
+            record.get("tanda_name"),
+            transform_log_id,
+            int(record.get("day") or 0),
+            int(record.get("slot") or 0),
+            state,
+            record.get("failure_reason"),
+        )
+        with self.conn:
+            row = self.conn.execute(
+                """
+                SELECT id FROM content_account_uses
+                WHERE calendar_entry_key=?
+                  AND COALESCE(content_root_id, 0)=COALESCE(?, 0)
+                """,
+                (calendar_key, root_id),
+            ).fetchone()
+            if row:
+                self.conn.execute(
+                    """
+                    UPDATE content_account_uses
+                    SET vault_asset_id=?, account_id=?, username=?, delivery_kind=?, tanda_name=?,
+                        transform_log_id=?, day=?, slot=?,
+                        state=CASE
+                            WHEN state IN ('sent_telegram', 'published_confirmed') AND ?='scheduled' THEN state
+                            ELSE ?
+                        END,
+                        failure_reason=?, updated_at=datetime('now')
+                    WHERE id=?
+                    """,
+                    values[:8] + (state, state, record.get("failure_reason"), int(row["id"])),
+                )
+                created = False
+                use_id = int(row["id"])
+            else:
+                cur = self.conn.execute(
+                    """
+                    INSERT INTO content_account_uses (
+                        calendar_entry_key, content_root_id, vault_asset_id, account_id, username,
+                        delivery_kind, tanda_name, transform_log_id, day, slot, state, failure_reason
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (calendar_key, root_id) + values,
+                )
+                created = True
+                use_id = int(cur.lastrowid)
+        result = self.conn.execute(
+            "SELECT * FROM content_account_uses WHERE id=?", (use_id,)
+        ).fetchone()
+        return {"created": created, "use": dict(result)}
+
+    def list_content_account_uses(self, account_id=None, root_id=None):
+        clauses = []
+        params = []
+        if account_id is not None:
+            clauses.append("account_id=?")
+            params.append(int(account_id))
+        if root_id is not None:
+            clauses.append("content_root_id=?")
+            params.append(int(root_id))
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self.conn.execute(
+            f"""
+            SELECT * FROM content_account_uses
+            {where}
+            ORDER BY account_id, day, slot, id
+            """,
+            tuple(params),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def cancel_scoped_content_uses(self, account_ids, delivery_kind, active_keys):
+        account_ids = {int(account_id) for account_id in account_ids}
+        if not account_ids:
+            return 0
+        active_pairs = {
+            (str(item[0]), int(item[1]) if item[1] is not None else None)
+            for item in active_keys
+        }
+        placeholders = ", ".join("?" for _ in account_ids)
+        rows = self.conn.execute(
+            f"""
+            SELECT id, calendar_entry_key, content_root_id
+            FROM content_account_uses
+            WHERE account_id IN ({placeholders})
+              AND delivery_kind=?
+              AND state IN ('assigned', 'scheduled')
+            """,
+            tuple(account_ids) + (str(delivery_kind),),
+        ).fetchall()
+        stale_ids = [
+            int(row["id"])
+            for row in rows
+            if (row["calendar_entry_key"], row["content_root_id"]) not in active_pairs
+        ]
+        if not stale_ids:
+            return 0
+        with self.conn:
+            self.conn.executemany(
+                """
+                UPDATE content_account_uses
+                SET state='cancelled', updated_at=datetime('now')
+                WHERE id=?
+                """,
+                [(use_id,) for use_id in stale_ids],
+            )
+        return len(stale_ids)
+
+    def update_content_account_use_state(self, calendar_key, root_id, state, failure_reason=None):
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE content_account_uses
+                SET state=?, failure_reason=?, updated_at=datetime('now')
+                WHERE calendar_entry_key=?
+                  AND COALESCE(content_root_id, 0)=COALESCE(?, 0)
+                """,
+                (str(state), failure_reason, str(calendar_key), root_id),
+            )
+        row = self.conn.execute(
+            """
+            SELECT * FROM content_account_uses
+            WHERE calendar_entry_key=? AND COALESCE(content_root_id, 0)=COALESCE(?, 0)
+            """,
+            (str(calendar_key), root_id),
+        ).fetchone()
+        return dict(row) if row else None
 
     def _output_root_role(self, process_kind):
         roles = {
