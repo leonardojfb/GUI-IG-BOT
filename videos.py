@@ -184,7 +184,7 @@ def process_tandas(db: DatabaseManager, tandas: list, performance=None):
                         "tanda_name": tanda_name,
                         "ffmpeg_threads": performance.ffmpeg_threads,
                     }
-                    db.save_video_transform_log(
+                    log_id = db.save_video_transform_log(
                         "tandas",
                         os.path.abspath(path_v1),
                         os.path.abspath(out_path),
@@ -192,6 +192,14 @@ def process_tandas(db: DatabaseManager, tandas: list, performance=None):
                         tanda_name=tanda_name,
                         source_identity=f"p1:{p1_id}|p2:{p2_id}",
                     )
+                    if all(hasattr(db, method) for method in ("ensure_vault_asset", "register_transform_output")):
+                        p1_asset = db.ensure_vault_asset(path_v1)
+                        p2_asset = db.ensure_vault_asset(path_v2)
+                        db.register_transform_output(
+                            log_id,
+                            out_path,
+                            [(p1_asset["id"], "p1"), (p2_asset["id"], "p2")],
+                        )
 
 def process_mix_rules(db: DatabaseManager, rules: list):
     """Procesar videos usando reglas de mezcla legacy."""

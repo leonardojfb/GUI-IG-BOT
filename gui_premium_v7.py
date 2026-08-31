@@ -5000,18 +5000,8 @@ class InstagramAutoPro(ctk.CTk):
             self.editor_status.configure(text="✅ Video guardado" if success else "❌ Error de render", text_color=SUCCESS if success else DANGER)
             if success:
                 messagebox.showinfo("Edición completada", f"Video guardado en:\n{result}")
-                if hasattr(self, "db") and hasattr(self.db, "save_video_transform_log"):
-                    import video_editor
-                    self.db.save_video_transform_log(
-                        "video_editor",
-                        os.path.abspath(video),
-                        os.path.abspath(result),
-                        {
-                            "input_path": os.path.abspath(video),
-                            "overlays": video_editor.describe_overlay_log(overlays),
-                            "ffmpeg_threads": performance.ffmpeg_threads,
-                        },
-                    )
+                InstagramAutoPro._save_editor_transform_with_lineage(
+                    self, video, result, overlays, performance.ffmpeg_threads)
             else:
                 messagebox.showerror("Renderizar", result)
         try:
@@ -5025,6 +5015,34 @@ class InstagramAutoPro(ctk.CTk):
         button = getattr(self, "btn_editor_render", None)
         if button is not None:
             button.configure(state="disabled" if active else "normal")
+
+    def _save_editor_transform_with_lineage(self, source, output, overlays, ffmpeg_threads):
+        db = getattr(self, "db", None)
+        if db is None or not hasattr(db, "save_video_transform_log"):
+            return None
+
+        import video_editor
+
+        log_id = db.save_video_transform_log(
+            "video_editor",
+            os.path.abspath(source),
+            os.path.abspath(output),
+            {
+                "input_path": os.path.abspath(source),
+                "overlays": video_editor.describe_overlay_log(overlays),
+                "ffmpeg_threads": ffmpeg_threads,
+            },
+        )
+        if not all(hasattr(db, method) for method in ("ensure_vault_asset", "register_transform_output")):
+            return log_id
+
+        parent_links = [(db.ensure_vault_asset(source)["id"], "source")]
+        for overlay in overlays:
+            photo_path = overlay.get("photo")
+            if photo_path:
+                parent_links.append((db.ensure_vault_asset(photo_path)["id"], "overlay"))
+        db.register_transform_output(log_id, output, parent_links)
+        return log_id
 
     def _editor_render_batch(self, jobs):
         """Render one job per requested video/photo combination."""
@@ -5051,19 +5069,9 @@ class InstagramAutoPro(ctk.CTk):
             if success:
                 messagebox.showinfo("Edición completada",
                                     f"{len(result)} videos guardados en:\n{os.path.dirname(result[0])}")
-                if hasattr(self, "db") and hasattr(self.db, "save_video_transform_log"):
-                    import video_editor
-                    for source, output, job_overlays in jobs:
-                        self.db.save_video_transform_log(
-                            "video_editor",
-                            os.path.abspath(source),
-                            os.path.abspath(output),
-                            {
-                                "input_path": os.path.abspath(source),
-                                "overlays": video_editor.describe_overlay_log(job_overlays),
-                                "ffmpeg_threads": performance.ffmpeg_threads,
-                            },
-                        )
+                for source, output, job_overlays in jobs:
+                    InstagramAutoPro._save_editor_transform_with_lineage(
+                        self, source, output, job_overlays, performance.ffmpeg_threads)
             else:
                 messagebox.showerror("Renderizar lote", result)
 

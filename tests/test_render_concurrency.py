@@ -189,6 +189,38 @@ def test_process_tandas_logs_successful_outputs(tmp_path, monkeypatch):
     assert details["p1_id"] == "one"
     assert details["p2_id"] == "two"
     assert details["ffmpeg_threads"] == 2
+    output = db.get_vault_asset(rows[0]["output_vault_asset_id"])
+    assert {item["relation_kind"] for item in db.list_vault_asset_links(output["id"])} == {"p1", "p2"}
+    db.close()
+
+
+def test_process_tandas_does_not_register_failed_render(tmp_path, monkeypatch):
+    from database import DatabaseManager
+
+    db = DatabaseManager(str(tmp_path / "organizador.db"))
+    p1_dir = tmp_path / "inputs" / "p1"
+    p2_dir = tmp_path / "inputs" / "p2"
+    p1_dir.mkdir(parents=True)
+    p2_dir.mkdir(parents=True)
+    (p1_dir / "one.mp4").write_bytes(b"p1")
+    (p2_dir / "two.mp4").write_bytes(b"p2")
+    monkeypatch.setattr(videos, "FOLDER_INPUTS", str(tmp_path / "inputs"))
+    monkeypatch.setattr(videos, "FOLDER_OUTPUT_ROOT", str(tmp_path / "videos_finales"))
+    monkeypatch.setattr(
+        videos,
+        "render_video_pair",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("ffmpeg failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="ffmpeg failed"):
+        videos.process_tandas(
+            db,
+            [{"tanda_name": "TANDA", "p1_folder": "p1", "p2_folder": "p2"}],
+            SimpleNamespace(workers=1, ffmpeg_threads=2),
+        )
+
+    assert db.list_video_transform_logs() == []
+    assert db.list_vault_assets() == []
     db.close()
 
 
@@ -288,6 +320,60 @@ def test_editor_single_render_uses_one_snapshot_and_blocks_repeated_clicks(monke
     assert transform_logs[0][1] == {}
     assert fake.btn_editor_render.states == ["disabled", "normal"]
     assert fake._editor_render_active is False
+
+
+def test_editor_success_registers_source_and_overlay_parent_links(monkeypatch, tmp_path):
+    import gui_premium_v7
+    from database import DatabaseManager
+
+    source = tmp_path / "source.mp4"
+    overlay = tmp_path / "overlay.png"
+    output = tmp_path / "output.mp4"
+    source.write_bytes(b"source")
+    overlay.write_bytes(b"overlay")
+    db = DatabaseManager(str(tmp_path / "organizador.db"))
+    performance = RenderPerformance(4, 2, 5, 10, None)
+    worker_callbacks = []
+
+    class Widget:
+        def configure(self, **_kwargs):
+            pass
+
+    class Worker:
+        def __init__(self, _app, done, task):
+            worker_callbacks.append((done, task))
+
+        def start(self):
+            pass
+
+    selected_overlay = {**OVERLAY, "photo": str(overlay)}
+    fake = SimpleNamespace(
+        _editor_render_active=False,
+        _editor_collect=lambda: ([str(source)], [selected_overlay]),
+        editor_status=Widget(),
+        btn_editor_render=Widget(),
+        db=db,
+    )
+    monkeypatch.setattr(gui_premium_v7.render_performance, "get_render_performance", lambda: performance)
+    monkeypatch.setattr(gui_premium_v7.filedialog, "asksaveasfilename", lambda **_kwargs: str(output))
+    monkeypatch.setattr(gui_premium_v7.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(gui_premium_v7, "WorkerThread", Worker)
+
+    def render(*_args):
+        output.write_bytes(b"rendered")
+        return str(output)
+
+    monkeypatch.setattr(video_editor, "render_video", render)
+
+    InstagramAutoPro.editor_render(fake)
+    done, task = worker_callbacks[0]
+    done(True, task())
+
+    log = db.list_video_transform_logs()[0]
+    assert {item["relation_kind"] for item in db.list_vault_asset_links(log["output_vault_asset_id"])} == {
+        "source", "overlay"
+    }
+    db.close()
 
 
 def test_editor_batch_blocks_repeated_clicks_until_its_worker_finishes(monkeypatch):

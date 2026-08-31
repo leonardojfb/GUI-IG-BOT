@@ -1290,6 +1290,18 @@ class DatabaseManager:
         self.conn.commit()
         return asset
 
+    def find_vault_asset_by_path(self, source_path):
+        abs_path = os.path.abspath(os.fspath(source_path))
+        row = self.conn.execute(
+            "SELECT * FROM vault_assets WHERE source_path=?",
+            (abs_path,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def ensure_vault_asset(self, source_path):
+        existing = self.find_vault_asset_by_path(source_path)
+        return existing if existing else self.upsert_vault_asset(source_path)
+
     def _upsert_vault_asset(self, source_path, display_name=None, tags=None):
         from vault import hash_asset, media_type_for_path
 

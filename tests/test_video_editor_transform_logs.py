@@ -52,3 +52,15 @@ def test_video_editor_completion_can_persist_overlay_details(tmp_path):
     assert row["id"] == log_id
     assert json.loads(row["details_json"])["overlays"][0]["photo_path"] == "x.png"
     db.close()
+
+
+def test_ensure_vault_asset_reuses_an_asset_found_by_path(tmp_path):
+    db = DatabaseManager(str(tmp_path / "organizador.db"))
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source")
+
+    created = db.ensure_vault_asset(source)
+
+    assert db.find_vault_asset_by_path(source)["id"] == created["id"]
+    assert db.ensure_vault_asset(source)["id"] == created["id"]
+    db.close()
