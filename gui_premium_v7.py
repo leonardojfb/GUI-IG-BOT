@@ -5206,7 +5206,7 @@ class InstagramAutoPro(ctk.CTk):
         library.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         library.grid_columnconfigure(0, weight=1)
         library.grid_rowconfigure(2, weight=1)
-        ctk.CTkLabel(library, text="FAMILIAS", font=FONT_OVERLINE, text_color=TEXT_MUTED).grid(
+        ctk.CTkLabel(library, text="FAMILIAS", font=FONT_SMALL, text_color=TEXT_MUTED).grid(
             row=0, column=0, sticky="w", padx=14, pady=(14, 6)
         )
         root_actions = ctk.CTkFrame(library, fg_color="transparent")
@@ -5234,7 +5234,7 @@ class InstagramAutoPro(ctk.CTk):
         self.vault_roots_tree.grid(row=2, column=0, sticky="nsew", padx=10)
         self.vault_roots_tree.bind("<<TreeviewSelect>>", self._on_vault_root_selected)
 
-        ctk.CTkLabel(library, text="COLECCIONES", font=FONT_OVERLINE, text_color=TEXT_MUTED).grid(
+        ctk.CTkLabel(library, text="COLECCIONES", font=FONT_SMALL, text_color=TEXT_MUTED).grid(
             row=3, column=0, sticky="w", padx=14, pady=(14, 6)
         )
         self.vault_collections_tree = ttk.Treeview(
@@ -5294,7 +5294,7 @@ class InstagramAutoPro(ctk.CTk):
         detail.grid(row=0, column=2, sticky="nsew")
         detail.grid_columnconfigure(0, weight=1)
         detail.grid_rowconfigure(1, weight=1)
-        ctk.CTkLabel(detail, text="DETALLE DEL ACTIVO", font=FONT_OVERLINE, text_color=TEXT_MUTED).grid(
+        ctk.CTkLabel(detail, text="DETALLE DEL ACTIVO", font=FONT_SMALL, text_color=TEXT_MUTED).grid(
             row=0, column=0, sticky="w", padx=14, pady=(14, 8)
         )
         self.vault_detail = ctk.CTkTextbox(
