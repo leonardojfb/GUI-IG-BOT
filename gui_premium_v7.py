@@ -5237,6 +5237,20 @@ class InstagramAutoPro(ctk.CTk):
         ctk.CTkLabel(library, text="COLECCIONES", font=FONT_SMALL, text_color=TEXT_MUTED).grid(
             row=3, column=0, sticky="w", padx=14, pady=(14, 6)
         )
+        collection_actions = ctk.CTkFrame(library, fg_color="transparent")
+        collection_actions.grid(row=4, column=0, sticky="ew", padx=10, pady=(0, 8))
+        collection_actions.grid_columnconfigure(0, weight=1)
+        self.vault_collection_name_var = tk.StringVar(value="")
+        ctk.CTkEntry(
+            collection_actions,
+            textvariable=self.vault_collection_name_var,
+            placeholder_text="Nueva coleccion",
+            fg_color=BG_INPUT,
+            border_color=BORDER,
+        ).grid(row=0, column=0, sticky="ew")
+        PrimaryButton(collection_actions, text="+", width=32, command=self.vault_create_collection).grid(
+            row=0, column=1, padx=(6, 0)
+        )
         self.vault_collections_tree = ttk.Treeview(
             library, columns=("name", "assets"), show="headings", height=7, style="Premium.Treeview"
         )
@@ -5244,7 +5258,7 @@ class InstagramAutoPro(ctk.CTk):
         self.vault_collections_tree.heading("assets", text="Activos")
         self.vault_collections_tree.column("name", width=150, anchor="w")
         self.vault_collections_tree.column("assets", width=52, anchor="center")
-        self.vault_collections_tree.grid(row=4, column=0, sticky="ew", padx=10, pady=(0, 12))
+        self.vault_collections_tree.grid(row=5, column=0, sticky="ew", padx=10, pady=(0, 12))
         self.vault_collections_tree.bind("<<TreeviewSelect>>", self._on_vault_collection_selected)
 
         assets = ctk.CTkFrame(body, fg_color="transparent")
@@ -5277,9 +5291,20 @@ class InstagramAutoPro(ctk.CTk):
         PrimaryButton(actions, text="Agregar a familia", command=self.vault_assign_selected_asset).grid(
             row=0, column=3, padx=(8, 0)
         )
+        PrimaryButton(
+            actions,
+            text="Agregar a coleccion",
+            command=self.vault_assign_selected_assets_to_collection,
+        ).grid(row=0, column=4, padx=(8, 0))
 
         columns = ("name", "hash", "type", "outputs", "path")
-        self.vault_tree = ttk.Treeview(assets, columns=columns, show="headings", style="Premium.Treeview")
+        self.vault_tree = ttk.Treeview(
+            assets,
+            columns=columns,
+            show="headings",
+            selectmode="extended",
+            style="Premium.Treeview",
+        )
         for col, label in (("name", "Nombre"), ("hash", "Hash"), ("type", "Tipo"), ("outputs", "Outputs"), ("path", "Ruta")):
             self.vault_tree.heading(col, text=label)
         self.vault_tree.column("name", width=220, anchor="w")
@@ -5354,6 +5379,19 @@ class InstagramAutoPro(ctk.CTk):
         self.vault_root_name_var.set("")
         self.refresh_vault_roots(selected_root_id=root["id"])
 
+    def vault_create_collection(self):
+        name = self.vault_collection_name_var.get().strip()
+        if not name:
+            return messagebox.showwarning("Biblioteca", "Indica un nombre para la coleccion.", parent=self)
+        try:
+            collection = self.db.create_vault_collection(name)
+        except Exception as exc:
+            return messagebox.showwarning("Biblioteca", f"No se pudo crear la coleccion: {exc}", parent=self)
+        self.vault_collection_name_var.set("")
+        self.refresh_vault_roots(selected_collection_id=collection["id"])
+        self.refresh_vault_table()
+        self.refresh_vault_asset_detail()
+
     def vault_assign_selected_asset(self):
         asset_selection = self.vault_tree.selection()
         root_id = self._selected_vault_root_id()
@@ -5375,7 +5413,20 @@ class InstagramAutoPro(ctk.CTk):
         self.refresh_vault_table()
         self.refresh_vault_asset_detail()
 
-    def refresh_vault_roots(self, selected_root_id=None):
+    def vault_assign_selected_assets_to_collection(self):
+        asset_ids = self.vault_tree.selection()
+        collection_id = self._selected_vault_collection_id()
+        if not asset_ids:
+            return messagebox.showwarning("Biblioteca", "Selecciona al menos un activo para agregar.", parent=self)
+        if collection_id is None:
+            return messagebox.showwarning("Biblioteca", "Selecciona una coleccion de destino.", parent=self)
+        for asset_id in asset_ids:
+            self.db.add_asset_to_collection(collection_id, int(asset_id))
+        self.refresh_vault_roots(selected_collection_id=collection_id)
+        self.refresh_vault_table(selected_asset_ids=asset_ids)
+        self.refresh_vault_asset_detail()
+
+    def refresh_vault_roots(self, selected_root_id=None, selected_collection_id=None):
         roots_tree = getattr(self, "vault_roots_tree", None)
         collections_tree = getattr(self, "vault_collections_tree", None)
         if roots_tree is None or collections_tree is None:
@@ -5392,8 +5443,11 @@ class InstagramAutoPro(ctk.CTk):
         if selected_root_id is not None and roots_tree.exists(str(selected_root_id)):
             roots_tree.selection_set(str(selected_root_id))
             roots_tree.focus(str(selected_root_id))
+        if selected_collection_id is not None and collections_tree.exists(str(selected_collection_id)):
+            collections_tree.selection_set(str(selected_collection_id))
+            collections_tree.focus(str(selected_collection_id))
 
-    def refresh_vault_table(self):
+    def refresh_vault_table(self, selected_asset_ids=None):
         tree = getattr(self, "vault_tree", None)
         if tree is None:
             return
@@ -5402,8 +5456,11 @@ class InstagramAutoPro(ctk.CTk):
         search_var = getattr(self, "vault_search_var", None)
         search = search_var.get() if search_var is not None else ""
         collection_id = self._selected_vault_collection_id()
+        root_id = self._selected_vault_root_id()
         if collection_id is not None:
             rows = self.db.list_collection_assets(collection_id)
+        elif root_id is not None:
+            rows = self.db.list_root_assets(root_id)
         else:
             rows = self.db.list_vault_assets(search)
         for row in rows:
@@ -5423,6 +5480,11 @@ class InstagramAutoPro(ctk.CTk):
                     row["source_path"],
                 ),
             )
+        selected_asset_ids = [str(asset_id) for asset_id in (selected_asset_ids or ())]
+        visible_asset_ids = [asset_id for asset_id in selected_asset_ids if tree.exists(asset_id)]
+        if visible_asset_ids:
+            tree.selection_set(visible_asset_ids)
+            tree.focus(visible_asset_ids[0])
 
     def refresh_vault_history(self):
         self.refresh_vault_asset_detail()

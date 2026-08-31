@@ -54,6 +54,27 @@ def test_biblioteca_exposes_import_roots_collections_and_asset_detail():
         assert token in source
 
 
+def test_biblioteca_filters_assets_by_selected_family_through_database_api():
+    table = _source("refresh_vault_table")
+
+    assert "root_id = self._selected_vault_root_id()" in table
+    assert "self.db.list_root_assets(root_id)" in table
+
+
+def test_biblioteca_makes_collections_creatable_and_assignable_without_file_moves():
+    frame = _source("_build_vault_frame")
+    create = _source("vault_create_collection")
+    assign = _source("vault_assign_selected_assets_to_collection")
+
+    assert "self.vault_collection_name_var" in frame
+    assert "Nueva coleccion" in frame
+    assert "Agregar a coleccion" in frame
+    assert "self.db.create_vault_collection(name)" in create
+    assert "self.db.add_asset_to_collection(collection_id, int(asset_id))" in assign
+    assert "Selecciona una coleccion de destino." in assign
+    assert "self.refresh_vault_asset_detail()" in assign
+
+
 def test_forge_uses_vault_selection_controls():
     forge = _source("_build_forge_frame")
     add = _source("forge_add_videos")
