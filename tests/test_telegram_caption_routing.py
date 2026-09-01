@@ -123,3 +123,69 @@ def test_scan_calendar_structure_uses_manifest_when_present(tmp_path, monkeypatc
     assert rows[0]["username"] == "alice"
     assert rows[0]["delivery_kind"] == "normal"
     assert rows[0]["category"] == "promo"
+
+
+def test_scan_calendar_structure_ignores_manual_publication_targets(tmp_path, monkeypatch):
+    video = tmp_path / "videos_finales" / "T1" / "clip.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"manifest")
+    entries = [
+        build_entry(
+            "alice",
+            1,
+            "normal",
+            1,
+            1,
+            "T1",
+            str(video),
+            "clip__TANDA_T1__ACC1__D1__S1.mp4",
+        ),
+        build_entry(
+            "alice",
+            1,
+            "normal",
+            1,
+            2,
+            "T1",
+            str(video),
+            "story.mp4",
+            publication_target="instagram_story",
+            story_link_url="https://link.ejemplo/alice",
+            story_announcement_text="Mira el enlace",
+        ),
+        build_entry(
+            "alice",
+            1,
+            "normal",
+            1,
+            3,
+            "T1",
+            str(video),
+            "facebook.mp4",
+            publication_target="facebook_page_post",
+        ),
+    ]
+    replace_entries(tmp_path / "calendar_manifest.json", entries, {"alice"}, "normal")
+
+    monkeypatch.setattr(organizadortg, "base_dir", str(tmp_path), raising=False)
+    monkeypatch.setattr(
+        organizadortg,
+        "input_root",
+        str(tmp_path / "CALENDARIO_POSTEO"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        organizadortg,
+        "trial_input_root",
+        str(tmp_path / "CALENDARIO_TRIALS"),
+        raising=False,
+    )
+    monkeypatch.setattr(organizadortg, "get_accounts_with_va_info", lambda: [
+        {"username": "alice", "account_type": "promo", "trials_active": False},
+    ])
+
+    rows = organizadortg.scan_calendar_structure()
+
+    assert len(rows) == 1
+    assert rows[0]["filename"] == "clip__TANDA_T1__ACC1__D1__S1.mp4"
+    assert rows[0]["publication_target"] == "instagram_reel"
