@@ -294,7 +294,7 @@ def test_forge_logs_exact_variant_params_after_success(tmp_path):
     db.close()
 
 
-def test_forge_variant_prefers_nvenc_and_falls_back_to_cpu_thread_budget(monkeypatch):
+def test_forge_variant_uses_high_profile_libx264_and_strips_ffmpeg_encoder_tags(monkeypatch):
     params = {
         "crop_px": 2,
         "mirror": False,
@@ -314,7 +314,7 @@ def test_forge_variant_prefers_nvenc_and_falls_back_to_cpu_thread_budget(monkeyp
     monkeypatch.setattr(metadata_pool, "generate_variant_params", lambda *_args, **_kwargs: params)
     def run(command, **_kwargs):
         commands.append(command)
-        return SimpleNamespace(returncode=0 if len(commands) == 2 else 1, stderr=b"nvenc failed")
+        return SimpleNamespace(returncode=0, stderr=b"")
 
     monkeypatch.setattr(metadata_pool.subprocess, "run", run)
 
@@ -331,10 +331,23 @@ def test_forge_variant_prefers_nvenc_and_falls_back_to_cpu_thread_budget(monkeyp
         ffmpeg_threads=3,
     )
 
-    assert commands[0][commands[0].index("-c:v") + 1] == "h264_nvenc"
-    assert commands[1][commands[1].index("-c:v") + 1] == "libx264"
+    assert len(commands) == 1
+    assert commands[0][commands[0].index("-c:v") + 1] == "libx264"
+    assert "h264_nvenc" not in commands[0]
+    assert ["-profile:v", "high"] in [
+        commands[0][index:index + 2] for index in range(len(commands[0]) - 1)
+    ]
     assert ["-threads", "3"] in [
-        commands[1][index:index + 2] for index in range(len(commands[1]) - 1)
+        commands[0][index:index + 2] for index in range(len(commands[0]) - 1)
+    ]
+    assert ["-map_metadata", "-1"] in [
+        commands[0][index:index + 2] for index in range(len(commands[0]) - 1)
+    ]
+    assert ["-metadata", "encoder="] in [
+        commands[0][index:index + 2] for index in range(len(commands[0]) - 1)
+    ]
+    assert ["-metadata:s:v:0", "encoder="] in [
+        commands[0][index:index + 2] for index in range(len(commands[0]) - 1)
     ]
 
 

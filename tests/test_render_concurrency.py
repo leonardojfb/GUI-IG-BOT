@@ -29,21 +29,35 @@ def _video_codec(command):
         return None
 
 
-def test_cpu_tanda_fallback_uses_the_snapshot_thread_budget(monkeypatch, tmp_path):
+def test_tanda_render_uses_high_profile_libx264_and_strips_ffmpeg_encoder_tags(monkeypatch, tmp_path):
     commands = []
     monkeypatch.setattr(videos, "get_audio", lambda _path: True)
 
     def run(command, **_kwargs):
         commands.append(command)
-        return SimpleNamespace(returncode=0 if len(commands) == 3 else 1, stderr="")
+        return SimpleNamespace(returncode=0, stderr="")
 
     monkeypatch.setattr(videos.subprocess, "run", run)
 
     videos.render_video_pair("p1.mp4", "p2.mp4", str(tmp_path / "out.mp4"), "T", "P1", "P2", ffmpeg_threads=3)
 
-    assert not _contains_threads(commands[0], 3)
-    assert not _contains_threads(commands[1], 3)
-    assert _contains_threads(commands[2], 3)
+    assert len(commands) == 1
+    assert _video_codec(commands[0]) == "libx264"
+    assert "h264_nvenc" not in commands[0]
+    assert "h264_qsv" not in commands[0]
+    assert _contains_threads(commands[0], 3)
+    assert ["-profile:v", "high"] in [
+        commands[0][index:index + 2] for index in range(len(commands[0]) - 1)
+    ]
+    assert ["-map_metadata", "-1"] in [
+        commands[0][index:index + 2] for index in range(len(commands[0]) - 1)
+    ]
+    assert ["-metadata", "encoder="] in [
+        commands[0][index:index + 2] for index in range(len(commands[0]) - 1)
+    ]
+    assert ["-metadata:s:v:0", "encoder="] in [
+        commands[0][index:index + 2] for index in range(len(commands[0]) - 1)
+    ]
 
 
 def test_all_tanda_encoders_raise_a_source_and_output_specific_error(monkeypatch, tmp_path):
@@ -103,21 +117,34 @@ def test_tanda_future_failure_prevents_a_success_result(monkeypatch, tmp_path):
     assert database.closed is True
 
 
-def test_editor_prefers_nvenc_and_falls_back_to_cpu_thread_budget(monkeypatch):
+def test_editor_uses_high_profile_libx264_and_strips_ffmpeg_encoder_tags(monkeypatch):
     monkeypatch.setattr(video_editor, "probe_video", lambda _path: {"duration": 1.0, "width": 100, "height": 100, "fps": 30})
     captured = []
 
     def run(command):
         captured.append(command)
-        return SimpleNamespace(returncode=0 if len(captured) == 2 else 1, stderr="nvenc failed")
+        return SimpleNamespace(returncode=0, stderr="")
 
     monkeypatch.setattr(video_editor, "_run", run)
 
     video_editor.render_video("source.mp4", "out.mp4", [OVERLAY], ffmpeg_threads=2)
 
-    assert [_video_codec(command) for command in captured] == ["h264_nvenc", "libx264"]
-    assert not _contains_threads(captured[0], 2)
-    assert _contains_threads(captured[1], 2)
+    assert len(captured) == 1
+    assert _video_codec(captured[0]) == "libx264"
+    assert "h264_nvenc" not in captured[0]
+    assert _contains_threads(captured[0], 2)
+    assert ["-profile:v", "high"] in [
+        captured[0][index:index + 2] for index in range(len(captured[0]) - 1)
+    ]
+    assert ["-map_metadata", "-1"] in [
+        captured[0][index:index + 2] for index in range(len(captured[0]) - 1)
+    ]
+    assert ["-metadata", "encoder="] in [
+        captured[0][index:index + 2] for index in range(len(captured[0]) - 1)
+    ]
+    assert ["-metadata:s:v:0", "encoder="] in [
+        captured[0][index:index + 2] for index in range(len(captured[0]) - 1)
+    ]
 
 
 def test_tandas_use_one_snapshot_for_workers_and_cpu_thread_budget(monkeypatch, tmp_path):

@@ -14,6 +14,16 @@ from pathlib import Path
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 EXTERNAL_PROCESS_TIMEOUT_SECONDS = 300
+FFMPEG_METADATA_CLEAN_ARGS = [
+    "-map_metadata", "-1",
+    "-map_chapters", "-1",
+    "-metadata", "encoder=",
+    "-metadata:s:v:0", "encoder=",
+    "-metadata:s:a:0", "encoder=",
+    "-fflags", "+bitexact",
+    "-flags:v", "+bitexact",
+    "-flags:a", "+bitexact",
+]
 
 
 def _ffmpeg_tool_command(tool_name: str) -> str:
@@ -166,12 +176,14 @@ def render_video(input_path: str, output_path: str, overlays: list[dict], ffmpeg
         "-filter_complex", ";".join(filters), "-map", f"[v{len(overlays)}]", "-map", "0:a?",
     ]
     encoder_attempts = [
-        ["-c:v", "h264_nvenc", "-preset", "p4", "-cq:v", "20", "-pix_fmt", "yuv420p"],
-        ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p"],
+        ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-profile:v", "high", "-pix_fmt", "yuv420p"],
     ]
     last_stderr = ""
     for encoder_args in encoder_attempts:
-        cmd = base_cmd + common_args + encoder_args + ["-c:a", "aac", "-b:a", "192k"]
+        cmd = base_cmd + common_args + encoder_args + [
+            "-c:a", "aac", "-b:a", "192k",
+            *FFMPEG_METADATA_CLEAN_ARGS,
+        ]
         if ffmpeg_threads and "libx264" in encoder_args:
             cmd += ["-threads", str(ffmpeg_threads)]
         cmd += ["-t", f"{info['duration']:.6f}", output_path]

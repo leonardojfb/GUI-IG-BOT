@@ -21,6 +21,16 @@ from pathlib import Path
 # means hundreds of flashing consoles that freeze the machine. Suppress it.
 # 0 on non-Windows platforms, where CREATE_NO_WINDOW does not exist.
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+FFMPEG_METADATA_CLEAN_ARGS = [
+    "-map_metadata", "-1",
+    "-map_chapters", "-1",
+    "-metadata", "encoder=",
+    "-metadata:s:v:0", "encoder=",
+    "-metadata:s:a:0", "encoder=",
+    "-fflags", "+bitexact",
+    "-flags:v", "+bitexact",
+    "-flags:a", "+bitexact",
+]
 
 
 def _ffmpeg_tool_command(tool_name: str) -> str:
@@ -223,6 +233,7 @@ def apply_metadata_to_video(input_path: str, output_path: str, meta: dict) -> No
     cmd = [
         _ffmpeg_tool_command("ffmpeg"), "-y", "-i", input_path,
         "-c", "copy",
+        *FFMPEG_METADATA_CLEAN_ARGS,
         "-movflags", "use_metadata_tags",
         "-metadata", "make=Apple",
         "-metadata", f"model={meta['iphone_model']}",
@@ -498,6 +509,7 @@ def apply_variant_and_metadata(
         common_args += ["-af", af]
     metadata_args = [
         "-c:a", "aac", "-b:a", "128k",
+        *FFMPEG_METADATA_CLEAN_ARGS,
         "-movflags", "use_metadata_tags",
         "-metadata", "make=Apple",
         "-metadata", f"model={meta['iphone_model']}",
@@ -508,8 +520,7 @@ def apply_variant_and_metadata(
         output_path,
     ]
     encoder_attempts = [
-        ["-c:v", "h264_nvenc", "-preset", "p4", "-cq:v", "20", "-pix_fmt", "yuv420p"],
-        ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"],
+        ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-profile:v", "high", "-pix_fmt", "yuv420p"],
     ]
     last_stderr = b""
     for encoder_args in encoder_attempts:

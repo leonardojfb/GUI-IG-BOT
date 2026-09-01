@@ -24,6 +24,16 @@ LAT, LON = "+34.0522", "-118.2437"
 # Windows: suppress the console window each ffmpeg/ffprobe child would otherwise
 # pop (the GUI runs windowless). 0 on non-Windows, where the flag doesn't exist.
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+FFMPEG_METADATA_CLEAN_ARGS = [
+    "-map_metadata", "-1",
+    "-map_chapters", "-1",
+    "-metadata", "encoder=",
+    "-metadata:s:v:0", "encoder=",
+    "-metadata:s:a:0", "encoder=",
+    "-fflags", "+bitexact",
+    "-flags:v", "+bitexact",
+    "-flags:a", "+bitexact",
+]
 
 
 def _ffmpeg_tool_command(tool_name):
@@ -278,9 +288,11 @@ def render_video_pair(path_v1, path_v2, out_path, cat, p1_id, p2_id, ffmpeg_thre
     name_out = os.path.basename(out_path)
 
     encoders = [
-        ('GPU NVIDIA (h264_nvenc)', ['-hwaccel', 'cuda'], ['-c:v', 'h264_nvenc', '-preset', 'p4', '-cq:v', '20']),
-        ('Intel QSV (h264_qsv)',    [],                   ['-c:v', 'h264_qsv', '-global_quality', '23']),
-        ('CPU (libx264 fast)',      [],                   ['-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-threads', str(ffmpeg_threads or 4)]),
+        ('CPU (libx264 high)', [], [
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+            '-profile:v', 'high', '-pix_fmt', 'yuv420p',
+            '-threads', str(ffmpeg_threads or 4),
+        ]),
     ]
 
     last_stderr = ""
@@ -295,6 +307,7 @@ def render_video_pair(path_v1, path_v2, out_path, cat, p1_id, p2_id, ffmpeg_thre
                '-filter_complex', filter_complex,
                '-map', '[outv]', '-map', '[outa]']
             + codec_args
+            + FFMPEG_METADATA_CLEAN_ARGS
             + ['-metadata', 'make=Apple',
                '-metadata', 'model=iPhone 15 Pro',
                '-metadata', f'location={LAT}{LON}/',
