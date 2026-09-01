@@ -6,6 +6,8 @@ import sqlite3
 import os
 import json
 
+from social_publishing import normalize_story_link_base, resolve_story_link
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "organizador.db")
 
@@ -123,6 +125,12 @@ CREATE TABLE IF NOT EXISTS video_transform_logs (
 
 CREATE INDEX IF NOT EXISTS idx_video_transform_logs_process_created
 ON video_transform_logs(process_kind, created_at);
+
+CREATE TABLE IF NOT EXISTS social_publishing_settings (
+    setting_key TEXT PRIMARY KEY,
+    setting_value TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 class DatabaseManager:
@@ -190,6 +198,8 @@ class DatabaseManager:
             "ALTER TABLE virtual_accounts ADD COLUMN social_network TEXT DEFAULT ''",
             "ALTER TABLE virtual_accounts ADD COLUMN vpn_proxy TEXT DEFAULT ''",
             "ALTER TABLE virtual_accounts ADD COLUMN account_link TEXT DEFAULT ''",
+            "ALTER TABLE virtual_accounts ADD COLUMN story_link_override_enabled INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE virtual_accounts ADD COLUMN story_link_override TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE virtual_assistants ADD COLUMN timezone TEXT DEFAULT 'America/Argentina/Buenos_Aires'",
         ]
         cur = self.conn.cursor()
@@ -293,6 +303,66 @@ class DatabaseManager:
         cur = self.conn.cursor()
         cur.execute("SELECT * FROM virtual_accounts ORDER BY account_type, username")
         return [dict(row) for row in cur.fetchall()]
+
+    def get_story_link_base_url(self):
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT setting_value FROM social_publishing_settings "
+            "WHERE setting_key = ?",
+            ("story_link_base_url",),
+        )
+        row = cur.fetchone()
+        return row["setting_value"] if row else ""
+
+    def set_story_link_base_url(self, value):
+        normalized = normalize_story_link_base(value)
+        cur = self.conn.cursor()
+        cur.execute(
+            "INSERT INTO social_publishing_settings (setting_key, setting_value) "
+            "VALUES (?, ?) "
+            "ON CONFLICT(setting_key) DO UPDATE SET "
+            "setting_value=excluded.setting_value, updated_at=CURRENT_TIMESTAMP",
+            ("story_link_base_url", normalized),
+        )
+        self.conn.commit()
+        return normalized
+
+    def set_story_link_override(self, username, enabled, value=""):
+        override_enabled = bool(enabled)
+        override_url = ""
+        if override_enabled:
+            override_url = resolve_story_link(
+                "",
+                username,
+                override_enabled=True,
+                override_url=value,
+            )
+        cur = self.conn.cursor()
+        cur.execute(
+            "UPDATE virtual_accounts "
+            "SET story_link_override_enabled = ?, story_link_override = ? "
+            "WHERE username = ?",
+            (int(override_enabled), override_url, username),
+        )
+        self.conn.commit()
+        return bool(cur.rowcount)
+
+    def resolve_story_link_for_account(self, username):
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT username, story_link_override_enabled, story_link_override "
+            "FROM virtual_accounts WHERE username = ?",
+            (username,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return ""
+        return resolve_story_link(
+            self.get_story_link_base_url(),
+            row["username"],
+            bool(row["story_link_override_enabled"]),
+            row["story_link_override"],
+        )
 
     def set_account_trials_active(self, username: str, active: bool) -> bool:
         cur = self.conn.cursor()
