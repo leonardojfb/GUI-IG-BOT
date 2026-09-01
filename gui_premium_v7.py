@@ -10,6 +10,7 @@ import customtkinter as ctk
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 import os
+import math
 import random
 import time
 import threading
@@ -2654,6 +2655,7 @@ class InstagramAutoPro(ctk.CTk):
         "2 semanas": 14,
         "3 semanas": 21,
         "1 mes": 30,
+        "MAX": None,
     }
 
     def _build_logistica_caption_controls(
@@ -3292,7 +3294,11 @@ class InstagramAutoPro(ctk.CTk):
             vpd = int(self.acct_dist_vpd.get())
         except ValueError:
             vpd = 0
-        days = self.PERIOD_DAYS.get(self.acct_dist_period.get(), 7)
+        period_str = self.acct_dist_period.get()
+        if str(period_str).strip().upper() == "MAX":
+            self.acct_dist_total_lbl.configure(text="= MAX según tanda")
+            return
+        days = self.PERIOD_DAYS.get(period_str, 7)
         total = vpd * days
         self.acct_dist_total_lbl.configure(text=f"= {total} videos/cuenta")
 
@@ -3333,8 +3339,9 @@ class InstagramAutoPro(ctk.CTk):
             messagebox.showerror("Error", "Videos al día debe ser un número positivo")
             return
         period_str = self.acct_dist_period.get()
+        max_period = str(period_str).strip().upper() == "MAX"
         days = self.PERIOD_DAYS.get(period_str, 7)
-        n = vpd * days
+        n = None if max_period else vpd * days
 
         folder = os.path.join(_BASE_DIR, "videos_finales", tanda)
 
@@ -3354,6 +3361,7 @@ class InstagramAutoPro(ctk.CTk):
                         return
 
         def task():
+            nonlocal days, n
             import re
             from Organizador import build_calendar_video_filename
 
@@ -3368,7 +3376,17 @@ class InstagramAutoPro(ctk.CTk):
             if not all_vids:
                 raise ValueError("No se encontraron videos en la carpeta")
 
-            needed = len(accounts) * vpd * days
+            if max_period:
+                n = len(all_vids) // len(accounts)
+                if n < 1:
+                    raise ValueError(
+                        f"No hay suficientes videos ({len(all_vids)}) para "
+                        f"{len(accounts)} cuentas. MAX necesita al menos 1 video por cuenta."
+                    )
+                days = math.ceil(n / vpd)
+                needed = n * len(accounts)
+            else:
+                needed = len(accounts) * vpd * days
             if len(all_vids) < needed:
                 raise ValueError(
                     f"No hay suficientes videos ({len(all_vids)}) para "
@@ -3397,8 +3415,9 @@ class InstagramAutoPro(ctk.CTk):
 
             for day_idx in range(days):
                 day_vid_ids_used = set()
+                slots_today = min(vpd, max(0, n - (day_idx * vpd)))
 
-                for slot in range(vpd):
+                for slot in range(slots_today):
                     slot_vid_ids_used = set()
                     accs_shuffled = accounts[:]
                     random.shuffle(accs_shuffled)
@@ -3440,11 +3459,14 @@ class InstagramAutoPro(ctk.CTk):
 
             lines = []
             label = "👁️  PREVISUALIZACIÓN" if preview_only else "🚀  EJECUTANDO"
-            total_per_acc = vpd * days
+            total_per_acc = n
+            period_detail = f"{days} días × {vpd} videos/día = {total_per_acc}/cuenta"
+            if max_period and total_per_acc % vpd:
+                period_detail = f"{total_per_acc}/cuenta en {days} días (último día parcial)"
             lines += [label, "=" * 60,
                       f"📦  Tanda      : {tanda}",
                       f"📦  Pool total  : {len(all_vids)} videos en carpeta",
-                      f"📅  Período     : {period_str}  ({days} días × {vpd} videos/día = {total_per_acc}/cuenta)",
+                      f"📅  Período     : {period_str}  ({period_detail})",
                       f"🛡️  Antichoque  : vid_id único por cuenta/día activo",
                       f"👥  Cuentas    : {len(plan)}", ""]
 

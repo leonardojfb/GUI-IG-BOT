@@ -191,3 +191,68 @@ def test_por_cuentas_distributes_manual_cross_category_accounts_without_mixing(t
             )
     finally:
         cleanup()
+
+
+def test_por_cuentas_max_period_uses_all_complete_account_rounds(tmp_path, monkeypatch):
+    app, cleanup = _make_app()
+    try:
+        import Organizador
+        import gui_premium_v7 as gui
+
+        base_dir = str(tmp_path)
+        monkeypatch.setattr(Organizador, "output_root", os.path.join(base_dir, "CALENDARIO_POSTEO"))
+        monkeypatch.setattr(gui, "_BASE_DIR", base_dir)
+        monkeypatch.setattr(gui, "_ACCT_HIST_FILE", os.path.join(base_dir, "acct_hist.json"))
+        monkeypatch.setattr(gui, "WorkerThread", _SyncWorkerThread)
+        monkeypatch.setattr(gui.messagebox, "showinfo", lambda *a, **k: None)
+        monkeypatch.setattr(gui.messagebox, "showerror", lambda *a, **k: None)
+        monkeypatch.setattr(gui.messagebox, "showwarning", lambda *a, **k: None)
+        monkeypatch.setattr(gui.messagebox, "askyesno", lambda *a, **k: True)
+
+        app.db.add_category("PC_MAX_CAT")
+        app.db.add_va("PC_MAX_VA")
+        app.db.add_virtual_account("pc_max_a", "PC_MAX_CAT")
+        app.db.update_account("pc_max_a", assigned_va="PC_MAX_VA")
+        app.db.add_virtual_account("pc_max_b", "PC_MAX_CAT")
+        app.db.update_account("pc_max_b", assigned_va="PC_MAX_VA")
+
+        tanda_name = "PC_MAX_SRC"
+        tanda_dir = os.path.join(base_dir, "videos_finales", tanda_name)
+        os.makedirs(tanda_dir, exist_ok=True)
+        for i in range(1, 11):
+            with open(os.path.join(tanda_dir, f"PC_MAX__SRC{i:02d}__P2.mp4"), "wb") as fh:
+                fh.write(f"fake-video-{i}".encode())
+        app.db.add_tanda(tanda_name, tanda_name, tanda_name, "")
+
+        app.reload_dist_lists()
+        assert "MAX" in app.acct_dist_period.cget("values")
+        app.acct_dist_tanda.set(tanda_name)
+        app.acct_dist_list.delete("1.0", "end")
+        app.acct_dist_list.insert("end", "pc_max_a\npc_max_b\n")
+        app.acct_dist_vpd.set(3)
+        app.acct_dist_period.set("MAX")
+
+        app._acct_dist_run(preview_only=False)
+
+        result_text = app.acct_dist_result.get("1.0", "end")
+        assert "Error" not in result_text, result_text
+        assert "MAX" in result_text
+        assert "Dia_1" in result_text and "Dia_2" in result_text
+
+        manifest_path = Path(base_dir) / "calendar_manifest.json"
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        produced = [
+            row for row in payload["entries"]
+            if row["delivery_kind"] == "normal" and row["username"] in {"pc_max_a", "pc_max_b"}
+        ]
+
+        assert len(produced) == 10
+        assert {row["username"] for row in produced} == {"pc_max_a", "pc_max_b"}
+        assert {row["day"] for row in produced} == {1, 2}
+        assert sum(1 for row in produced if row["username"] == "pc_max_a") == 5
+        assert sum(1 for row in produced if row["username"] == "pc_max_b") == 5
+        for username in {"pc_max_a", "pc_max_b"}:
+            assert sum(1 for row in produced if row["username"] == username and row["day"] == 1) == 3
+            assert sum(1 for row in produced if row["username"] == username and row["day"] == 2) == 2
+    finally:
+        cleanup()
