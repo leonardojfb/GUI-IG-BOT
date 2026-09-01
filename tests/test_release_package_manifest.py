@@ -27,6 +27,8 @@ LEGACY_UPDATEABLE_FILES = {
     "render_performance.py",
     "metadata_pool.py",
     "vault.py",
+    "vault_usage.py",
+    "content_crm.py",
     "telegram_core.py",
     "cleaner.py",
     "vercuentas.py",

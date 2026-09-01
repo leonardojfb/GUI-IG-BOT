@@ -41,6 +41,8 @@ $ReleaseFiles = @(
     "render_performance.py",
     "metadata_pool.py",
     "vault.py",
+    "vault_usage.py",
+    "content_crm.py",
     "trial_content.py",
     "calendar_manifest.py",
     "telegram_core.py",
