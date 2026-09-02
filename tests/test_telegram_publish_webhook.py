@@ -67,6 +67,36 @@ def test_secret_header_rejects_wrong_token():
     assert webhook.is_authorized({}, "") is True
 
 
+def test_get_accounts_normalizes_telegram_chat_id_labels(monkeypatch):
+    import organizadortg
+
+    class Cursor:
+        def execute(self, *_args):
+            return None
+
+        def fetchone(self):
+            return {"tg_group_id": "ID: -1003749971714", "timezone": "America/New_York"}
+
+    class Conn:
+        def cursor(self):
+            return Cursor()
+
+    class FakeDb:
+        conn = Conn()
+
+        def get_all_accounts(self):
+            return [{"username": "aaa", "account_type": "2222", "assigned_va": "VA1"}]
+
+        def get_vas(self):
+            return []
+
+    monkeypatch.setattr(organizadortg, "db", FakeDb())
+
+    [account] = organizadortg.get_accounts_with_va_info()
+
+    assert account["tg_group_id"] == "-1003749971714"
+
+
 def test_send_document_attaches_publish_button(monkeypatch, tmp_path):
     import organizadortg
 

@@ -119,6 +119,12 @@ def _publish_button_markup():
     return {"inline_keyboard": [[{"text": "publicado", "callback_data": PUBLISH_CALLBACK_DATA}]]}
 
 
+def normalize_telegram_chat_id(value):
+    text = str(value or "").strip()
+    match = re.search(r"-?\d+", text)
+    return match.group(0) if match else text
+
+
 def _calendar_manifest_file():
     return manifest_path(base_dir)
 
@@ -525,7 +531,7 @@ def get_accounts_with_va_info():
             cur.execute("SELECT tg_group_id, timezone FROM virtual_assistants WHERE name = ?", (va_name,))
             row = cur.fetchone()
             if row:
-                if row['tg_group_id']: tg_group_id = row['tg_group_id']
+                if row['tg_group_id']: tg_group_id = normalize_telegram_chat_id(row['tg_group_id'])
                 if 'timezone' in row.keys() and row['timezone']:
                     va_timezone = row['timezone']
         result.append({
