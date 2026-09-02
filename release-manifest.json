@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.37",
+    "version":  "1.0.38",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.37",
-    "asset_name":  "MetodoIG-v1.0.37.zip",
-    "sha256":  "5d2b1d4a4e06a587ce3df7a510bc4ce7502ff5514454368a8422c51a6833b367",
-    "notes":  "Logistica Por Cuentas: agrega periodo MAX para usar el maximo balanceado de la tanda por cuentas seleccionadas, incluyendo ultimo dia parcial cuando aplique.",
+    "github_release_tag":  "v1.0.38",
+    "asset_name":  "MetodoIG-v1.0.38.zip",
+    "sha256":  "9912941cf50e8ab02b8c923f10b4e81e78b25f3ffd97da65726522006a5a1f0e",
+    "notes":  "Telegram: envia videos como media normal con supports_streaming, conserva botones Publicado/Copiar caption y copia metadata al comprimir cuando Telegram obliga por limite de tamano.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",
