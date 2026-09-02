@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -46,6 +47,30 @@ def _published_markup() -> dict:
     }
 
 
+def _remove_publish_buttons(reply_markup: dict | None) -> dict | None:
+    keyboard = []
+    for row in (reply_markup or {}).get("inline_keyboard") or []:
+        kept = [
+            button for button in row
+            if button.get("callback_data") not in {PENDING_CALLBACK, PUBLISHED_CALLBACK}
+        ]
+        if kept:
+            keyboard.append(kept)
+    if not keyboard:
+        return None
+    return {"inline_keyboard": keyboard}
+
+
+def _mark_caption_published(caption: str) -> str:
+    caption = str(caption or "").rstrip()
+    marker = "✅ Ya publicado"
+    if marker in caption:
+        return caption
+    if caption:
+        return f"{caption}\n\n{marker}"
+    return marker
+
+
 def handle_update(update: dict, token: str) -> dict:
     callback = update.get("callback_query")
     if not callback:
@@ -77,16 +102,41 @@ def handle_update(update: dict, token: str) -> dict:
     if chat_id is None or message_id is None:
         return {"ok": True, "handled": False}
 
-    post_telegram_method(
-        token,
-        "editMessageReplyMarkup",
-        {
+    remaining_markup = _remove_publish_buttons(message.get("reply_markup"))
+    caption = message.get("caption")
+    if caption is not None:
+        payload = {
             "chat_id": chat_id,
             "message_id": message_id,
-            "reply_markup": _published_markup(),
-        },
-    )
+            "caption": _mark_caption_published(caption),
+        }
+        if remaining_markup:
+            payload["reply_markup"] = remaining_markup
+        post_telegram_method(token, "editMessageCaption", payload)
+    else:
+        payload = {"chat_id": chat_id, "message_id": message_id}
+        if remaining_markup:
+            payload["reply_markup"] = remaining_markup
+        post_telegram_method(token, "editMessageReplyMarkup", payload)
     return {"ok": True, "handled": True}
+
+
+def download_file(token: str, file_id: str) -> tuple[int, dict, bytes]:
+    file_info = post_telegram_method(token, "getFile", {"file_id": file_id})
+    if not file_info.get("ok"):
+        return 502, {"Content-Type": "application/json"}, json.dumps(file_info).encode("utf-8")
+    file_path = (file_info.get("result") or {}).get("file_path")
+    if not file_path:
+        return 404, {"Content-Type": "application/json"}, b'{"ok": false, "error": "file_not_found"}'
+
+    url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+    with urllib.request.urlopen(urllib.request.Request(url), timeout=30) as response:
+        body = response.read()
+        headers = {
+            "Content-Type": response.headers.get("Content-Type", "application/octet-stream"),
+            "Content-Disposition": f'attachment; filename="{os.path.basename(file_path)}"',
+        }
+        return 200, headers, body
 
 
 class TelegramCallbackHandler(BaseHTTPRequestHandler):
@@ -95,6 +145,21 @@ class TelegramCallbackHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path in ("/", "/health"):
             self._send_json(200, {"ok": True})
+            return
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/telegram/download":
+            token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+            file_id = (urllib.parse.parse_qs(parsed.query).get("file_id") or [""])[0]
+            if not token or not file_id:
+                self._send_json(400, {"ok": False, "error": "missing_file"})
+                return
+            try:
+                status, headers, body = download_file(token, file_id)
+            except Exception as exc:
+                print(f"download error: {exc}", file=sys.stderr, flush=True)
+                self._send_json(500, {"ok": False, "error": "download_failed"})
+                return
+            self._send_bytes(status, headers, body)
             return
         self._send_json(404, {"ok": False, "error": "not_found"})
 
@@ -127,8 +192,12 @@ class TelegramCallbackHandler(BaseHTTPRequestHandler):
 
     def _send_json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload).encode("utf-8")
+        self._send_bytes(status, {"Content-Type": "application/json"}, body)
+
+    def _send_bytes(self, status: int, headers: dict, body: bytes) -> None:
         self.send_response(status)
-        self.send_header("Content-Type", "application/json")
+        for key, value in headers.items():
+            self.send_header(key, value)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

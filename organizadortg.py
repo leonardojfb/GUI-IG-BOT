@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -107,6 +108,10 @@ HISTORY_FILE = "fingerprint_history.json"
 ADMIN_TOPIC_NAME = "Admin"
 TRIAL_TOPIC_PREFIX = "TRIALS - "
 PUBLISH_CALLBACK_DATA = "pub"
+TELEGRAM_DOWNLOAD_BASE_URL = os.environ.get(
+    "TELEGRAM_DOWNLOAD_BASE_URL",
+    "https://telegram-publish-webhook-production.up.railway.app/telegram/download",
+)
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
 input_root = os.path.join(base_dir, "CALENDARIO_POSTEO")
@@ -115,11 +120,35 @@ trial_input_root = os.path.join(base_dir, "CALENDARIO_TRIALS")
 db = DatabaseManager()
 
 
-def _publish_button_markup(caption=None):
+def _download_url_for_file_id(file_id):
+    return f"{TELEGRAM_DOWNLOAD_BASE_URL}?file_id={urllib.parse.quote(str(file_id), safe='')}"
+
+
+def _publish_button_markup(caption=None, download_url=None):
     buttons = [{"text": "✅ Publicado", "callback_data": PUBLISH_CALLBACK_DATA}]
     if caption:
         buttons.append({"text": "📋 Copiar caption", "copy_text": {"text": str(caption)}})
-    return {"inline_keyboard": [buttons]}
+    keyboard = [buttons]
+    if download_url:
+        keyboard.append([{"text": "⬇️ Descargar documento", "url": str(download_url)}])
+    return {"inline_keyboard": keyboard}
+
+
+def _attach_download_button(chat_id, message_id, caption, file_id):
+    if not message_id or not file_id:
+        return
+    call_tg(
+        "editMessageReplyMarkup",
+        {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "reply_markup": _publish_button_markup(
+                caption,
+                download_url=_download_url_for_file_id(file_id),
+            ),
+        },
+        silent=True,
+    )
 
 
 def normalize_telegram_chat_id(value):
@@ -754,7 +783,7 @@ def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, usern
             }
             if caption:
                 payload['caption'] = caption
-            document_name = os.path.basename(os.fspath(active_path)) or os.path.basename(os.fspath(video_path))
+            document_name = os.path.basename(os.fspath(video_path)) or os.path.basename(os.fspath(active_path))
             with open(active_path, 'rb') as fv:
                 r = requests.post(
                     f"https://api.telegram.org/bot{TOKEN}/sendDocument",
@@ -762,6 +791,18 @@ def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, usern
                     files={'document': (document_name, fv, 'application/octet-stream')}
                 )
             if r.status_code == 200:
+                try:
+                    sent = r.json()
+                    result = sent.get("result") or {}
+                    document = result.get("document") or {}
+                    _attach_download_button(
+                        chat_id,
+                        result.get("message_id"),
+                        caption,
+                        document.get("file_id"),
+                    )
+                except Exception as exc:
+                    print(f"⚠️ No se pudo agregar boton de descarga para @{username}: {exc}")
                 return True, t_id
             if r.status_code == 413:
                 # El comprimido sigue siendo muy grande — intentar comprimir más agresivamente

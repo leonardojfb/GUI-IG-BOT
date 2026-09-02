@@ -1,4 +1,5 @@
 import json
+from io import BytesIO
 
 import telegram_publish_webhook as webhook
 
@@ -19,6 +20,16 @@ def test_publish_callback_marks_button_on_same_message(monkeypatch):
             "message": {
                 "message_id": 77,
                 "chat": {"id": -100123},
+                "caption": "Do you like them? 🍒",
+                "reply_markup": {
+                    "inline_keyboard": [
+                        [
+                            {"text": "✅ Publicado", "callback_data": "pub"},
+                            {"text": "📋 Copiar caption", "copy_text": {"text": "Do you like them? 🍒"}},
+                        ],
+                        [{"text": "⬇️ Descargar documento", "url": "https://example.test/download"}],
+                    ]
+                },
             },
         }
     }
@@ -30,12 +41,16 @@ def test_publish_callback_marks_button_on_same_message(monkeypatch):
         ("token-123", "answerCallbackQuery", {"callback_query_id": "cb-1"}),
         (
             "token-123",
-            "editMessageReplyMarkup",
+            "editMessageCaption",
             {
                 "chat_id": -100123,
                 "message_id": 77,
+                "caption": "Do you like them? 🍒\n\n✅ Ya publicado",
                 "reply_markup": {
-                    "inline_keyboard": [[{"text": "✅ Ya publicado", "disabled": {}}]]
+                    "inline_keyboard": [
+                        [{"text": "📋 Copiar caption", "copy_text": {"text": "Do you like them? 🍒"}}],
+                        [{"text": "⬇️ Descargar documento", "url": "https://example.test/download"}],
+                    ]
                 },
             },
         ),
@@ -103,10 +118,20 @@ def test_send_document_attaches_publish_button(monkeypatch, tmp_path):
     video = tmp_path / "clip.mp4"
     video.write_bytes(b"fake-video")
     posted = []
+    api_calls = []
 
     class Response:
         status_code = 200
         text = "ok"
+
+        def json(self):
+            return {
+                "ok": True,
+                "result": {
+                    "message_id": 456,
+                    "document": {"file_id": "file-id-123"},
+                },
+            }
 
     def fake_post(url, data, files):
         filename, handle, content_type = files["document"]
@@ -114,6 +139,11 @@ def test_send_document_attaches_publish_button(monkeypatch, tmp_path):
         return Response()
 
     monkeypatch.setattr(organizadortg.requests, "post", fake_post)
+    monkeypatch.setattr(
+        organizadortg,
+        "call_tg",
+        lambda method, data, silent=False: api_calls.append((method, data, silent)) or {"ok": True},
+    )
 
     ok, topic_id = organizadortg._send_video_to_topic(
         "-1001",
@@ -141,6 +171,30 @@ def test_send_document_attaches_publish_button(monkeypatch, tmp_path):
             ]
         ]
     }
+    assert api_calls == [
+        (
+            "editMessageReplyMarkup",
+            {
+                "chat_id": "-1001",
+                "message_id": 456,
+                "reply_markup": {
+                    "inline_keyboard": [
+                        [
+                            {"text": "✅ Publicado", "callback_data": "pub"},
+                            {"text": "📋 Copiar caption", "copy_text": {"text": "caption"}},
+                        ],
+                        [
+                            {
+                                "text": "⬇️ Descargar documento",
+                                "url": "https://telegram-publish-webhook-production.up.railway.app/telegram/download?file_id=file-id-123",
+                            }
+                        ],
+                    ]
+                },
+            },
+            True,
+        )
+    ]
 
 
 def test_send_document_omits_copy_caption_button_without_caption(monkeypatch, tmp_path):
@@ -174,3 +228,39 @@ def test_send_document_omits_copy_caption_button_without_caption(monkeypatch, tm
     assert json.loads(posted[0]["reply_markup"]) == {
         "inline_keyboard": [[{"text": "✅ Publicado", "callback_data": "pub"}]]
     }
+
+
+def test_download_file_fetches_telegram_file_without_exposing_token(monkeypatch):
+    opened = []
+
+    class Response:
+        headers = {"Content-Type": "video/mp4"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b"file-bytes"
+
+    def fake_post(token, method, payload):
+        assert token == "token-123"
+        assert method == "getFile"
+        assert payload == {"file_id": "file-id-123"}
+        return {"ok": True, "result": {"file_path": "documents/file.mp4"}}
+
+    def fake_urlopen(request, timeout=30):
+        opened.append((request.full_url, timeout))
+        return Response()
+
+    monkeypatch.setattr(webhook, "post_telegram_method", fake_post)
+    monkeypatch.setattr(webhook.urllib.request, "urlopen", fake_urlopen)
+
+    status, headers, body = webhook.download_file("token-123", "file-id-123")
+
+    assert status == 200
+    assert headers["Content-Type"] == "video/mp4"
+    assert body == b"file-bytes"
+    assert opened == [("https://api.telegram.org/file/bottoken-123/documents/file.mp4", 30)]
