@@ -106,12 +106,17 @@ STATE_FILE = "telegram_state_v11.json"
 HISTORY_FILE = "fingerprint_history.json"
 ADMIN_TOPIC_NAME = "Admin"
 TRIAL_TOPIC_PREFIX = "TRIALS - "
+PUBLISH_CALLBACK_DATA = "pub"
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
 input_root = os.path.join(base_dir, "CALENDARIO_POSTEO")
 trial_input_root = os.path.join(base_dir, "CALENDARIO_TRIALS")
 
 db = DatabaseManager()
+
+
+def _publish_button_markup():
+    return {"inline_keyboard": [[{"text": "publicado", "callback_data": PUBLISH_CALLBACK_DATA}]]}
 
 
 def _calendar_manifest_file():
@@ -732,14 +737,18 @@ def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, usern
 
     try:
         for attempt in range(5):
-            payload = {'chat_id': chat_id, 'message_thread_id': t_id}
+            payload = {
+                'chat_id': chat_id,
+                'message_thread_id': t_id,
+                'reply_markup': json.dumps(_publish_button_markup()),
+            }
             if caption:
                 payload['caption'] = caption
             with open(active_path, 'rb') as fv:
                 r = requests.post(
-                    f"https://api.telegram.org/bot{TOKEN}/sendVideo",
+                    f"https://api.telegram.org/bot{TOKEN}/sendDocument",
                     data=payload,
-                    files={'video': fv}
+                    files={'document': fv}
                 )
             if r.status_code == 200:
                 return True, t_id
@@ -762,7 +771,7 @@ def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, usern
                     retry_after = r.json().get("parameters", {}).get("retry_after", 15)
                 except Exception:
                     retry_after = 15
-                print(f"⏳ Telegram rate limit (sendVideo @{username}), esperando {retry_after}s...")
+                print(f"⏳ Telegram rate limit (sendDocument @{username}), esperando {retry_after}s...")
                 time.sleep(retry_after + 1)
                 continue
             if "thread not found" in r.text:

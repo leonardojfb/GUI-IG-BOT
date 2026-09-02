@@ -24,7 +24,8 @@ def test_send_video_to_topic_handles_calendar_paths_over_260_chars(tmp_path, mon
     posted = []
 
     def fake_post(url, data, files):
-        assert files["video"].read() == b"fake-video"
+        assert url.endswith("/sendDocument")
+        assert files["document"].read() == b"fake-video"
         posted.append((url, dict(data)))
         return SimpleNamespace(status_code=200, text="ok")
 

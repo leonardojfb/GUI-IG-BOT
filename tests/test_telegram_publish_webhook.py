@@ -1,0 +1,104 @@
+import json
+
+import telegram_publish_webhook as webhook
+
+
+def test_publish_callback_marks_button_on_same_message(monkeypatch):
+    calls = []
+
+    def fake_post(token, method, payload):
+        calls.append((token, method, payload))
+        return {"ok": True}
+
+    monkeypatch.setattr(webhook, "post_telegram_method", fake_post)
+
+    update = {
+        "callback_query": {
+            "id": "cb-1",
+            "data": "pub",
+            "message": {
+                "message_id": 77,
+                "chat": {"id": -100123},
+            },
+        }
+    }
+
+    result = webhook.handle_update(update, "token-123")
+
+    assert result == {"ok": True, "handled": True}
+    assert calls == [
+        ("token-123", "answerCallbackQuery", {"callback_query_id": "cb-1"}),
+        (
+            "token-123",
+            "editMessageReplyMarkup",
+            {
+                "chat_id": -100123,
+                "message_id": 77,
+                "reply_markup": {
+                    "inline_keyboard": [[{"text": "PUBLICADO", "callback_data": "published"}]]
+                },
+            },
+        ),
+    ]
+
+
+def test_already_published_callback_only_answers(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        webhook,
+        "post_telegram_method",
+        lambda token, method, payload: calls.append((method, payload)) or {"ok": True},
+    )
+
+    result = webhook.handle_update(
+        {"callback_query": {"id": "cb-2", "data": "published"}},
+        "token-123",
+    )
+
+    assert result == {"ok": True, "handled": True}
+    assert calls == [
+        ("answerCallbackQuery", {"callback_query_id": "cb-2", "text": "Ya estaba marcado."})
+    ]
+
+
+def test_secret_header_rejects_wrong_token():
+    assert webhook.is_authorized({"X-Telegram-Bot-Api-Secret-Token": "bad"}, "good") is False
+    assert webhook.is_authorized({"X-Telegram-Bot-Api-Secret-Token": "good"}, "good") is True
+    assert webhook.is_authorized({}, "") is True
+
+
+def test_send_document_attaches_publish_button(monkeypatch, tmp_path):
+    import organizadortg
+
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"fake-video")
+    posted = []
+
+    class Response:
+        status_code = 200
+        text = "ok"
+
+    def fake_post(url, data, files):
+        posted.append((url, dict(data), files["document"].read()))
+        return Response()
+
+    monkeypatch.setattr(organizadortg.requests, "post", fake_post)
+
+    ok, topic_id = organizadortg._send_video_to_topic(
+        "-1001",
+        123,
+        "caption",
+        str(video),
+        {},
+        "eve",
+        "MAIN",
+    )
+
+    assert ok is True
+    assert topic_id == 123
+    url, data, contents = posted[0]
+    assert url.endswith("/sendDocument")
+    assert contents == b"fake-video"
+    assert json.loads(data["reply_markup"]) == {
+        "inline_keyboard": [[{"text": "publicado", "callback_data": "pub"}]]
+    }
