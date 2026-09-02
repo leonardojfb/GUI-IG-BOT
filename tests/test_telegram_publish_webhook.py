@@ -112,7 +112,7 @@ def test_get_accounts_normalizes_telegram_chat_id_labels(monkeypatch):
     assert account["tg_group_id"] == "-1003749971714"
 
 
-def test_send_document_attaches_publish_button(monkeypatch, tmp_path):
+def test_send_document_sends_native_document_with_publish_button(monkeypatch, tmp_path):
     import organizadortg
 
     video = tmp_path / "clip.mp4"
@@ -171,30 +171,7 @@ def test_send_document_attaches_publish_button(monkeypatch, tmp_path):
             ]
         ]
     }
-    assert api_calls == [
-        (
-            "editMessageReplyMarkup",
-            {
-                "chat_id": "-1001",
-                "message_id": 456,
-                "reply_markup": {
-                    "inline_keyboard": [
-                        [
-                            {"text": "✅ Publicado", "callback_data": "pub"},
-                            {"text": "📋 Copiar caption", "copy_text": {"text": "caption"}},
-                        ],
-                        [
-                            {
-                                "text": "⬇️ Descargar documento",
-                                "url": "https://telegram-publish-webhook-production.up.railway.app/telegram/download?file_id=file-id-123",
-                            }
-                        ],
-                    ]
-                },
-            },
-            True,
-        )
-    ]
+    assert api_calls == []
 
 
 def test_send_document_omits_copy_caption_button_without_caption(monkeypatch, tmp_path):
