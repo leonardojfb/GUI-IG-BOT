@@ -52,6 +52,7 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "metadata_pool.py",
         "trial_content.py",
         "calendar_manifest.py",
+        "social_publishing.py",
         "telegram_core.py",
         "cleaner.py",
         "vercuentas.py",

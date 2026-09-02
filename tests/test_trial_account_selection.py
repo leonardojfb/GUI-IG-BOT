@@ -28,6 +28,25 @@ def test_max_days_uses_all_available_files_without_shortfall():
     assert plan.shortfalls == {}
 
 
+def test_max_duplicate_tanda_reports_shortfalls_for_unfilled_accounts():
+    files = [f"clip_{index:03d}.mp4" for index in range(5)]
+    plan = build_trial_account_plan(
+        {"eve": "T1", "luna": "T1", "sol": "T1"},
+        {"T1": files},
+        videos_per_day=2,
+        days="MAX",
+    )
+
+    assert plan.assigned["eve"] == files
+    assert plan.assigned["luna"] == []
+    assert plan.assigned["sol"] == []
+    assert plan.shortfalls == {"luna": 5, "sol": 5}
+    assert plan.tanda_stats["T1"]["requested"] == 15
+    assert plan.tanda_stats["T1"]["shortfall"] == 10
+    assert "para 15 requeridos" in reused_trial_tanda_warnings(plan)[0]
+    assert "faltan 10" in reused_trial_tanda_warnings(plan)[0]
+
+
 def test_trial_plan_interleaves_sources_before_repeating_copies():
     plan = build_trial_account_plan(
         {"eve": "T1"},
@@ -119,6 +138,24 @@ def test_trial_distribution_writes_manifest_not_calendar_copies():
     assert "_copy_calendar_file(" not in body
     assert "replace_entries(" in body
     assert 'delivery_kind="trial"' in body
+
+
+def test_trial_distribution_replaces_all_assigned_accounts_even_when_zero_videos():
+    source = Path("gui_premium_v7.py").read_text(encoding="utf-8")
+    start = source.index("    def _trial_dist_run_per_account")
+    end = source.index("    def _build_dist_cuentas_tab", start)
+    body = source[start:end]
+    assert "affected = set(plan.assigned)" in body
+    assert "affected.add(user)" not in body
+
+
+def test_trial_distribution_blocks_incomplete_calendarization():
+    source = Path("gui_premium_v7.py").read_text(encoding="utf-8")
+    start = source.index("    def _trial_dist_run_per_account")
+    end = source.index("    def _build_dist_cuentas_tab", start)
+    body = source[start:end]
+    assert "if plan.shortfalls and not preview_only:" in body
+    assert "No se calendariza incompleto" in body
 
 
 def test_trial_logistica_has_no_global_tanda_selector_and_uses_account_panels():

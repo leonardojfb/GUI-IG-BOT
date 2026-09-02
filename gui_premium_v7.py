@@ -2889,13 +2889,20 @@ class InstagramAutoPro(ctk.CTk):
         result = "\n".join(warnings + [f"@{u}: {len(v)} videos" + (f" (faltan {plan.shortfalls[u]})" if u in plan.shortfalls else "") for u, v in plan.assigned.items()])
         if preview_only:
             self.trial_dist_result.delete("1.0", "end"); self.trial_dist_result.insert("1.0", result); return
+        if plan.shortfalls and not preview_only:
+            self.trial_dist_result.delete("1.0", "end")
+            self.trial_dist_result.insert("1.0", result)
+            return messagebox.showwarning(
+                "Trials incompletos",
+                "No se calendariza incompleto. Revisa VISTA PREVIA y asigna una tanda con videos suficientes por cuenta.",
+            )
         if not messagebox.askyesno("Distribuir Trials", "\n\n".join(warnings + [f"Calendarizar {sum(map(len, plan.assigned.values()))} videos sin reutilizar metadata?"])):
             return
         ids = {r["username"]: r["id"] for r in self.db.get_trials_active_accounts()}
         def task():
             from Organizador import build_calendar_video_filename
             entries = []
-            affected = set()
+            affected = set(plan.assigned)
             for user, files in plan.assigned.items():
                 tanda = assignments[user]
                 for index, name in enumerate(files):
@@ -2914,7 +2921,6 @@ class InstagramAutoPro(ctk.CTk):
                             transform_log_id=self.db.get_video_transform_log_id(source_path),
                         )
                     )
-                    affected.add(user)
             if affected:
                 replace_entries(manifest_path(_BASE_DIR), entries, affected, "trial")
             count = len(entries)

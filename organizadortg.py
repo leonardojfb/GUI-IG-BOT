@@ -639,7 +639,15 @@ def _topic_state_chat_id(state_key):
 def _topic_state_account_name(state_key):
     if not isinstance(state_key, str) or "_" not in state_key:
         return None
-    return state_key.split("_", 1)[1]
+    account_name = state_key.split("_", 1)[1]
+    if account_name.endswith("_trials"):
+        return account_name[:-len("_trials")]
+    return account_name
+
+def _topic_state_delivery_kind(state_key):
+    if isinstance(state_key, str) and state_key.endswith("_trials"):
+        return "trial"
+    return "normal"
 
 def _normalize_account_name(name):
     return str(name or "").strip().lstrip("@").lower()
@@ -677,7 +685,8 @@ def _delete_known_topics_from_state(topics_state, should_delete):
     for state_key, topic_value in list(topics_state.items()):
         chat_id = _topic_state_chat_id(state_key)
         account_name = _topic_state_account_name(state_key)
-        if not chat_id or not account_name or not should_delete(chat_id, account_name, topic_value):
+        delivery_kind = _topic_state_delivery_kind(state_key)
+        if not chat_id or not account_name or not should_delete(chat_id, account_name, topic_value, delivery_kind):
             continue
 
         topic_id = _topic_id_from_state_value(topic_value)
@@ -709,18 +718,22 @@ def delete_known_topics_for_chats(chat_ids, topics_state):
     target_chat_ids = {str(chat_id) for chat_id in chat_ids if chat_id not in (None, "")}
     return _delete_known_topics_from_state(
         topics_state,
-        lambda chat_id, _account_name, _topic_value: chat_id in target_chat_ids,
+        lambda chat_id, _account_name, _topic_value, _delivery_kind: chat_id in target_chat_ids,
     )
 
 def delete_known_topics_for_accounts(account_names, topics_state):
     target_accounts = {_normalize_account_name(name) for name in account_names if _normalize_account_name(name)}
     trial_targets = {_normalize_account_name(name) for name in account_names if _is_trials_subaccount(name)}
 
-    def should_delete(_chat_id, account_name, topic_value):
+    def should_delete(_chat_id, account_name, topic_value, delivery_kind):
         normalized_name = _normalize_account_name(account_name)
         if normalized_name not in target_accounts:
             return False
-        if _topic_has_trials_prefix(topic_value) and normalized_name not in trial_targets:
+        if (
+            _topic_has_trials_prefix(topic_value)
+            and delivery_kind != "trial"
+            and normalized_name not in trial_targets
+        ):
             return False
         return True
 
