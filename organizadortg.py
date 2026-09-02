@@ -79,6 +79,7 @@ def _compress_video_for_tg(video_path: str, target_bytes: int = TG_COMPRESS_TARG
             tmp.close()
             result = subprocess.run(
                 [_ffmpeg_tool_command("ffmpeg"), "-y", "-i", video_path,
+                 "-map_metadata", "0", "-movflags", "+use_metadata_tags",
                  "-b:v", f"{target_kbps}k", "-b:a", "128k"]
                 + codec_args
                 + ["-acodec", "aac", tmp.name],
@@ -106,12 +107,26 @@ STATE_FILE = "telegram_state_v11.json"
 HISTORY_FILE = "fingerprint_history.json"
 ADMIN_TOPIC_NAME = "Admin"
 TRIAL_TOPIC_PREFIX = "TRIALS - "
+PUBLISH_CALLBACK_DATA = "pub"
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
 input_root = os.path.join(base_dir, "CALENDARIO_POSTEO")
 trial_input_root = os.path.join(base_dir, "CALENDARIO_TRIALS")
 
 db = DatabaseManager()
+
+
+def _publish_button_markup(caption=None):
+    buttons = [{"text": "✅ Publicado", "callback_data": PUBLISH_CALLBACK_DATA}]
+    if caption:
+        buttons.append({"text": "📋 Copiar caption", "copy_text": {"text": str(caption)}})
+    return {"inline_keyboard": [buttons]}
+
+
+def normalize_telegram_chat_id(value):
+    text = str(value or "").strip()
+    match = re.search(r"-?\d+", text)
+    return match.group(0) if match else text
 
 
 def _calendar_manifest_file():
@@ -520,7 +535,7 @@ def get_accounts_with_va_info():
             cur.execute("SELECT tg_group_id, timezone FROM virtual_assistants WHERE name = ?", (va_name,))
             row = cur.fetchone()
             if row:
-                if row['tg_group_id']: tg_group_id = row['tg_group_id']
+                if row['tg_group_id']: tg_group_id = normalize_telegram_chat_id(row['tg_group_id'])
                 if 'timezone' in row.keys() and row['timezone']:
                     va_timezone = row['timezone']
         result.append({
@@ -732,14 +747,20 @@ def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, usern
 
     try:
         for attempt in range(5):
-            payload = {'chat_id': chat_id, 'message_thread_id': t_id}
+            payload = {
+                'chat_id': chat_id,
+                'message_thread_id': t_id,
+                'supports_streaming': 'true',
+                'reply_markup': json.dumps(_publish_button_markup(caption), ensure_ascii=False),
+            }
             if caption:
                 payload['caption'] = caption
+            upload_name = os.path.basename(os.fspath(video_path)) or os.path.basename(os.fspath(active_path))
             with open(active_path, 'rb') as fv:
                 r = requests.post(
                     f"https://api.telegram.org/bot{TOKEN}/sendVideo",
                     data=payload,
-                    files={'video': fv}
+                    files={'video': (upload_name, fv, 'video/mp4')}
                 )
             if r.status_code == 200:
                 return True, t_id

@@ -24,7 +24,12 @@ def test_send_video_to_topic_handles_calendar_paths_over_260_chars(tmp_path, mon
     posted = []
 
     def fake_post(url, data, files):
-        assert files["video"].read() == b"fake-video"
+        assert url.endswith("/sendVideo")
+        _filename, handle, content_type = files["video"]
+        assert handle.read() == b"fake-video"
+        assert content_type == "video/mp4"
+        assert data["supports_streaming"] == "true"
+        assert "disable_content_type_detection" not in data
         posted.append((url, dict(data)))
         return SimpleNamespace(status_code=200, text="ok")
 
@@ -122,4 +127,6 @@ def test_telegram_compression_prefers_nvenc_and_falls_back_to_cpu(monkeypatch):
     assert compressed is not None
     assert commands[1][commands[1].index("-vcodec") + 1] == "h264_nvenc"
     assert commands[2][commands[2].index("-vcodec") + 1] == "libx264"
+    assert commands[2][commands[2].index("-map_metadata") + 1] == "0"
+    assert commands[2][commands[2].index("-movflags") + 1] == "+use_metadata_tags"
     os.unlink(compressed)
