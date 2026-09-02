@@ -79,6 +79,7 @@ def _compress_video_for_tg(video_path: str, target_bytes: int = TG_COMPRESS_TARG
             tmp.close()
             result = subprocess.run(
                 [_ffmpeg_tool_command("ffmpeg"), "-y", "-i", video_path,
+                 "-map_metadata", "0", "-movflags", "+use_metadata_tags",
                  "-b:v", f"{target_kbps}k", "-b:a", "128k"]
                 + codec_args
                 + ["-acodec", "aac", tmp.name],
@@ -749,17 +750,17 @@ def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, usern
             payload = {
                 'chat_id': chat_id,
                 'message_thread_id': t_id,
-                'disable_content_type_detection': 'true',
+                'supports_streaming': 'true',
                 'reply_markup': json.dumps(_publish_button_markup(caption), ensure_ascii=False),
             }
             if caption:
                 payload['caption'] = caption
-            document_name = os.path.basename(os.fspath(video_path)) or os.path.basename(os.fspath(active_path))
+            upload_name = os.path.basename(os.fspath(video_path)) or os.path.basename(os.fspath(active_path))
             with open(active_path, 'rb') as fv:
                 r = requests.post(
-                    f"https://api.telegram.org/bot{TOKEN}/sendDocument",
+                    f"https://api.telegram.org/bot{TOKEN}/sendVideo",
                     data=payload,
-                    files={'document': (document_name, fv, 'application/octet-stream')}
+                    files={'video': (upload_name, fv, 'video/mp4')}
                 )
             if r.status_code == 200:
                 return True, t_id
@@ -782,7 +783,7 @@ def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, usern
                     retry_after = r.json().get("parameters", {}).get("retry_after", 15)
                 except Exception:
                     retry_after = 15
-                print(f"⏳ Telegram rate limit (sendDocument @{username}), esperando {retry_after}s...")
+                print(f"⏳ Telegram rate limit (sendVideo @{username}), esperando {retry_after}s...")
                 time.sleep(retry_after + 1)
                 continue
             if "thread not found" in r.text:

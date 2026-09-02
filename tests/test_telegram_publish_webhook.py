@@ -112,7 +112,7 @@ def test_get_accounts_normalizes_telegram_chat_id_labels(monkeypatch):
     assert account["tg_group_id"] == "-1003749971714"
 
 
-def test_send_document_sends_native_document_with_publish_button(monkeypatch, tmp_path):
+def test_send_video_sends_media_with_publish_button(monkeypatch, tmp_path):
     import organizadortg
 
     video = tmp_path / "clip.mp4"
@@ -129,12 +129,12 @@ def test_send_document_sends_native_document_with_publish_button(monkeypatch, tm
                 "ok": True,
                 "result": {
                     "message_id": 456,
-                    "document": {"file_id": "file-id-123"},
+                    "video": {"file_id": "file-id-123"},
                 },
             }
 
     def fake_post(url, data, files):
-        filename, handle, content_type = files["document"]
+        filename, handle, content_type = files["video"]
         posted.append((url, dict(data), filename, handle.read(), content_type))
         return Response()
 
@@ -158,11 +158,12 @@ def test_send_document_sends_native_document_with_publish_button(monkeypatch, tm
     assert ok is True
     assert topic_id == 123
     url, data, filename, contents, content_type = posted[0]
-    assert url.endswith("/sendDocument")
+    assert url.endswith("/sendVideo")
     assert filename == "clip.mp4"
     assert contents == b"fake-video"
-    assert content_type == "application/octet-stream"
-    assert data["disable_content_type_detection"] == "true"
+    assert content_type == "video/mp4"
+    assert data["supports_streaming"] == "true"
+    assert "disable_content_type_detection" not in data
     assert json.loads(data["reply_markup"]) == {
         "inline_keyboard": [
             [
@@ -174,7 +175,7 @@ def test_send_document_sends_native_document_with_publish_button(monkeypatch, tm
     assert api_calls == []
 
 
-def test_send_document_omits_copy_caption_button_without_caption(monkeypatch, tmp_path):
+def test_send_video_omits_copy_caption_button_without_caption(monkeypatch, tmp_path):
     import organizadortg
 
     video = tmp_path / "clip.mp4"
