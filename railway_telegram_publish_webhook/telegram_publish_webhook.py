@@ -42,7 +42,7 @@ def post_telegram_method(token: str, method: str, payload: dict) -> dict:
 
 def _published_markup() -> dict:
     return {
-        "inline_keyboard": [[{"text": "PUBLICADO", "callback_data": PUBLISHED_CALLBACK}]]
+        "inline_keyboard": [[{"text": "✅ Ya publicado", "disabled": {}}]]
     }
 
 

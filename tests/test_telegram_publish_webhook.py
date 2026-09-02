@@ -35,7 +35,7 @@ def test_publish_callback_marks_button_on_same_message(monkeypatch):
                 "chat_id": -100123,
                 "message_id": 77,
                 "reply_markup": {
-                    "inline_keyboard": [[{"text": "PUBLICADO", "callback_data": "published"}]]
+                    "inline_keyboard": [[{"text": "✅ Ya publicado", "disabled": {}}]]
                 },
             },
         ),
@@ -109,7 +109,8 @@ def test_send_document_attaches_publish_button(monkeypatch, tmp_path):
         text = "ok"
 
     def fake_post(url, data, files):
-        posted.append((url, dict(data), files["document"].read()))
+        filename, handle, content_type = files["document"]
+        posted.append((url, dict(data), filename, handle.read(), content_type))
         return Response()
 
     monkeypatch.setattr(organizadortg.requests, "post", fake_post)
@@ -126,9 +127,50 @@ def test_send_document_attaches_publish_button(monkeypatch, tmp_path):
 
     assert ok is True
     assert topic_id == 123
-    url, data, contents = posted[0]
+    url, data, filename, contents, content_type = posted[0]
     assert url.endswith("/sendDocument")
+    assert filename == "clip.mp4"
     assert contents == b"fake-video"
+    assert content_type == "application/octet-stream"
+    assert data["disable_content_type_detection"] == "true"
     assert json.loads(data["reply_markup"]) == {
-        "inline_keyboard": [[{"text": "publicado", "callback_data": "pub"}]]
+        "inline_keyboard": [
+            [
+                {"text": "✅ Publicado", "callback_data": "pub"},
+                {"text": "📋 Copiar caption", "copy_text": {"text": "caption"}},
+            ]
+        ]
+    }
+
+
+def test_send_document_omits_copy_caption_button_without_caption(monkeypatch, tmp_path):
+    import organizadortg
+
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"fake-video")
+    posted = []
+
+    class Response:
+        status_code = 200
+        text = "ok"
+
+    def fake_post(url, data, files):
+        posted.append(dict(data))
+        return Response()
+
+    monkeypatch.setattr(organizadortg.requests, "post", fake_post)
+
+    ok, _topic_id = organizadortg._send_video_to_topic(
+        "-1001",
+        123,
+        "",
+        str(video),
+        {},
+        "eve",
+        "MAIN",
+    )
+
+    assert ok is True
+    assert json.loads(posted[0]["reply_markup"]) == {
+        "inline_keyboard": [[{"text": "✅ Publicado", "callback_data": "pub"}]]
     }

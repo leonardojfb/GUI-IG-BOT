@@ -25,7 +25,10 @@ def test_send_video_to_topic_handles_calendar_paths_over_260_chars(tmp_path, mon
 
     def fake_post(url, data, files):
         assert url.endswith("/sendDocument")
-        assert files["document"].read() == b"fake-video"
+        _filename, handle, content_type = files["document"]
+        assert handle.read() == b"fake-video"
+        assert content_type == "application/octet-stream"
+        assert data["disable_content_type_detection"] == "true"
         posted.append((url, dict(data)))
         return SimpleNamespace(status_code=200, text="ok")
 
