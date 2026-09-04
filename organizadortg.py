@@ -157,6 +157,7 @@ def _scan_manifest_calendar_structure(manifest_file=None):
             "delivery_kind": entry.get("delivery_kind", "normal"),
             "account_id": entry.get("account_id"),
             "transform_log_id": entry.get("transform_log_id"),
+            "caption_mode": entry.get("caption_mode"),
         })
     rows.sort(key=lambda row: (int(str(row["day"]).split("_")[1]), row.get("slot", 0), row["username"], row["filename"]))
     return rows
@@ -518,6 +519,18 @@ def load_normal_individual_caption_maps():
         for tanda in db.get_all_tandas()
         if (captions := db.get_normal_source_captions(tanda["tanda_name"]))
     }
+
+
+def caption_for_normal_calendar_video(filename, caption_mode, normal_map, caption_pools, caption_indexes):
+    """Resolve normal captions with manifest mode, falling back to legacy auto mode."""
+    mode = str(caption_mode or "").strip().lower()
+    if mode == "individual":
+        return caption_for_normal_individual_video(filename, normal_map or {})
+    if mode == "general":
+        return caption_for_calendar_video(filename, caption_pools, caption_indexes)
+    if normal_map:
+        return caption_for_normal_individual_video(filename, normal_map)
+    return caption_for_calendar_video(filename, caption_pools, caption_indexes)
 
 history_db = load_json(os.path.join(base_dir, HISTORY_FILE))
 
@@ -1070,9 +1083,12 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     normal_map = normal_individual_caption_maps.get(
                         extract_tanda_tag_from_calendar_filename(vid["filename"]), {}
                     )
-                    cap = (
-                        caption_for_normal_individual_video(vid["filename"], normal_map)
-                        if normal_map else caption_for_calendar_video(vid['filename'], caption_pools, caption_indexes)
+                    cap = caption_for_normal_calendar_video(
+                        vid["filename"],
+                        vid.get("caption_mode"),
+                        normal_map,
+                        caption_pools,
+                        caption_indexes,
                     )
 
                 jobs_by_chat[chat_id].append({

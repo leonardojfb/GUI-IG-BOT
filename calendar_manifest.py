@@ -29,9 +29,10 @@ def build_entry(
     source_path: str,
     telegram_filename: str,
     transform_log_id: int | None = None,
+    caption_mode: str | None = None,
     created_at: str | None = None,
 ) -> dict:
-    return {
+    entry = {
         "id": str(uuid.uuid4()),
         "username": str(username),
         "account_id": account_id,
@@ -44,6 +45,9 @@ def build_entry(
         "transform_log_id": transform_log_id,
         "created_at": created_at or _now_utc(),
     }
+    if caption_mode:
+        entry["caption_mode"] = str(caption_mode)
+    return entry
 
 
 def _read_payload(path: Path) -> dict:

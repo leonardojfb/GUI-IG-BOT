@@ -88,6 +88,20 @@ def test_normal_individual_caption_uses_original_p1_for_edited_video_forge_copie
     assert organizadortg.caption_for_normal_individual_video(second, captions) == captions["Output 14"]
 
 
+def test_normal_manifest_caption_mode_overrides_saved_individual_captions():
+    filename = "clip__SRC01__P2__TANDA_MIXED__ACC1__D1__S1.mp4"
+    normal_map = {"SRC01": "individual caption\n#one"}
+    pools = {"MIXED": ["general caption\n#two"]}
+    indexes = {}
+
+    assert organizadortg.caption_for_normal_calendar_video(
+        filename, "general", normal_map, pools, indexes
+    ).startswith("general caption")
+    assert organizadortg.caption_for_normal_calendar_video(
+        filename, "individual", normal_map, pools, indexes
+    ) == normal_map["SRC01"]
+
+
 def test_scan_calendar_structure_uses_manifest_when_present(tmp_path, monkeypatch):
     video = tmp_path / "videos_finales" / "T1" / "clip.mp4"
     legacy = tmp_path / "CALENDARIO_POSTEO" / "Dia_1" / "legacy" / "legacy.mp4"

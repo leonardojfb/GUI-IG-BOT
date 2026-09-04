@@ -2977,7 +2977,7 @@ class InstagramAutoPro(ctk.CTk):
             row=0, column=0, padx=(16, 8), pady=(16, 8), sticky="e")
         self.acct_dist_tanda = ctk.CTkComboBox(
             cfg, values=[], fg_color=BG_INPUT, border_color=BORDER,
-            command=self._refresh_tanda_caption_label,
+            command=self._acct_on_tanda_selection_changed,
         )
         self.acct_dist_tanda.grid(row=0, column=1, columnspan=2, padx=(0, 16), pady=(16, 8), sticky="ew")
 
@@ -2985,6 +2985,7 @@ class InstagramAutoPro(ctk.CTk):
             row=0, column=3, padx=(8, 8), pady=(16, 8), sticky="e")
         self.acct_dist_tanda_2 = ctk.CTkComboBox(
             cfg, values=[""], fg_color=BG_INPUT, border_color=BORDER,
+            command=self._acct_on_tanda_selection_changed,
         )
         self.acct_dist_tanda_2.grid(row=0, column=4, columnspan=2, padx=(0, 16), pady=(16, 8), sticky="ew")
 
@@ -2994,39 +2995,56 @@ class InstagramAutoPro(ctk.CTk):
             padx=(16, 16), pady=(0, 8),
         )
 
-        self.acct_individual_captions_var = tk.BooleanVar(value=False)
-        ctk.CTkSwitch(
-            cfg, text="Captions individuales", variable=self.acct_individual_captions_var,
-            command=self._acct_on_individual_captions_toggle,
-        ).grid(row=2, column=0, columnspan=2, padx=16, pady=(0, 8), sticky="w")
+        self._build_logistica_caption_controls(
+            cfg, row=2, columnspan=6,
+            selector_attr="acct_dist_tanda_2", label_attr="acct_dist_lbl_cap_2",
+            padx=(16, 16), pady=(0, 8),
+        )
+
+        ctk.CTkLabel(cfg, text="Modo captions T1:", text_color=TEXT_MUTED).grid(
+            row=3, column=0, padx=(16, 8), pady=(0, 8), sticky="e")
+        self.acct_dist_caption_mode_1 = ctk.CTkComboBox(
+            cfg, values=["General", "Individual"], fg_color=BG_INPUT, border_color=BORDER,
+            command=self._acct_on_caption_mode_change,
+        )
+        self.acct_dist_caption_mode_1.set("General")
+        self.acct_dist_caption_mode_1.grid(row=3, column=1, padx=(0, 16), pady=(0, 8), sticky="ew")
+        ctk.CTkLabel(cfg, text="Modo captions T2:", text_color=TEXT_MUTED).grid(
+            row=3, column=2, padx=(8, 8), pady=(0, 8), sticky="e")
+        self.acct_dist_caption_mode_2 = ctk.CTkComboBox(
+            cfg, values=["General", "Individual"], fg_color=BG_INPUT, border_color=BORDER,
+            command=self._acct_on_caption_mode_change,
+        )
+        self.acct_dist_caption_mode_2.set("General")
+        self.acct_dist_caption_mode_2.grid(row=3, column=3, padx=(0, 16), pady=(0, 8), sticky="ew")
         self.acct_individual_captions_btn = GhostButton(
             cfg, text="Editar captions individuales", state="disabled",
             command=self._acct_refresh_individual_captions,
         )
-        self.acct_individual_captions_btn.grid(row=2, column=2, columnspan=4, padx=8, pady=(0, 8), sticky="w")
+        self.acct_individual_captions_btn.grid(row=3, column=4, columnspan=2, padx=8, pady=(0, 8), sticky="w")
 
         # Fila 1: Videos al día + Período + total calculado
         ctk.CTkLabel(cfg, text="Videos al día:", text_color=TEXT_MUTED).grid(
-            row=3, column=0, padx=(16, 8), pady=(4, 16), sticky="e")
+            row=4, column=0, padx=(16, 8), pady=(4, 16), sticky="e")
         self.acct_dist_vpd = Stepper(
             cfg, value=3, min=1, max=50,
             command=lambda _: self._acct_dist_update_total()
         )
-        self.acct_dist_vpd.grid(row=3, column=1, padx=(0, 16), pady=(4, 16), sticky="w")
+        self.acct_dist_vpd.grid(row=4, column=1, padx=(0, 16), pady=(4, 16), sticky="w")
 
         ctk.CTkLabel(cfg, text="Período:", text_color=TEXT_MUTED).grid(
-            row=3, column=2, padx=(8, 8), pady=(4, 16), sticky="e")
+            row=4, column=2, padx=(8, 8), pady=(4, 16), sticky="e")
         self.acct_dist_period = ctk.CTkComboBox(
             cfg, values=list(self.PERIOD_DAYS.keys()),
             fg_color=BG_INPUT, border_color=BORDER,
             command=lambda _: self._acct_dist_update_total())
         self.acct_dist_period.set("1 semana")
-        self.acct_dist_period.grid(row=3, column=3, padx=(0, 16), pady=(4, 16), sticky="ew")
+        self.acct_dist_period.grid(row=4, column=3, padx=(0, 16), pady=(4, 16), sticky="ew")
 
         self.acct_dist_total_lbl = ctk.CTkLabel(
             cfg, text="= 21 videos/cuenta",
             font=ctk.CTkFont(size=13, weight="bold"), text_color=NEON_CYAN)
-        self.acct_dist_total_lbl.grid(row=3, column=4, columnspan=2, padx=(0, 16), pady=(4, 16), sticky="w")
+        self.acct_dist_total_lbl.grid(row=4, column=4, columnspan=2, padx=(0, 16), pady=(4, 16), sticky="w")
         self._acct_dist_update_total()
 
         # ── Cuentas ──────────────────────────────────────────────────────
@@ -3116,6 +3134,7 @@ class InstagramAutoPro(ctk.CTk):
                 self.acct_dist_tanda_2.configure(values=acct_tanda_2_values)
                 if self.acct_dist_tanda_2.get() not in acct_tanda_2_values:
                     self.acct_dist_tanda_2.set("")
+                self._acct_update_individual_captions_button()
 
             if hasattr(self, "trial_account_scroll"):
                 active_trials = len(self.db.get_trials_active_accounts())
@@ -3136,6 +3155,11 @@ class InstagramAutoPro(ctk.CTk):
     def _refresh_tanda_caption_label(self, _value=None):
         self._refresh_logistica_caption_label("c_tandas", "tandas_lbl_cap")
         self._refresh_logistica_caption_label("acct_dist_tanda", "acct_dist_lbl_cap")
+        self._refresh_logistica_caption_label("acct_dist_tanda_2", "acct_dist_lbl_cap_2")
+
+    def _acct_on_tanda_selection_changed(self, _value=None):
+        self._refresh_tanda_caption_label()
+        self._acct_update_individual_captions_button()
 
     def _get_logistica_caption_tanda_name(self, selector_attr):
         selector = getattr(self, selector_attr, None)
@@ -3249,13 +3273,30 @@ class InstagramAutoPro(ctk.CTk):
         return [a.strip() for a in raw.splitlines() if a.strip()]
 
     def _acct_dist_selected_tandas(self) -> list[str]:
+        return [tanda for tanda, _mode in self._acct_dist_selected_tanda_modes()]
+
+    def _acct_dist_selected_tanda_modes(self) -> list[tuple[str, str]]:
         tandas = []
         for attr in ("acct_dist_tanda", "acct_dist_tanda_2"):
             selector = getattr(self, attr, None)
             value = selector.get().strip() if selector is not None else ""
-            if value and value not in tandas:
-                tandas.append(value)
+            if value and value not in [tanda for tanda, _mode in tandas]:
+                mode_attr = "acct_dist_caption_mode_2" if attr.endswith("_2") else "acct_dist_caption_mode_1"
+                mode_selector = getattr(self, mode_attr, None)
+                raw_mode = mode_selector.get().strip().lower() if mode_selector is not None else "general"
+                mode = "individual" if raw_mode == "individual" else "general"
+                tandas.append((value, mode))
         return tandas
+
+    def _acct_individual_caption_tandas(self) -> list[str]:
+        return [
+            tanda
+            for tanda, mode in self._acct_dist_selected_tanda_modes()
+            if mode == "individual"
+        ]
+
+    def _acct_caption_mode_map(self) -> dict[str, str]:
+        return dict(self._acct_dist_selected_tanda_modes())
 
     def _acct_dist_load_file(self, category: str):
         fpath = os.path.join(_BASE_DIR, f"accounts_{category}.txt")
@@ -3350,10 +3391,11 @@ class InstagramAutoPro(ctk.CTk):
         if not selected_tandas:
             messagebox.showwarning("⚠️", "Selecciona una tanda fuente")
             return
-        if self.acct_individual_captions_var.get():
+        individual_tandas = self._acct_individual_caption_tandas()
+        if individual_tandas:
             missing = [
                 f"{t}/{source}"
-                for t in selected_tandas
+                for t in individual_tandas
                 for source in self._acct_missing_individual_captions(t)
             ]
             if missing:
@@ -3400,6 +3442,7 @@ class InstagramAutoPro(ctk.CTk):
             nonlocal days, n
             import re
             from Organizador import build_calendar_video_filename
+            caption_mode_map = self._acct_caption_mode_map()
 
             def forge_vid_id(fname):
                 return source_key_from_filename(fname)
@@ -3593,6 +3636,7 @@ class InstagramAutoPro(ctk.CTk):
                                     source_path=src,
                                     telegram_filename=dst_name,
                                     transform_log_id=self.db.get_video_transform_log_id(src),
+                                    caption_mode=caption_mode_map.get(item_tanda, "general"),
                                 )
                             )
                             affected.add(acc)
@@ -5748,11 +5792,15 @@ class InstagramAutoPro(ctk.CTk):
 
     def _trial_dist_run(self, preview_only):
         return self._trial_dist_run_per_account(preview_only)
-    def _acct_on_individual_captions_toggle(self):
-        enabled = self.acct_individual_captions_var.get()
+
+    def _acct_on_caption_mode_change(self, _value=None):
+        self._acct_update_individual_captions_button()
+
+    def _acct_update_individual_captions_button(self):
+        if not hasattr(self, "acct_individual_captions_btn"):
+            return
+        enabled = bool(self._acct_individual_caption_tandas())
         self.acct_individual_captions_btn.configure(state="normal" if enabled else "disabled")
-        if enabled:
-            self._acct_refresh_individual_captions()
 
     def _acct_normal_tanda_files(self, tanda=None):
         tanda = tanda or self.acct_dist_tanda.get().strip()
@@ -5762,9 +5810,9 @@ class InstagramAutoPro(ctk.CTk):
         return sorted(name for name in os.listdir(folder) if name.lower().endswith((".mp4", ".mov", ".avi")))
 
     def _acct_refresh_individual_captions(self):
-        selected_tandas = self._acct_dist_selected_tandas()
+        selected_tandas = self._acct_individual_caption_tandas()
         if not selected_tandas:
-            return messagebox.showwarning("Captions individuales", "Selecciona una tanda fuente.")
+            return messagebox.showwarning("Captions individuales", "Marca al menos una tanda como Individual.")
         dialog = ctk.CTkToplevel(self)
         dialog.title(f"Captions individuales - {' + '.join(selected_tandas)}")
         self._fit_toplevel(dialog, 860, 680)

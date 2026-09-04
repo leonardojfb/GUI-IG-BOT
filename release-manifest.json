@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.40",
+    "version":  "1.0.41",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.40",
-    "asset_name":  "MetodoIG-v1.0.40.zip",
-    "sha256":  "300ded5c75270b81e9a0fe65eacfd353b7f125fb8749b0247a3c5c10b11539f8",
-    "notes":  "Video: cachea overlays de fotos por configuracion para reutilizarlos entre renders. Logistica Por Cuentas: permite mezclar 2 tandas fuente en una sola tanda de cuentas, conservando la tanda original en el manifiesto.",
+    "github_release_tag":  "v1.0.41",
+    "asset_name":  "MetodoIG-v1.0.41.zip",
+    "sha256":  "893b9c140c86c576b111d88c6b246ca4a5b1a2851fd6390be0e7f7a5449d4fd9",
+    "notes":  "Logistica Por Cuentas: permite elegir captions General o Individual por cada tanda fuente al mezclar 2 tandas; el modo queda grabado por entrada en calendar_manifest.json y Telegram lo respeta. Mantiene cache de overlays de fotos de v1.0.40.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",

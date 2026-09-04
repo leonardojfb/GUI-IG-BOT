@@ -291,6 +291,14 @@ def test_por_cuentas_can_shuffle_two_source_tandas_into_one_account_batch(tmp_pa
         app.reload_dist_lists()
         app.acct_dist_tanda.set("PC_MIX_ONE")
         app.acct_dist_tanda_2.set("PC_MIX_TWO")
+        app.acct_dist_caption_mode_1.set("Individual")
+        app.acct_dist_caption_mode_2.set("General")
+        for source_key in ("SRC01", "SRC02"):
+            app.db.set_normal_source_caption("PC_MIX_ONE", source_key, f"caption {source_key}")
+        general_caption_path = os.path.join(base_dir, "PC_MIX_TWO_CAPTIONS.txt")
+        with open(general_caption_path, "w", encoding="utf-8") as fh:
+            fh.write("general caption two\n#mix\n")
+        app.db.set_tanda_captions("PC_MIX_TWO", general_caption_path)
         app.acct_dist_list.delete("1.0", "end")
         app.acct_dist_list.insert("end", "pc_mix_a\npc_mix_b\n")
         app.acct_dist_vpd.set(1)
@@ -310,6 +318,12 @@ def test_por_cuentas_can_shuffle_two_source_tandas_into_one_account_batch(tmp_pa
 
         assert len(produced) == 4
         assert {row["tanda"] for row in produced} == {"PC_MIX_ONE", "PC_MIX_TWO"}
+        assert {
+            row["caption_mode"] for row in produced if row["tanda"] == "PC_MIX_ONE"
+        } == {"individual"}
+        assert {
+            row["caption_mode"] for row in produced if row["tanda"] == "PC_MIX_TWO"
+        } == {"general"}
         assert {
             Path(row["source_path"]).parent.name for row in produced
         } == {"PC_MIX_ONE", "PC_MIX_TWO"}

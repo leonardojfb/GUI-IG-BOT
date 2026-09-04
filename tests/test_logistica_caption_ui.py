@@ -21,6 +21,7 @@ def test_logistica_caption_controls_are_available_in_both_distribution_tabs():
     assert 'selector_attr="c_tandas"' in tandas_tab
     assert "_build_logistica_caption_controls" in cuentas_tab
     assert 'selector_attr="acct_dist_tanda"' in cuentas_tab
+    assert 'selector_attr="acct_dist_tanda_2"' in cuentas_tab
 
 
 def test_logistica_caption_actions_target_the_requested_tanda_selector():
@@ -42,5 +43,7 @@ def test_por_cuentas_distribution_calendarizes_filenames_for_telegram_captions()
 def test_por_cuentas_has_optional_individual_caption_controls():
     source = _method_source("_build_dist_cuentas_tab")
 
-    assert "Captions individuales" in source
+    assert "Modo captions T1" in source
+    assert "Modo captions T2" in source
+    assert "Individual" in source
     assert "_acct_refresh_individual_captions" in source
