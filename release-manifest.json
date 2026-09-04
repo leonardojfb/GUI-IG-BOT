@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.39",
+    "version":  "1.0.40",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.39",
-    "asset_name":  "MetodoIG-v1.0.39.zip",
-    "sha256":  "a3745e91ea212e2e6cb8001aa6e9f26f01190a75e071fe7991d7efe5e66c5e0e",
-    "notes":  "Trials: bloquea calendarizaciones incompletas, reporta faltantes reales en MAX cuando varias cuentas comparten tanda y resetea tambien topics Trial modernos de la cuenta seleccionada.",
+    "github_release_tag":  "v1.0.40",
+    "asset_name":  "MetodoIG-v1.0.40.zip",
+    "sha256":  "300ded5c75270b81e9a0fe65eacfd353b7f125fb8749b0247a3c5c10b11539f8",
+    "notes":  "Video: cachea overlays de fotos por configuracion para reutilizarlos entre renders. Logistica Por Cuentas: permite mezclar 2 tandas fuente en una sola tanda de cuentas, conservando la tanda original en el manifiesto.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",

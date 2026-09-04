@@ -2979,7 +2979,14 @@ class InstagramAutoPro(ctk.CTk):
             cfg, values=[], fg_color=BG_INPUT, border_color=BORDER,
             command=self._refresh_tanda_caption_label,
         )
-        self.acct_dist_tanda.grid(row=0, column=1, columnspan=5, padx=(0, 16), pady=(16, 8), sticky="ew")
+        self.acct_dist_tanda.grid(row=0, column=1, columnspan=2, padx=(0, 16), pady=(16, 8), sticky="ew")
+
+        ctk.CTkLabel(cfg, text="2da tanda:", text_color=TEXT_MUTED).grid(
+            row=0, column=3, padx=(8, 8), pady=(16, 8), sticky="e")
+        self.acct_dist_tanda_2 = ctk.CTkComboBox(
+            cfg, values=[""], fg_color=BG_INPUT, border_color=BORDER,
+        )
+        self.acct_dist_tanda_2.grid(row=0, column=4, columnspan=2, padx=(0, 16), pady=(16, 8), sticky="ew")
 
         self._build_logistica_caption_controls(
             cfg, row=1, columnspan=6,
@@ -3103,6 +3110,12 @@ class InstagramAutoPro(ctk.CTk):
                 if not self.acct_dist_tanda.get() and normal_tandas:
                     self.acct_dist_tanda.set(normal_tandas[0])
                 self._refresh_tanda_caption_label()
+
+            if hasattr(self, "acct_dist_tanda_2"):
+                acct_tanda_2_values = [""] + normal_tandas
+                self.acct_dist_tanda_2.configure(values=acct_tanda_2_values)
+                if self.acct_dist_tanda_2.get() not in acct_tanda_2_values:
+                    self.acct_dist_tanda_2.set("")
 
             if hasattr(self, "trial_account_scroll"):
                 active_trials = len(self.db.get_trials_active_accounts())
@@ -3235,6 +3248,15 @@ class InstagramAutoPro(ctk.CTk):
         raw = self.acct_dist_list.get("1.0", "end").strip()
         return [a.strip() for a in raw.splitlines() if a.strip()]
 
+    def _acct_dist_selected_tandas(self) -> list[str]:
+        tandas = []
+        for attr in ("acct_dist_tanda", "acct_dist_tanda_2"):
+            selector = getattr(self, attr, None)
+            value = selector.get().strip() if selector is not None else ""
+            if value and value not in tandas:
+                tandas.append(value)
+        return tandas
+
     def _acct_dist_load_file(self, category: str):
         fpath = os.path.join(_BASE_DIR, f"accounts_{category}.txt")
         if not os.path.exists(fpath):
@@ -3322,13 +3344,18 @@ class InstagramAutoPro(ctk.CTk):
             json.dump(history, fh, indent=2, ensure_ascii=False)
 
     def _acct_dist_run(self, preview_only: bool = True):
-        tanda = self.acct_dist_tanda.get()
+        selected_tandas = self._acct_dist_selected_tandas()
+        tanda = selected_tandas[0] if selected_tandas else ""
         accounts = self._acct_dist_accounts()
-        if not tanda:
+        if not selected_tandas:
             messagebox.showwarning("⚠️", "Selecciona una tanda fuente")
             return
         if self.acct_individual_captions_var.get():
-            missing = self._acct_missing_individual_captions(tanda)
+            missing = [
+                f"{t}/{source}"
+                for t in selected_tandas
+                for source in self._acct_missing_individual_captions(t)
+            ]
             if missing:
                 return messagebox.showwarning(
                     "Captions individuales faltantes",
@@ -3349,7 +3376,10 @@ class InstagramAutoPro(ctk.CTk):
         days = self.PERIOD_DAYS.get(period_str, 7)
         n = None if max_period else vpd * days
 
-        folder = os.path.join(_BASE_DIR, "videos_finales", tanda)
+        folders = {
+            source_tanda: os.path.join(_BASE_DIR, "videos_finales", source_tanda)
+            for source_tanda in selected_tandas
+        }
 
         # Advertir si la ejecución va a sobreescribir Dia_* existentes
         if not preview_only:
@@ -3374,13 +3404,30 @@ class InstagramAutoPro(ctk.CTk):
             def forge_vid_id(fname):
                 return source_key_from_filename(fname)
 
-            if not os.path.exists(folder):
-                raise FileNotFoundError(f"Carpeta no encontrada: {folder}")
-
-            all_vids = sorted(f for f in os.listdir(folder)
-                              if f.lower().endswith((".mp4", ".mov", ".avi")))
+            all_vids = []
+            for source_tanda, source_folder in folders.items():
+                if not os.path.exists(source_folder):
+                    raise FileNotFoundError(f"Carpeta no encontrada: {source_folder}")
+                all_vids.extend(
+                    {"tanda": source_tanda, "name": filename}
+                    for filename in sorted(
+                        f for f in os.listdir(source_folder)
+                        if f.lower().endswith((".mp4", ".mov", ".avi"))
+                    )
+                )
             if not all_vids:
-                raise ValueError("No se encontraron videos en la carpeta")
+                raise ValueError("No se encontraron videos en las tandas seleccionadas")
+
+            def item_key(item):
+                return (item["tanda"], item["name"])
+
+            def item_name(item):
+                return item["name"]
+
+            def item_display(item):
+                if len(selected_tandas) > 1:
+                    return f"{item['tanda']} / {item['name']}"
+                return item["name"]
 
             if max_period:
                 n = len(all_vids) // len(accounts)
@@ -3429,12 +3476,12 @@ class InstagramAutoPro(ctk.CTk):
                     random.shuffle(accs_shuffled)
 
                     for acc in accs_shuffled:
-                        acc_today_vid_ids = {forge_vid_id(v) for v in plan[acc][day_idx]}
+                        acc_today_vid_ids = {forge_vid_id(item_name(v)) for v in plan[acc][day_idx]}
                         candidates = []
                         for v in pool:
-                            if v in assigned:
+                            if item_key(v) in assigned:
                                 continue
-                            vid_id = forge_vid_id(v)
+                            vid_id = forge_vid_id(item_name(v))
                             if vid_id in acc_today_vid_ids:
                                 continue  # regla dura: no repetir vid_id mismo día/cuenta
                             score = 0
@@ -3455,10 +3502,10 @@ class InstagramAutoPro(ctk.CTk):
 
                         candidates.sort(key=lambda x: x[0])
                         chosen = candidates[0][1]
-                        vid_id = forge_vid_id(chosen)
+                        vid_id = forge_vid_id(item_name(chosen))
 
                         plan[acc][day_idx].append(chosen)
-                        assigned.add(chosen)
+                        assigned.add(item_key(chosen))
                         acc_lifetime_vid_ids[acc].add(vid_id)
                         day_vid_ids_used.add(vid_id)
                         slot_vid_ids_used.add(vid_id)
@@ -3470,8 +3517,8 @@ class InstagramAutoPro(ctk.CTk):
             if max_period and total_per_acc % vpd:
                 period_detail = f"{total_per_acc}/cuenta en {days} días (último día parcial)"
             lines += [label, "=" * 60,
-                      f"📦  Tanda      : {tanda}",
-                      f"📦  Pool total  : {len(all_vids)} videos en carpeta",
+                      f"📦  Tanda      : {' + '.join(selected_tandas)}",
+                      f"📦  Pool total  : {len(all_vids)} videos en {len(selected_tandas)} tanda(s)",
                       f"📅  Período     : {period_str}  ({period_detail})",
                       f"🛡️  Antichoque  : vid_id único por cuenta/día activo",
                       f"👥  Cuentas    : {len(plan)}", ""]
@@ -3482,7 +3529,7 @@ class InstagramAutoPro(ctk.CTk):
                 for day_idx, day_vids in enumerate(day_lists):
                     lines.append(f"  Día {day_idx + 1}:")
                     for i, vid in enumerate(day_vids, 1):
-                        lines.append(f"    {i:02d}. {vid}  [{forge_vid_id(vid)}]")
+                        lines.append(f"    {i:02d}. {item_display(vid)}  [{forge_vid_id(item_name(vid))}]")
                 lines.append("")
 
             if not preview_only:
@@ -3512,11 +3559,13 @@ class InstagramAutoPro(ctk.CTk):
                 for acc, day_lists in plan.items():
                     for day_idx, day_vids in enumerate(day_lists):
                         day_path = os.path.join(cal_root, f"Dia_{day_idx + 1}", acc)
-                        for slot_idx, vid_name in enumerate(day_vids, 1):
-                            src = os.path.abspath(os.path.join(folder, vid_name))
+                        for slot_idx, item in enumerate(day_vids, 1):
+                            vid_name = item["name"]
+                            item_tanda = item["tanda"]
+                            src = os.path.abspath(os.path.join(folders[item_tanda], vid_name))
                             dst_name = build_calendar_video_filename(
                                 vid_name,
-                                tanda,
+                                item_tanda,
                                 account_ids[acc],
                                 day_idx + 1,
                                 slot_idx,
@@ -3525,7 +3574,7 @@ class InstagramAutoPro(ctk.CTk):
                             if dst_name in logical_names:
                                 dst_name = build_calendar_video_filename(
                                     vid_name,
-                                    tanda,
+                                    item_tanda,
                                     account_ids[acc],
                                     day_idx + 1,
                                     slot_idx,
@@ -3540,7 +3589,7 @@ class InstagramAutoPro(ctk.CTk):
                                     delivery_kind="normal",
                                     day=day_idx + 1,
                                     slot=slot_idx,
-                                    tanda=tanda,
+                                    tanda=item_tanda,
                                     source_path=src,
                                     telegram_filename=dst_name,
                                     transform_log_id=self.db.get_video_transform_log_id(src),
@@ -5713,61 +5762,64 @@ class InstagramAutoPro(ctk.CTk):
         return sorted(name for name in os.listdir(folder) if name.lower().endswith((".mp4", ".mov", ".avi")))
 
     def _acct_refresh_individual_captions(self):
-        tanda = self.acct_dist_tanda.get().strip()
-        if not tanda:
+        selected_tandas = self._acct_dist_selected_tandas()
+        if not selected_tandas:
             return messagebox.showwarning("Captions individuales", "Selecciona una tanda fuente.")
         dialog = ctk.CTkToplevel(self)
-        dialog.title(f"Captions individuales - {tanda}")
+        dialog.title(f"Captions individuales - {' + '.join(selected_tandas)}")
         self._fit_toplevel(dialog, 860, 680)
         dialog.configure(fg_color=BG_APP)
         scroll = ctk.CTkScrollableFrame(dialog, fg_color=BG_CARD2)
         scroll.pack(fill="both", expand=True, padx=16, pady=16)
         editors, previews = {}, []
-        captions = self.db.get_normal_source_captions(tanda)
-        folder = os.path.join(_BASE_DIR, "videos_finales", tanda)
-        for source_key, copies in group_trial_sources(self._acct_normal_tanda_files(tanda)):
-            row = ctk.CTkFrame(scroll, fg_color=BG_CARD)
-            row.pack(fill="x", padx=4, pady=4)
-            preview_label = ctk.CTkLabel(row, text="Cargando preview", width=120, height=68)
-            preview_label.pack(side="left", padx=8, pady=8)
-            body = ctk.CTkFrame(row, fg_color="transparent")
-            body.pack(side="left", fill="both", expand=True, padx=(0, 8), pady=6)
-            ctk.CTkLabel(body, text=f"{source_key} ({len(copies)} copias)", text_color=TEXT_BODY).pack(anchor="w")
-            editor = ctk.CTkTextbox(body, height=72, fg_color=BG_INPUT, border_color=BORDER, border_width=1)
-            editor.pack(fill="x", pady=(2, 0))
-            editor.insert("1.0", captions.get(source_key, ""))
-            editors[source_key] = editor
+        multi_tanda = len(selected_tandas) > 1
+        for tanda in selected_tandas:
+            captions = self.db.get_normal_source_captions(tanda)
+            folder = os.path.join(_BASE_DIR, "videos_finales", tanda)
+            for source_key, copies in group_trial_sources(self._acct_normal_tanda_files(tanda)):
+                row = ctk.CTkFrame(scroll, fg_color=BG_CARD)
+                row.pack(fill="x", padx=4, pady=4)
+                preview_label = ctk.CTkLabel(row, text="Cargando preview", width=120, height=68)
+                preview_label.pack(side="left", padx=8, pady=8)
+                body = ctk.CTkFrame(row, fg_color="transparent")
+                body.pack(side="left", fill="both", expand=True, padx=(0, 8), pady=6)
+                source_label = f"{tanda} / {source_key}" if multi_tanda else source_key
+                ctk.CTkLabel(body, text=f"{source_label} ({len(copies)} copias)", text_color=TEXT_BODY).pack(anchor="w")
+                editor = ctk.CTkTextbox(body, height=72, fg_color=BG_INPUT, border_color=BORDER, border_width=1)
+                editor.pack(fill="x", pady=(2, 0))
+                editor.insert("1.0", captions.get(source_key, ""))
+                editors[(tanda, source_key)] = editor
 
-            def load(label=preview_label, path=os.path.join(folder, copies[0])):
-                def task():
-                    cache = trial_preview_path(path)
-                    if not cache.exists():
-                        cache.parent.mkdir(parents=True, exist_ok=True)
-                        from video_editor import render_preview
-                        render_preview(path, [], str(cache), timestamp=0.1)
-                    return cache
-                def done(success, result):
-                    if not success:
-                        return label.configure(text="Sin preview")
-                    try:
-                        from PIL import Image
-                        image = Image.open(result).convert("RGB")
-                        image.thumbnail((120, 68), Image.Resampling.LANCZOS)
-                        preview = ctk.CTkImage(light_image=image, dark_image=image, size=image.size)
-                        previews.append(preview)
-                        label.configure(image=preview, text="")
-                    except Exception:
-                        label.configure(text="Sin preview")
-                WorkerThread(self, done, task).start()
-            load()
+                def load(label=preview_label, path=os.path.join(folder, copies[0])):
+                    def task():
+                        cache = trial_preview_path(path)
+                        if not cache.exists():
+                            cache.parent.mkdir(parents=True, exist_ok=True)
+                            from video_editor import render_preview
+                            render_preview(path, [], str(cache), timestamp=0.1)
+                        return cache
+                    def done(success, result):
+                        if not success:
+                            return label.configure(text="Sin preview")
+                        try:
+                            from PIL import Image
+                            image = Image.open(result).convert("RGB")
+                            image.thumbnail((120, 68), Image.Resampling.LANCZOS)
+                            preview = ctk.CTkImage(light_image=image, dark_image=image, size=image.size)
+                            previews.append(preview)
+                            label.configure(image=preview, text="")
+                        except Exception:
+                            label.configure(text="Sin preview")
+                    WorkerThread(self, done, task).start()
+                load()
 
         def save():
             missing = []
-            for source_key, editor in editors.items():
+            for (tanda_name, source_key), editor in editors.items():
                 text = editor.get("1.0", "end-1c").strip()
                 if not text:
-                    missing.append(source_key)
-                self.db.set_normal_source_caption(tanda, source_key, text)
+                    missing.append(f"{tanda_name}/{source_key}" if multi_tanda else source_key)
+                self.db.set_normal_source_caption(tanda_name, source_key, text)
             if missing:
                 return messagebox.showwarning("Captions individuales", "Falta caption: " + ", ".join(missing), parent=dialog)
             dialog.destroy()

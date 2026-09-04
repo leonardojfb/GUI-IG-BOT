@@ -6,14 +6,18 @@ render, so the coordinates, opacity and timing have one source of truth.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import random
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 EXTERNAL_PROCESS_TIMEOUT_SECONDS = 300
+_OVERLAY_CACHE_DIR = Path(tempfile.gettempdir()) / "metodoig_video_editor_overlay_cache"
+_OVERLAY_CACHE_LOCK = threading.Lock()
 FFMPEG_METADATA_CLEAN_ARGS = [
     "-map_metadata", "-1",
     "-map_chapters", "-1",
@@ -149,17 +153,73 @@ def _xy(width: int, height: int, ow: int, oh: int, position: str, x: float, y: f
     return round(px), round(py)
 
 
-def _overlay_filter(info: dict, item: dict, input_index: int) -> str:
+def _overlay_geometry(info: dict, item: dict) -> dict:
     ow, oh = _ratio_size(info["width"], info["height"], float(item["size"]), item["ratio"])
     x, y = _xy(info["width"], info["height"], ow, oh, item["position"], float(item["x"]), float(item["y"]))
     start = max(0, int(item["frame"]))
     end = start + max(1, round(float(item["duration_ms"]) * info["fps"] / 1000)) - 1
     opacity = 0 if float(item["size"]) <= 0 else max(0, min(1, float(item["opacity"]) / 100))
-    return (f"[{input_index}:v]scale={ow}:{oh}:force_original_aspect_ratio=increase,"
-            f"crop={ow}:{oh},format=rgba,"
-            f"colorchannelmixer=aa={opacity}[ov{input_index}];"
-            f"[v{input_index - 1}][ov{input_index}]overlay={x}:{y}:"
-            f"enable='between(n,{start},{end})'[v{input_index}]")
+    return {"width": ow, "height": oh, "x": x, "y": y, "start": start, "end": end, "opacity": opacity}
+
+
+def _prepared_overlay_cache_path(item: dict, geometry: dict) -> Path:
+    photo_path = Path(item["photo"]).resolve()
+    try:
+        stat = photo_path.stat()
+    except OSError as error:
+        raise RuntimeError(f"No se pudo leer la foto '{item['photo']}'. Detalle: {error}") from error
+    payload = {
+        "version": 1,
+        "photo": str(photo_path),
+        "mtime_ns": stat.st_mtime_ns,
+        "size_bytes": stat.st_size,
+        "width": geometry["width"],
+        "height": geometry["height"],
+        "opacity": geometry["opacity"],
+    }
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+    return Path(_OVERLAY_CACHE_DIR) / f"{digest}.png"
+
+
+def _prepare_overlay_image(item: dict, geometry: dict) -> str:
+    cached = _prepared_overlay_cache_path(item, geometry)
+    if cached.is_file() and cached.stat().st_size > 0:
+        return str(cached)
+
+    with _OVERLAY_CACHE_LOCK:
+        if cached.is_file() and cached.stat().st_size > 0:
+            return str(cached)
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = cached.with_name(f"{cached.stem}.{os.getpid()}.{threading.get_ident()}.tmp.png")
+        result = _run([
+            _ffmpeg_tool_command("ffmpeg"), "-y", "-i", item["photo"],
+            "-vf",
+            (
+                f"scale={geometry['width']}:{geometry['height']}:force_original_aspect_ratio=increase,"
+                f"crop={geometry['width']}:{geometry['height']},format=rgba,"
+                f"colorchannelmixer=aa={geometry['opacity']}"
+            ),
+            "-frames:v", "1", str(tmp_path),
+        ])
+        if result.returncode:
+            if tmp_path.exists():
+                tmp_path.unlink()
+            stderr = (result.stderr or "")[-1800:]
+            raise RuntimeError(
+                f"FFmpeg no pudo preparar la foto '{item['photo']}' para el overlay: "
+                f"{stderr or 'sin detalle de stderr.'}"
+            )
+        if not tmp_path.is_file() or tmp_path.stat().st_size <= 0:
+            raise RuntimeError(f"FFmpeg no generó el overlay preparado para '{item['photo']}'.")
+        os.replace(tmp_path, cached)
+        return str(cached)
+
+
+def _overlay_filter(item: dict, input_index: int) -> str:
+    geometry = item["_overlay_geometry"]
+    return (f"[{input_index}:v]format=rgba[ov{input_index}];"
+            f"[v{input_index - 1}][ov{input_index}]overlay={geometry['x']}:{geometry['y']}:"
+            f"enable='between(n,{geometry['start']},{geometry['end']})'[v{input_index}]")
 
 
 def render_video(input_path: str, output_path: str, overlays: list[dict], ffmpeg_threads=None) -> str:
@@ -167,11 +227,15 @@ def render_video(input_path: str, output_path: str, overlays: list[dict], ffmpeg
     if not overlays:
         raise ValueError("Agregá al menos una foto.")
     base_cmd = [_ffmpeg_tool_command("ffmpeg"), "-y", "-i", input_path]
+    prepared_overlays = []
     for item in overlays:
-        base_cmd += ["-loop", "1", "-i", item["photo"]]
+        geometry = _overlay_geometry(info, item)
+        prepared = {**item, "_overlay_geometry": geometry, "photo": _prepare_overlay_image(item, geometry)}
+        prepared_overlays.append(prepared)
+        base_cmd += ["-loop", "1", "-i", prepared["photo"]]
     filters = [f"[0:v]format=yuv420p[v0]"]
-    for index, item in enumerate(overlays, start=1):
-        filters.append(_overlay_filter(info, item, index))
+    for index, item in enumerate(prepared_overlays, start=1):
+        filters.append(_overlay_filter(item, index))
     common_args = [
         "-filter_complex", ";".join(filters), "-map", f"[v{len(overlays)}]", "-map", "0:a?",
     ]

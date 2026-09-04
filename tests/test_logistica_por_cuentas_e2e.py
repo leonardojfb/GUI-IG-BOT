@@ -256,3 +256,65 @@ def test_por_cuentas_max_period_uses_all_complete_account_rounds(tmp_path, monke
             assert sum(1 for row in produced if row["username"] == username and row["day"] == 2) == 2
     finally:
         cleanup()
+
+
+def test_por_cuentas_can_shuffle_two_source_tandas_into_one_account_batch(tmp_path, monkeypatch):
+    app, cleanup = _make_app()
+    try:
+        import Organizador
+        import gui_premium_v7 as gui
+
+        base_dir = str(tmp_path)
+        monkeypatch.setattr(Organizador, "output_root", os.path.join(base_dir, "CALENDARIO_POSTEO"))
+        monkeypatch.setattr(gui, "_BASE_DIR", base_dir)
+        monkeypatch.setattr(gui, "_ACCT_HIST_FILE", os.path.join(base_dir, "acct_hist.json"))
+        monkeypatch.setattr(gui, "WorkerThread", _SyncWorkerThread)
+        monkeypatch.setattr(gui.messagebox, "showinfo", lambda *a, **k: None)
+        monkeypatch.setattr(gui.messagebox, "showerror", lambda *a, **k: None)
+        monkeypatch.setattr(gui.messagebox, "showwarning", lambda *a, **k: None)
+        monkeypatch.setattr(gui.messagebox, "askyesno", lambda *a, **k: True)
+
+        app.db.add_category("PC_MIX_CAT")
+        app.db.add_va("PC_MIX_VA")
+        for username in ("pc_mix_a", "pc_mix_b"):
+            app.db.add_virtual_account(username, "PC_MIX_CAT")
+            app.db.update_account(username, assigned_va="PC_MIX_VA")
+
+        for tanda_name in ("PC_MIX_ONE", "PC_MIX_TWO"):
+            tanda_dir = os.path.join(base_dir, "videos_finales", tanda_name)
+            os.makedirs(tanda_dir, exist_ok=True)
+            for i in range(1, 3):
+                with open(os.path.join(tanda_dir, f"{tanda_name}__SRC{i:02d}__P2.mp4"), "wb") as fh:
+                    fh.write(f"fake-video-{tanda_name}-{i}".encode())
+            app.db.add_tanda(tanda_name, tanda_name, tanda_name, "")
+
+        app.reload_dist_lists()
+        app.acct_dist_tanda.set("PC_MIX_ONE")
+        app.acct_dist_tanda_2.set("PC_MIX_TWO")
+        app.acct_dist_list.delete("1.0", "end")
+        app.acct_dist_list.insert("end", "pc_mix_a\npc_mix_b\n")
+        app.acct_dist_vpd.set(1)
+        app.acct_dist_period.set("MAX")
+
+        app._acct_dist_run(preview_only=False)
+
+        result_text = app.acct_dist_result.get("1.0", "end")
+        assert "Error" not in result_text, result_text
+        assert "PC_MIX_ONE + PC_MIX_TWO" in result_text
+
+        payload = json.loads((Path(base_dir) / "calendar_manifest.json").read_text(encoding="utf-8"))
+        produced = [
+            row for row in payload["entries"]
+            if row["delivery_kind"] == "normal" and row["username"] in {"pc_mix_a", "pc_mix_b"}
+        ]
+
+        assert len(produced) == 4
+        assert {row["tanda"] for row in produced} == {"PC_MIX_ONE", "PC_MIX_TWO"}
+        assert {
+            Path(row["source_path"]).parent.name for row in produced
+        } == {"PC_MIX_ONE", "PC_MIX_TWO"}
+        assert all(f"__TANDA_{row['tanda']}__" in row["telegram_filename"] for row in produced)
+        assert sum(1 for row in produced if row["username"] == "pc_mix_a") == 2
+        assert sum(1 for row in produced if row["username"] == "pc_mix_b") == 2
+    finally:
+        cleanup()

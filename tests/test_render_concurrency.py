@@ -117,33 +117,41 @@ def test_tanda_future_failure_prevents_a_success_result(monkeypatch, tmp_path):
     assert database.closed is True
 
 
-def test_editor_uses_high_profile_libx264_and_strips_ffmpeg_encoder_tags(monkeypatch):
+def test_editor_uses_high_profile_libx264_and_strips_ffmpeg_encoder_tags(monkeypatch, tmp_path):
     monkeypatch.setattr(video_editor, "probe_video", lambda _path: {"duration": 1.0, "width": 100, "height": 100, "fps": 30})
+    monkeypatch.setattr(video_editor, "_OVERLAY_CACHE_DIR", tmp_path / "cache")
+    photo = tmp_path / "photo.png"
+    photo.write_bytes(b"fake image")
+    overlay = {**OVERLAY, "photo": str(photo)}
     captured = []
 
     def run(command):
         captured.append(command)
+        if "-frames:v" in command:
+            Path(command[-1]).write_bytes(b"prepared")
         return SimpleNamespace(returncode=0, stderr="")
 
     monkeypatch.setattr(video_editor, "_run", run)
 
-    video_editor.render_video("source.mp4", "out.mp4", [OVERLAY], ffmpeg_threads=2)
+    video_editor.render_video("source.mp4", "out.mp4", [overlay], ffmpeg_threads=2)
 
-    assert len(captured) == 1
-    assert _video_codec(captured[0]) == "libx264"
-    assert "h264_nvenc" not in captured[0]
-    assert _contains_threads(captured[0], 2)
+    final_commands = [command for command in captured if "-filter_complex" in command]
+    assert len(final_commands) == 1
+    final_command = final_commands[0]
+    assert _video_codec(final_command) == "libx264"
+    assert "h264_nvenc" not in final_command
+    assert _contains_threads(final_command, 2)
     assert ["-profile:v", "high"] in [
-        captured[0][index:index + 2] for index in range(len(captured[0]) - 1)
+        final_command[index:index + 2] for index in range(len(final_command) - 1)
     ]
     assert ["-map_metadata", "-1"] in [
-        captured[0][index:index + 2] for index in range(len(captured[0]) - 1)
+        final_command[index:index + 2] for index in range(len(final_command) - 1)
     ]
     assert ["-metadata", "encoder="] in [
-        captured[0][index:index + 2] for index in range(len(captured[0]) - 1)
+        final_command[index:index + 2] for index in range(len(final_command) - 1)
     ]
     assert ["-metadata:s:v:0", "encoder="] in [
-        captured[0][index:index + 2] for index in range(len(captured[0]) - 1)
+        final_command[index:index + 2] for index in range(len(final_command) - 1)
     ]
 
 
