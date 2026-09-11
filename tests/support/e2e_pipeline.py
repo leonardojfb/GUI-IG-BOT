@@ -2,6 +2,7 @@ import importlib
 import json
 import os
 import random
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -10,12 +11,34 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from zipfile import ZipFile
 
-from tests.support.e2e_audit import audit_database, audit_filesystem, audit_telegram, render_audit_report
+from tests.support.e2e_audit import audit_database, audit_filesystem, audit_manifest_calendar, audit_telegram, render_audit_report
 from tests.support.fake_telegram import FakeTelegramSender
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MATRIX_PATH = REPO_ROOT / "tests" / "fixtures" / "e2e_pipeline_matrix.json"
+APP_MODULES = [
+    "Organizador",
+    "airtable_sync",
+    "calendar_manifest",
+    "cleaner",
+    "console_encoding",
+    "database",
+    "gui_organizador",
+    "gui_unificada",
+    "launcher",
+    "metadata_pool",
+    "organizadortg",
+    "render_performance",
+    "social_publishing",
+    "telegram_core",
+    "trial_content",
+    "updater",
+    "vercuentas",
+    "video_editor",
+    "videos",
+]
 
 
 def load_matrix(path: str | Path = MATRIX_PATH) -> dict:
@@ -31,6 +54,90 @@ def make_run_root() -> Path:
     root = Path(tempfile.gettempdir()) / "ig_gui_e2e_pipeline" / run_id
     root.mkdir(parents=True, exist_ok=False)
     return root
+
+
+def _release_files_from_build_script() -> list[str]:
+    script = (REPO_ROOT / "build_release.ps1").read_text(encoding="utf-8")
+    match = re.search(r"\$ReleaseFiles\s*=\s*@\((.*?)\)", script, re.S)
+    if not match:
+        raise AssertionError("build_release.ps1 must define a $ReleaseFiles array")
+    return re.findall(r'"([^"]+)"', match.group(1))
+
+
+def _make_release_zip(package_root: Path) -> Path:
+    zip_path = package_root / "MetodoIG-e2e.zip"
+    with ZipFile(zip_path, "w") as archive:
+        for relative in _release_files_from_build_script():
+            source = REPO_ROOT / relative
+            if not source.is_file():
+                raise AssertionError(f"release file missing: {relative}")
+            archive.write(source, relative)
+    return zip_path
+
+
+def _extract_release_install(package_root: Path) -> Path:
+    zip_path = _make_release_zip(package_root)
+    install_root = package_root / "install"
+    install_root.mkdir()
+    with ZipFile(zip_path) as archive:
+        archive.extractall(install_root)
+    return install_root
+
+
+@contextmanager
+def _app_import_context(app_root: Path | None):
+    if app_root is None:
+        yield
+        return
+
+    app_root = Path(app_root).resolve()
+    saved_path = list(os.sys.path)
+    saved_modules = {name: os.sys.modules.get(name) for name in APP_MODULES}
+    for name in APP_MODULES:
+        os.sys.modules.pop(name, None)
+    os.sys.path.insert(0, str(app_root))
+    importlib.invalidate_caches()
+    try:
+        yield
+    finally:
+        for name in APP_MODULES:
+            os.sys.modules.pop(name, None)
+            if saved_modules[name] is not None:
+                os.sys.modules[name] = saved_modules[name]
+        os.sys.path[:] = saved_path
+        importlib.invalidate_caches()
+
+
+def _run_extracted_launcher_smoke(install_root: Path) -> dict:
+    script = install_root / "_launcher_smoke.py"
+    script.write_text(
+        "\n".join(
+            [
+                "import json",
+                "from types import SimpleNamespace",
+                "import launcher",
+                "opened = []",
+                "launcher._run_update_check = lambda: True",
+                "launcher._ensure_timezone_data = lambda: ''",
+                "launcher._ensure_pillow = lambda: ''",
+                "launcher.subprocess.Popen = lambda command, **kwargs: opened.append((command, kwargs)) or SimpleNamespace(pid=1234)",
+                "returncode = launcher.main()",
+                "payload = {'returncode': returncode, 'opened_gui': bool(opened), 'gui_path': opened[0][0][1] if opened else ''}",
+                "print(json.dumps(payload))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [os.sys.executable, str(script)],
+        cwd=str(install_root),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode:
+        raise RuntimeError(result.stderr[-1600:] or result.stdout[-1600:] or "launcher smoke failed")
+    return json.loads(result.stdout.strip())
 
 
 def sha256_file(path: Path) -> str:
@@ -143,10 +250,12 @@ def seed_database(db_path: str | Path, matrix: dict) -> None:
         database.DB_PATH = old_path
 
 
-def _clone_db(run_root: Path) -> Path:
-    src = REPO_ROOT / "organizador.db"
+def _clone_db(run_root: Path, app_root: Path | None = None) -> Path:
+    source_root = Path(app_root) if app_root is not None else REPO_ROOT
+    src = source_root / "organizador.db"
     dst = run_root / "organizador.db"
-    shutil.copy2(src, dst)
+    if src.exists():
+        shutil.copy2(src, dst)
     return dst
 
 
@@ -446,6 +555,7 @@ def _write_test_report(summary, findings, audit_json, audit_md):
         f"- audit_md: {audit_md}",
         f"- processed_outputs: {summary['actual']['processed_outputs']} / {summary['expected']['processed_outputs']}",
         f"- distributed_files: {summary['actual']['distributed_files']} / {summary['expected']['distributed_files']}",
+        f"- manifest_entries: {summary['actual']['manifest_entries']} / {summary['expected']['manifest_entries']}",
         f"- telegram_sends: {summary['actual']['telegram_sends']} / {summary['expected']['telegram_sends']}",
         "",
         "## Finding counts",
@@ -479,77 +589,107 @@ def _write_test_report(summary, findings, audit_json, audit_md):
     return str(report_path)
 
 
-def run_e2e_pipeline(keep_artifacts=True):
-    matrix = load_matrix()
-    run_root = make_run_root()
-    db_path = _clone_db(run_root)
-    seed_database(db_path, matrix)
-    captions_dir = _create_captions(run_root)
-    manifest = {
-        "run_id": run_root.name,
-        "run_root": str(run_root),
-        "matrix": matrix,
-        "outputs": [],
-        "accounts_by_username": {a["username"]: a for a in matrix["accounts"]},
-        "va_chat_by_name": {v["name"]: v["telegram_id"] for v in matrix["vas"]},
-        "initial_db_snapshot": _snapshot_db(db_path),
-    }
+def run_e2e_pipeline(keep_artifacts=True, app_root: str | Path | None = None):
+    app_root = Path(app_root) if app_root is not None else None
+    with _app_import_context(app_root):
+        matrix = load_matrix()
+        run_root = make_run_root()
+        db_path = _clone_db(run_root, app_root)
+        seed_database(db_path, matrix)
+        captions_dir = _create_captions(run_root)
+        manifest = {
+            "run_id": run_root.name,
+            "run_root": str(run_root),
+            "matrix": matrix,
+            "outputs": [],
+            "accounts_by_username": {a["username"]: a for a in matrix["accounts"]},
+            "va_chat_by_name": {v["name"]: v["telegram_id"] for v in matrix["vas"]},
+            "initial_db_snapshot": _snapshot_db(db_path),
+        }
 
-    with patched_modules(run_root) as mods:
-        database, videos, video_editor, metadata_pool, Organizador, organizadortg = mods
-        _create_edicion(run_root, matrix, manifest, video_editor)
-        _create_tandas(run_root, db_path, matrix, manifest, videos)
-        _create_forge(run_root, db_path, manifest, database, metadata_pool)
-        _register_non_tanda_outputs(db_path, matrix, run_root)
-        _assign_logistica_captions(db_path, matrix, run_root)
-        previews, dist_results = _distribute_all(run_root, matrix, Organizador)
-        two_tanda = _run_two_tanda_route(run_root, db_path, matrix)
-        try:
-            organizadortg.db.close()
-        except Exception:
-            pass
-        organizadortg.db = database.DatabaseManager()
-        selected_accounts = [a["username"] for a in matrix["accounts"]]
-        telegram_result, telegram_events = _run_telegram(organizadortg, selected_accounts)
+        with patched_modules(run_root) as mods:
+            database, videos, video_editor, metadata_pool, Organizador, organizadortg = mods
+            _create_edicion(run_root, matrix, manifest, video_editor)
+            _create_tandas(run_root, db_path, matrix, manifest, videos)
+            _create_forge(run_root, db_path, manifest, database, metadata_pool)
+            _register_non_tanda_outputs(db_path, matrix, run_root)
+            _assign_logistica_captions(db_path, matrix, run_root)
+            previews, dist_results = _distribute_all(run_root, matrix, Organizador)
+            two_tanda = _run_two_tanda_route(run_root, db_path, matrix)
+            try:
+                organizadortg.db.close()
+            except Exception:
+                pass
+            organizadortg.db = database.DatabaseManager()
+            selected_accounts = [a["username"] for a in matrix["accounts"]]
+            telegram_result, telegram_events = _run_telegram(organizadortg, selected_accounts)
 
-    manifest["sha256"] = sha256_file
-    calendar_files = list((run_root / "CALENDARIO_POSTEO").rglob("*.mp4"))
-    findings = []
-    findings.extend(audit_filesystem(manifest, run_root / "videos_finales", run_root / "CALENDARIO_POSTEO"))
-    findings.extend(audit_database(manifest, db_path))
-    findings.extend(audit_telegram(manifest, telegram_events, "captions_by_tanda"))
+        manifest["sha256"] = sha256_file
+        current_manifest_path = run_root / "calendar_manifest.json"
+        if current_manifest_path.exists():
+            current_manifest = json.loads(current_manifest_path.read_text(encoding="utf-8"))
+            manifest["calendar_entries"] = current_manifest.get("entries", [])
+        else:
+            manifest["calendar_entries"] = []
+        calendar_files = list((run_root / "CALENDARIO_POSTEO").rglob("*.mp4"))
+        findings = []
+        findings.extend(
+            audit_filesystem(
+                manifest,
+                run_root / "videos_finales",
+                run_root / "CALENDARIO_POSTEO",
+                require_calendar_files=False,
+            )
+        )
+        findings.extend(audit_manifest_calendar(manifest))
+        findings.extend(audit_database(manifest, db_path))
+        findings.extend(audit_telegram(manifest, telegram_events, "captions_by_tanda"))
 
-    actual = {
-        "processed_outputs": len(manifest["outputs"]),
-        "distributed_files": len(calendar_files),
-        "telegram_sends": len([e for e in telegram_events if e.get("event") == "video"]),
-        "categories": matrix["categories"],
-        "vas": [v["name"] for v in matrix["vas"]],
-        "tandas": list(matrix["tandas"].keys()),
-    }
-    expected = {
-        "processed_outputs": 27,
-        "distributed_files": 27,
-        "telegram_sends": 27,
-    }
-    summary = {
-        "run_id": run_root.name,
-        "run_root": str(run_root),
-        "expected": expected,
-        "actual": actual,
-        "previews": previews,
-        "distribution_results": dist_results,
-        "two_tanda_route": two_tanda,
-        "telegram_results": {
-            "captions_by_tanda": telegram_result,
-        },
-    }
-    audit_json, audit_md = render_audit_report(findings, run_root / "audit.md", summary)
-    test_report = _write_test_report(summary, findings, audit_json, audit_md)
-    manifest["final_db_snapshot"] = _snapshot_db(db_path)
-    write_manifest(run_root / "manifest.json", {k: v for k, v in manifest.items() if k != "sha256"})
-    result = dict(summary)
-    result.update({"findings": findings, "audit_json": audit_json, "audit_md": audit_md, "test_report": test_report})
+        actual = {
+            "processed_outputs": len(manifest["outputs"]),
+            "distributed_files": len(calendar_files),
+            "manifest_entries": len(manifest["calendar_entries"]),
+            "telegram_sends": len([e for e in telegram_events if e.get("event") == "video"]),
+            "categories": matrix["categories"],
+            "vas": [v["name"] for v in matrix["vas"]],
+            "tandas": list(matrix["tandas"].keys()),
+        }
+        expected = {
+            "processed_outputs": 27,
+            "distributed_files": 0,
+            "manifest_entries": 9,
+            "telegram_sends": 9,
+        }
+        summary = {
+            "run_id": run_root.name,
+            "run_root": str(run_root),
+            "expected": expected,
+            "actual": actual,
+            "previews": previews,
+            "distribution_results": dist_results,
+            "two_tanda_route": two_tanda,
+            "telegram_results": {
+                "captions_by_tanda": telegram_result,
+            },
+        }
+        audit_json, audit_md = render_audit_report(findings, run_root / "audit.md", summary)
+        test_report = _write_test_report(summary, findings, audit_json, audit_md)
+        manifest["final_db_snapshot"] = _snapshot_db(db_path)
+        write_manifest(run_root / "manifest.json", {k: v for k, v in manifest.items() if k != "sha256"})
+        result = dict(summary)
+        result.update({"findings": findings, "audit_json": audit_json, "audit_md": audit_md, "test_report": test_report})
+        if not keep_artifacts:
+            shutil.rmtree(run_root, ignore_errors=True)
+        return result
+
+
+def run_extracted_release_e2e_pipeline(keep_artifacts=True):
+    package_root = make_run_root()
+    install_root = _extract_release_install(package_root)
+    launcher_result = _run_extracted_launcher_smoke(install_root)
+    result = run_e2e_pipeline(keep_artifacts=keep_artifacts, app_root=install_root)
+    result["install_root"] = str(install_root)
+    result["launcher"] = launcher_result
     if not keep_artifacts:
-        shutil.rmtree(run_root, ignore_errors=True)
+        shutil.rmtree(package_root, ignore_errors=True)
     return result

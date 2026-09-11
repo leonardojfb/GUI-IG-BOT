@@ -64,6 +64,25 @@ Builder real ejecutado en ambos modos:
 - La prueba automatizada aplica bootstrap y application de la misma version en
   secuencia; la segunda fase completa la app y elimina `update_phase`.
 
+Recorrido E2E explicito, incluido paquete extraido:
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/smoke_e2e_pipeline.py -q
+```
+
+Resultado: `2 passed in 241.07s`.
+
+- El primer smoke corre productores, Logistica, manifest vigente y Telegram fake
+  desde el checkout.
+- El segundo smoke crea un ZIP temporal con el `$ReleaseFiles` real, lo extrae
+  en una ruta nueva, ejecuta `launcher.main()` en esa instalacion parcheando solo
+  el `Popen`, y luego corre el mismo pipeline importando los modulos desde el ZIP
+  extraido.
+- El contrato validado para el calendario actual es JSON-first: `27` outputs
+  producidos, `9` entradas vigentes en `calendar_manifest.json`, `9` envios
+  fake de Telegram y `0` copias fisicas obligatorias en `CALENDARIO_POSTEO`.
+
 ## Contratos incorporados
 
 - El manifest v1 conserva `caption_mode` y agrega el destino Reel/Trial explicito
@@ -104,8 +123,6 @@ b86674dfe4aa9f48596fe2e70bb067993a2bf13c6423c456f8f29385dd426860  release-manife
 
 ## Pendientes antes de cerrar R00
 
-- Ejecutar el recorrido launcher, GUI, productores, ambas logisticas, manifest y
-  Telegram fake desde un ZIP extraido en una ruta nueva.
 - Inventariar y clasificar todos los BAT y los imports con efectos secundarios.
 - Verificar dependencias transitivas en una instalacion sin paquetes heredados.
 - Convertir los recorridos UI hoy omitidos sin display en evidencia visual sobre

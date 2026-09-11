@@ -1,6 +1,17 @@
 from pathlib import Path
 
-from tests.support.e2e_pipeline import run_e2e_pipeline
+from tests.support.e2e_pipeline import run_e2e_pipeline, run_extracted_release_e2e_pipeline
+
+
+def _assert_current_json_calendar_result(result):
+    assert result["expected"]["processed_outputs"] == 27
+    assert result["actual"]["processed_outputs"] == 27
+    assert result["expected"]["distributed_files"] == 0
+    assert result["actual"]["distributed_files"] == 0
+    assert result["expected"]["manifest_entries"] == 9
+    assert result["actual"]["manifest_entries"] == 9
+    assert result["expected"]["telegram_sends"] == 9
+    assert result["actual"]["telegram_sends"] == 9
 
 
 def test_e2e_multimedia_logistica_telegram_smoke():
@@ -12,12 +23,7 @@ def test_e2e_multimedia_logistica_telegram_smoke():
     assert Path(result["audit_md"]).exists()
     assert Path(result["test_report"]).exists()
 
-    assert result["expected"]["processed_outputs"] == 27
-    assert result["actual"]["processed_outputs"] == 27
-    assert result["expected"]["distributed_files"] == 27
-    assert result["actual"]["distributed_files"] == 27
-    assert result["expected"]["telegram_sends"] == 27
-    assert result["actual"]["telegram_sends"] == 27
+    _assert_current_json_calendar_result(result)
 
     assert result["actual"]["categories"] == [
         "PRUEBA_CAT_A",
@@ -47,7 +53,10 @@ def test_e2e_multimedia_logistica_telegram_smoke():
         "CATEGORY_MIX",
         "ACCOUNT_VA_MIX",
         "TELEGRAM_CHAT_TOPIC_MIX",
-        "FILE_MISSING",
+        "MANIFEST_ACCOUNT_MISSING",
+        "MANIFEST_ACCOUNT_UNKNOWN",
+        "MANIFEST_DUPLICATE_ACCOUNT",
+        "MANIFEST_SOURCE_MISSING",
         "FILE_DUPLICATE",
         "CAPTION_LOST",
         "CAPTION_WRONG_TANDA",
@@ -55,3 +64,17 @@ def test_e2e_multimedia_logistica_telegram_smoke():
         "CALENDAR_CONTENT_CHANGED",
     }
     assert not (bug_codes & severe_identity_bugs)
+
+
+def test_extracted_release_launcher_logistica_telegram_smoke():
+    result = run_extracted_release_e2e_pipeline(keep_artifacts=True)
+
+    assert result["install_root"].endswith("install")
+    assert result["launcher"]["returncode"] == 0
+    assert result["launcher"]["opened_gui"]
+    assert Path(result["launcher"]["gui_path"]).name == "gui_premium_v7.py"
+    assert Path(result["run_root"]).exists()
+    assert Path(result["audit_json"]).exists()
+    assert Path(result["audit_md"]).exists()
+
+    _assert_current_json_calendar_result(result)
