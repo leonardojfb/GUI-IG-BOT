@@ -4,7 +4,6 @@ Gestiona la creación de infraestructura de Telegram para Virtual Assistants
 """
 
 import asyncio
-from pyrogram import Client
 from database import DatabaseManager
 
 # ==================== CONFIGURACIÓN ====================
@@ -16,6 +15,12 @@ CHAT_ID = "-1003749971714"
 # Obtenlas en: https://my.telegram.org/apps
 API_ID = 12345678  # Reemplazar con tu API_ID real
 API_HASH = "0123456789abcdef0123456789abcdef"  # Reemplazar con tu API_HASH real
+
+
+def _telegram_client(*args, **kwargs):
+    from pyrogram import Client
+
+    return Client(*args, **kwargs)
 
 # ==================== FUNCIONES ASÍNCRONAS ====================
 async def create_va_infrastructure(va_name: str) -> dict:
@@ -50,7 +55,7 @@ async def create_va_infrastructure(va_name: str) -> dict:
     
     # Crear cliente de Pyrogram
     # session_name será el nombre del archivo .session que se creará
-    app = Client(
+    app = _telegram_client(
         name=f"va_{va_name.lower().replace(' ', '_')}_session",
         api_id=API_ID,
         api_hash=API_HASH
@@ -133,7 +138,7 @@ async def create_account_topic(va_name: str, account_username: str) -> dict:
     # (Nota: Necesitarías añadir un método get_va_by_name en DatabaseManager para esto)
     # Por ahora, asumimos que el grupo existe
     
-    app = Client(
+    app = _telegram_client(
         name=f"va_{va_name.lower().replace(' ', '_')}_session",
         api_id=API_ID,
         api_hash=API_HASH
@@ -201,7 +206,7 @@ async def get_me_info() -> dict:
     """
     result = {'success': False, 'user': None, 'error': None}
     
-    app = Client(
+    app = _telegram_client(
         name="test_session",
         api_id=API_ID,
         api_hash=API_HASH

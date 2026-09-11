@@ -38,7 +38,7 @@ paquete incompleto.
 | `styles/__init__.py` | Si | Paquete vacio/ligero. | Bajo | Apto para import. |
 | `styles/colors.py` | Si | Constantes de colores/tamanos. | Bajo | Apto para import. |
 | `styles/components.py` | Parcial | Define componentes CustomTkinter; importa UI deps. | Medio | Importar solo donde ya se requiere GUI. |
-| `telegram_core.py` | Si | Helpers Telegram sin envio top-level. | Bajo | Apto para import. |
+| `telegram_core.py` | Si | Helpers Telegram sin envio top-level; Pyrogram se importa de forma lazy al crear el cliente. | Bajo | Apto para import en runtime limpio sin instalar dependencias heredadas. |
 | `trial_content.py` | Si | Helpers puros de Trials/calendario. | Bajo | Apto para import. |
 | `updater.py` | Si | Define allowlists, excepciones y funciones; no aplica update salvo llamada explicita. | Bajo/medio: funciones escriben backup/status cuando se ejecutan. | Puede importarse desde launcher; `check_and_apply()` debe respetar `RECOVERY_REQUIRED`. |
 | `vercuentas.py` | No | Crea `DatabaseManager()`, consulta tabla e imprime cuentas al importar. | Alto: importarlo ejecuta SQL y stdout. | No debe importarse desde GUI/launcher; si se conserva, usarlo solo como script manual o refactorizar bajo `main()`. |

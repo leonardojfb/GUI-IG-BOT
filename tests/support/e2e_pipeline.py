@@ -693,3 +693,91 @@ def run_extracted_release_e2e_pipeline(keep_artifacts=True):
     if not keep_artifacts:
         shutil.rmtree(package_root, ignore_errors=True)
     return result
+
+
+def run_clean_runtime_smoke():
+    package_root = make_run_root()
+    install_root = _extract_release_install(package_root)
+    venv_root = package_root / ".venv-clean"
+    subprocess.run(
+        [os.sys.executable, "-m", "venv", str(venv_root)],
+        cwd=str(install_root),
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    python = venv_root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    subprocess.run(
+        [
+            str(python),
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "-r",
+            str(install_root / "requirements.txt"),
+        ],
+        cwd=str(install_root),
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=240,
+    )
+
+    modules = [
+        "airtable_sync",
+        "calendar_manifest",
+        "console_encoding",
+        "database",
+        "gui_premium_v7",
+        "launcher",
+        "metadata_pool",
+        "Organizador",
+        "organizadortg",
+        "render_performance",
+        "social_publishing",
+        "telegram_core",
+        "trial_content",
+        "updater",
+        "video_editor",
+        "videos",
+    ]
+    script = install_root / "_clean_runtime_smoke.py"
+    script.write_text(
+        "\n".join(
+            [
+                "import importlib, json, sys",
+                "from types import SimpleNamespace",
+                f"modules = {modules!r}",
+                "imported = []",
+                "for name in modules:",
+                "    importlib.import_module(name)",
+                "    imported.append(name)",
+                "import launcher",
+                "opened = []",
+                "launcher._run_update_check = lambda: True",
+                "launcher._ensure_timezone_data = lambda: ''",
+                "launcher._ensure_pillow = lambda: ''",
+                "launcher.subprocess.Popen = lambda command, **kwargs: opened.append((command, kwargs)) or SimpleNamespace(pid=1234)",
+                "returncode = launcher.main()",
+                "print(json.dumps({'venv': sys.prefix != sys.base_prefix, 'imported': imported, 'launcher_returncode': returncode, 'opened_gui': bool(opened)}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["PYTHONNOUSERSITE"] = "1"
+    result = subprocess.run(
+        [str(python), str(script)],
+        cwd=str(install_root),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if result.returncode:
+        raise RuntimeError(result.stderr[-1600:] or result.stdout[-1600:] or "clean runtime smoke failed")
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    shutil.rmtree(package_root, ignore_errors=True)
+    return payload

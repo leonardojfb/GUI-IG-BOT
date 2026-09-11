@@ -98,6 +98,22 @@ Resultado: `2 passed in 0.12s`.
   con efectos top-level como `organizadortg.py`, `gui_premium_v7.py` y
   `vercuentas.py`.
 
+Runtime limpio desde release extraida:
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/smoke_clean_runtime.py -q
+```
+
+Resultado: `1 passed in 23.35s`.
+
+- El smoke crea un ZIP temporal con `$ReleaseFiles`, lo extrae, crea una venv
+  limpia, instala solo `requirements.txt`, importa los modulos criticos y
+  ejecuta `launcher.main()` con `Popen` falso.
+- El primer rojo encontro que `telegram_core.py` importaba `pyrogram` top-level
+  aunque la dependencia no esta en `requirements.txt`; se corrigio con import
+  lazy dentro del helper de cliente Telegram.
+
 ## Contratos incorporados
 
 - El manifest v1 conserva `caption_mode` y agrega el destino Reel/Trial explicito
@@ -138,7 +154,6 @@ b86674dfe4aa9f48596fe2e70bb067993a2bf13c6423c456f8f29385dd426860  release-manife
 
 ## Pendientes antes de cerrar R00
 
-- Verificar dependencias transitivas en una instalacion sin paquetes heredados.
 - Convertir los recorridos UI hoy omitidos sin display en evidencia visual sobre
   Windows con display disponible.
 
