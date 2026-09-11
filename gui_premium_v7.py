@@ -42,7 +42,13 @@ from trial_content import (
     reused_trial_tanda_warnings, trial_preview_path,
     source_key_from_filename, forge_output_id_from_filename,
 )
-from updater import APP_DIR as UPDATE_APP_DIR, check_and_apply, load_config, read_local_version
+from updater import (
+    APP_DIR as UPDATE_APP_DIR,
+    RecoveryRequiredError,
+    check_and_apply,
+    load_config,
+    read_local_version,
+)
 from console_encoding import ensure_stdout_utf8
 
 ensure_stdout_utf8()
@@ -1507,7 +1513,12 @@ class InstagramAutoPro(ctk.CTk):
 
         def worker():
             messages = []
-            updated = check_and_apply(UPDATE_APP_DIR, status_callback=messages.append)
+            try:
+                updated = check_and_apply(UPDATE_APP_DIR, status_callback=messages.append)
+            except RecoveryRequiredError as exc:
+                updated = False
+                if not messages:
+                    messages.append(str(exc))
             try:
                 after = read_local_version(UPDATE_APP_DIR)
             except Exception:
@@ -2036,9 +2047,20 @@ class InstagramAutoPro(ctk.CTk):
                 r, text=f"Checks ({len(limitations)})", width=108, height=30,
                 command=lambda u=username, values=limitations: self._edit_account_limitations(u, values),
             ).grid(row=0, column=8, padx=(2, 4), pady=6)
+            override_enabled = bool(acc.get("story_link_override_enabled"))
+            override_url = acc.get("story_link_override") or ""
+            GhostButton(
+                r,
+                text="Editar enlace individual",
+                width=150,
+                height=30,
+                command=lambda u=username, enabled=override_enabled, url=override_url: (
+                    self._save_story_link_override(u, enabled, url)
+                ),
+            ).grid(row=0, column=9, padx=(2, 4), pady=6)
             DangerButton(r, text="×", width=28, height=30,
                           command=lambda u=username: self._admin_delete_account(u)
-                          ).grid(row=0, column=9, padx=(2, 8), pady=6)
+                          ).grid(row=0, column=10, padx=(2, 8), pady=6)
 
     def _set_account_label(self, username: str, value: str):
         self.db.update_account(username, ig_label=value)
@@ -2069,6 +2091,45 @@ class InstagramAutoPro(ctk.CTk):
 
     def _set_account_notes(self, username: str, value: str):
         self.db.update_account(username, notes=value.strip())
+
+    def _save_story_link_base_url(self):
+        value = self.story_link_base_entry.get().strip()
+        try:
+            normalized = self.db.set_story_link_base_url(value)
+        except ValueError as exc:
+            return messagebox.showerror("Links de historias", str(exc), parent=self)
+        self.story_link_base_entry.delete(0, "end")
+        self.story_link_base_entry.insert(0, normalized)
+        messagebox.showinfo(
+            "Links de historias",
+            "El dominio se aplicara a todas las cuentas sin enlace individual.",
+            parent=self,
+        )
+
+    def _save_story_link_override(self, username: str, enabled: bool, current_url: str):
+        use_override = messagebox.askyesnocancel(
+            "Links de historias",
+            f"Usar un enlace individual para @{username}?\n\n"
+            "Si eliges No, la cuenta volvera a usar el dominio compartido.",
+            parent=self,
+        )
+        if use_override is None:
+            return
+        value = ""
+        if use_override:
+            value = simpledialog.askstring(
+                "Editar enlace individual",
+                f"Enlace completo para @{username}:",
+                initialvalue=current_url if enabled else "",
+                parent=self,
+            )
+            if value is None:
+                return
+        try:
+            self.db.set_story_link_override(username, use_override, value)
+        except ValueError as exc:
+            return messagebox.showerror("Links de historias", str(exc), parent=self)
+        self._admin_load_accounts()
 
     @staticmethod
     def _parse_account_limitations(raw) -> list[str]:
@@ -4153,7 +4214,7 @@ class InstagramAutoPro(ctk.CTk):
     # ── Panel Estado de Cuentas ───────────────────────────────────────────────
     def _build_cuentas_frame(self):
         f = self._frames["Cuentas"]
-        f.grid_rowconfigure(2, weight=1)
+        f.grid_rowconfigure(3, weight=1)
         f.grid_columnconfigure(0, weight=1)
 
         PageHeader(
@@ -4186,8 +4247,29 @@ class InstagramAutoPro(ctk.CTk):
         PrimaryButton(add_body, text="Añadir cuentas",
                       command=self.add_bulk_accounts).grid(row=4, column=1, sticky="e")
 
+        story_card = Card(f, title="Links de historias")
+        story_card.grid(row=2, column=0, sticky="ew", padx=24, pady=(0, 10))
+        story_body = story_card.body
+        story_body.grid_columnconfigure(0, weight=1)
+        self.story_link_base_entry = ctk.CTkEntry(
+            story_body,
+            fg_color=BG_INPUT,
+            border_color=BORDER,
+            placeholder_text="https://dominio.ejemplo",
+        )
+        self.story_link_base_entry.grid(row=0, column=0, sticky="ew", padx=(0, 12))
+        current_story_base = self.db.get_story_link_base_url()
+        if current_story_base:
+            self.story_link_base_entry.insert(0, current_story_base)
+        PrimaryButton(
+            story_body,
+            text="Aplicar a todas",
+            width=140,
+            command=self._save_story_link_base_url,
+        ).grid(row=0, column=1, sticky="e")
+
         accounts_card = Card(f, title="Cuentas destino")
-        accounts_card.grid(row=2, column=0, sticky="nsew", padx=24, pady=(0, 20))
+        accounts_card.grid(row=3, column=0, sticky="nsew", padx=24, pady=(0, 20))
         accounts_body = accounts_card.body
         accounts_body.grid_rowconfigure(2, weight=1)
         accounts_body.grid_columnconfigure(0, weight=1)

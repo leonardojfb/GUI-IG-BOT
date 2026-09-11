@@ -13,8 +13,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from calendar_manifest import load_entries, manifest_path, remove_entries_for_accounts
+from calendar_manifest import (
+    load_entries,
+    manifest_path,
+    publication_target_for_entry,
+    remove_entries_for_accounts,
+)
 from database import DatabaseManager
+from social_publishing import is_telegram_publication_target
 from trial_content import source_key_from_filename
 from console_encoding import ensure_stdout_utf8
 
@@ -145,6 +151,9 @@ def _scan_manifest_calendar_structure(manifest_file=None):
     }
     rows = []
     for entry in load_entries(manifest_file or _calendar_manifest_file(), require_source=True):
+        publication_target = publication_target_for_entry(entry)
+        if not is_telegram_publication_target(publication_target):
+            continue
         day_number = int(entry.get("day") or 0)
         rows.append({
             "path": entry["source_path"],
@@ -155,6 +164,7 @@ def _scan_manifest_calendar_structure(manifest_file=None):
             "slot": int(entry.get("slot") or 0),
             "username": entry["username"],
             "delivery_kind": entry.get("delivery_kind", "normal"),
+            "publication_target": publication_target,
             "account_id": entry.get("account_id"),
             "transform_log_id": entry.get("transform_log_id"),
             "caption_mode": entry.get("caption_mode"),

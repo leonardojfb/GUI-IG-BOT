@@ -159,5 +159,68 @@ class VATimezoneTest(unittest.TestCase):
         self.assertEqual(tz, "America/Argentina/Buenos_Aires")
 
 
+class StoryLinkSettingsTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp_db_fd, self.tmp_db_path = tempfile.mkstemp(suffix=".db")
+        os.close(self.tmp_db_fd)
+        import database
+
+        self._original_db_path = database.DB_PATH
+        database.DB_PATH = self.tmp_db_path
+        from database import DatabaseManager
+
+        self.db = DatabaseManager()
+
+    def tearDown(self):
+        self.db.close()
+        import database
+
+        database.DB_PATH = self._original_db_path
+        if os.path.exists(self.tmp_db_path):
+            os.unlink(self.tmp_db_path)
+
+    def test_story_link_settings_and_account_override_persist(self):
+        self.db.add_virtual_account("nombre.de.cuenta", "MAIN")
+
+        self.assertEqual(
+            self.db.set_story_link_base_url("link.ejemplo/"),
+            "https://link.ejemplo",
+        )
+        self.assertEqual(
+            self.db.resolve_story_link_for_account("nombre.de.cuenta"),
+            "https://link.ejemplo/nombre.de.cuenta",
+        )
+
+        self.db.set_story_link_override(
+            "nombre.de.cuenta",
+            True,
+            "https://especial.ejemplo/cuenta",
+        )
+        self.assertEqual(
+            self.db.resolve_story_link_for_account("nombre.de.cuenta"),
+            "https://especial.ejemplo/cuenta",
+        )
+
+        self.db.set_story_link_override("nombre.de.cuenta", False)
+        self.assertEqual(
+            self.db.resolve_story_link_for_account("nombre.de.cuenta"),
+            "https://link.ejemplo/nombre.de.cuenta",
+        )
+
+    def test_story_link_columns_and_settings_table_exist_after_init(self):
+        cur = self.db.conn.cursor()
+        cur.execute("PRAGMA table_info(virtual_accounts)")
+        cols = {row["name"] for row in cur.fetchall()}
+        self.assertLessEqual(
+            {"story_link_override_enabled", "story_link_override"},
+            cols,
+        )
+        cur.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='social_publishing_settings'"
+        )
+        self.assertIsNotNone(cur.fetchone())
+
+
 if __name__ == "__main__":
     unittest.main()

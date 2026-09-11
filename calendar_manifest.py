@@ -7,6 +7,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from social_publishing import default_publication_target, validate_publication_metadata
+
 MANIFEST_VERSION = 1
 MANIFEST_FILENAME = "calendar_manifest.json"
 
@@ -31,7 +33,23 @@ def build_entry(
     transform_log_id: int | None = None,
     caption_mode: str | None = None,
     created_at: str | None = None,
+    *,
+    publication_target: str | None = None,
+    caption: str = "",
+    story_link_url: str = "",
+    story_announcement_text: str = "",
+    platform_payload: dict | None = None,
+    manual_status: str = "planned",
 ) -> dict:
+    target = publication_target or default_publication_target(delivery_kind)
+    metadata = validate_publication_metadata(
+        target,
+        str(delivery_kind),
+        caption,
+        story_link_url,
+        story_announcement_text,
+        platform_payload,
+    )
     entry = {
         "id": str(uuid.uuid4()),
         "username": str(username),
@@ -44,6 +62,12 @@ def build_entry(
         "telegram_filename": str(telegram_filename),
         "transform_log_id": transform_log_id,
         "created_at": created_at or _now_utc(),
+        "publication_target": target,
+        "caption": metadata["caption"],
+        "story_link_url": metadata["story_link_url"],
+        "story_announcement_text": metadata["story_announcement_text"],
+        "platform_payload": metadata["platform_payload"],
+        "manual_status": str(manual_status or "planned"),
     }
     if caption_mode:
         entry["caption_mode"] = str(caption_mode)
@@ -85,11 +109,18 @@ def load_entries(path: str | os.PathLike, require_source: bool = True) -> list[d
     return [entry for entry in entries if Path(entry.get("source_path", "")).exists()]
 
 
+def publication_target_for_entry(entry: dict) -> str:
+    return entry.get("publication_target") or default_publication_target(
+        entry.get("delivery_kind", "normal")
+    )
+
+
 def replace_entries(
     path: str | os.PathLike,
     entries: list[dict],
     usernames: set[str],
     delivery_kind: str,
+    publication_target: str | None = None,
 ) -> list[dict]:
     manifest = Path(path)
     current = list(_read_payload(manifest)["entries"])
@@ -97,7 +128,14 @@ def replace_entries(
     kept = [
         entry
         for entry in current
-        if not (entry.get("username") in affected and entry.get("delivery_kind") == delivery_kind)
+        if not (
+            entry.get("username") in affected
+            and entry.get("delivery_kind") == delivery_kind
+            and (
+                publication_target is None
+                or publication_target_for_entry(entry) == publication_target
+            )
+        )
     ]
     merged = kept + list(entries)
     _write_payload(manifest, merged)
