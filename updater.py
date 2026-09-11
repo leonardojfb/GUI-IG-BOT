@@ -64,6 +64,9 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "styles/__init__.py",
     }
 )
+OPTIONAL_APPLICATION_FILES = frozenset({"organizador.default.db"})
+APPLICATION_REQUIRED_FILES = DEFAULT_UPDATEABLE_FILES - OPTIONAL_APPLICATION_FILES
+BOOTSTRAP_FILES = frozenset({"updater.py", VERSION_FILE})
 
 _VERSION_RE = re.compile(r"^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:[-+].*)?$")
 
@@ -257,6 +260,62 @@ def _manifest_files(manifest: dict[str, Any]) -> list[str]:
     return files
 
 
+def _validated_package_files(
+    manifest: dict[str, Any], allowed: set[str]
+) -> tuple[str, list[str]]:
+    package_kind = str(manifest.get("package_kind", "")).strip().lower()
+    if package_kind not in {"application", "bootstrap"}:
+        raise UpdateError("El manifiesto necesita package_kind application o bootstrap")
+
+    requested = _manifest_files(manifest)
+    requested_set = set(requested)
+    prohibited = sorted(requested_set - allowed)
+    if prohibited:
+        raise UpdateError(f"Archivo no permitido por el updater: {prohibited[0]}")
+    if VERSION_FILE not in requested_set:
+        raise UpdateError("La lista files no contiene version.json")
+
+    if package_kind == "bootstrap":
+        if requested_set != BOOTSTRAP_FILES:
+            raise UpdateError(
+                "El paquete bootstrap solo puede contener updater.py y version.json"
+            )
+    else:
+        missing_application = sorted(APPLICATION_REQUIRED_FILES - requested_set)
+        if missing_application:
+            raise UpdateError(
+                "Paquete application incompleto; falta " + missing_application[0]
+            )
+    return package_kind, requested
+
+
+def _mark_recovery_required(app_dir: Path, message: str, backup_dir: Path) -> None:
+    status_path = app_dir / ".update_status.json"
+    payload = {
+        "error": message,
+        "recovery_required": True,
+        "backup_dir": str(backup_dir),
+    }
+    try:
+        status_path.write_text(
+            json.dumps(payload, ensure_ascii=True, indent=2),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
+def _existing_recovery_error(app_dir: Path) -> str:
+    status_path = app_dir / ".update_status.json"
+    try:
+        payload = json.loads(status_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    if not isinstance(payload, dict) or payload.get("recovery_required") is not True:
+        return ""
+    return str(payload.get("error") or "RECOVERY_REQUIRED: la instalacion requiere reparacion")
+
+
 def _atomic_copy(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(f".{destination.name}.update-tmp")
@@ -281,22 +340,23 @@ def apply_package(
     allowed = {item.replace("\\", "/") for item in allowed_files}
     remote_version = str(manifest.get("version", ""))
     _version_tuple(remote_version)
-    local_version = read_local_version(app_dir)
-    if not is_newer(remote_version, local_version):
-        return local_version
-    requested = _manifest_files(manifest)
+    package_kind, requested = _validated_package_files(manifest, allowed)
     requested_set = set(requested)
-    prohibited = sorted(requested_set - allowed)
-    if prohibited:
-        raise UpdateError(f"Archivo no permitido por el updater: {prohibited[0]}")
-    if VERSION_FILE not in requested_set:
-        raise UpdateError("La lista files no contiene version.json")
+    local_version_payload = _read_json(app_dir / VERSION_FILE)
+    local_version = str(local_version_payload.get("version", ""))
+    _version_tuple(local_version)
+    completes_bootstrap = (
+        package_kind == "application"
+        and remote_version == local_version
+        and local_version_payload.get("update_phase") == "bootstrap"
+    )
+    if not completes_bootstrap and not is_newer(remote_version, local_version):
+        return local_version
 
     with tempfile.TemporaryDirectory(prefix="metodo_ig_update_") as temp_name:
         extract_dir = Path(temp_name) / "package"
-        backup_dir = Path(temp_name) / "backup"
         extract_dir.mkdir()
-        backup_dir.mkdir()
+        backup_dir: Path | None = None
         backups: list[tuple[Path, Path]] = []
         created: list[Path] = []
 
@@ -324,6 +384,11 @@ def apply_package(
                     f"Version del ZIP ({packaged_version}) distinta del manifiesto ({remote_version})"
                 )
 
+            recovery_root = app_dir / ".update_recovery"
+            recovery_root.mkdir(parents=True, exist_ok=True)
+            backup_dir = Path(
+                tempfile.mkdtemp(prefix=f"from-{local_version}-", dir=str(recovery_root))
+            )
             for file_name in sorted(
                 relative for _, relative in selected if relative != VERSION_FILE
             ) + [VERSION_FILE]:
@@ -346,19 +411,36 @@ def apply_package(
                     pass
                 except OSError as recovery_exc:
                     recovery_errors.append(f"no se pudo eliminar {target}: {recovery_exc}")
+                if target.exists():
+                    recovery_errors.append(f"el archivo nuevo sigue presente: {target}")
             for target, backup in reversed(backups):
                 try:
                     _atomic_copy(backup, target)
                 except OSError as recovery_exc:
                     recovery_errors.append(f"no se pudo restaurar {target}: {recovery_exc}")
+                    continue
+                try:
+                    if sha256_file(target) != sha256_file(backup):
+                        recovery_errors.append(f"hash restaurado invalido: {target}")
+                except OSError as recovery_exc:
+                    recovery_errors.append(f"no se pudo verificar {target}: {recovery_exc}")
             if recovery_errors:
                 detail = "; ".join(recovery_errors)
-                raise RecoveryRequiredError(
-                    f"RECOVERY_REQUIRED: la instalacion anterior no pudo restaurarse: {detail}"
-                ) from exc
+                message = (
+                    "RECOVERY_REQUIRED: la instalacion anterior no pudo restaurarse: "
+                    f"{detail}. Backup: {backup_dir}"
+                )
+                if backup_dir is not None:
+                    _mark_recovery_required(app_dir, message, backup_dir)
+                raise RecoveryRequiredError(message) from exc
+            if backup_dir is not None:
+                shutil.rmtree(backup_dir, ignore_errors=True)
             if isinstance(exc, UpdateError):
                 raise
             raise UpdateError("No se pudo aplicar la actualizacion; se restauro la version anterior") from exc
+
+        if backup_dir is not None:
+            shutil.rmtree(backup_dir, ignore_errors=True)
 
     return remote_version
 
@@ -377,6 +459,11 @@ def check_and_apply(
             status_callback(message)
 
     try:
+        recovery_error = _existing_recovery_error(app_dir)
+        if recovery_error:
+            if not recovery_error.startswith("RECOVERY_REQUIRED"):
+                recovery_error = f"RECOVERY_REQUIRED: {recovery_error}"
+            raise RecoveryRequiredError(recovery_error)
         config = load_config(app_dir)
         manifest_url = str(config.get("manifest_url", "")).strip()
         if not manifest_url:

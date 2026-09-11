@@ -7,7 +7,11 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from social_publishing import default_publication_target, validate_publication_metadata
+from social_publishing import (
+    TELEGRAM_PUBLICATION_TARGETS,
+    default_publication_target,
+    validate_publication_metadata,
+)
 
 MANIFEST_VERSION = 1
 MANIFEST_FILENAME = "calendar_manifest.json"
@@ -42,6 +46,10 @@ def build_entry(
     manual_status: str = "planned",
 ) -> dict:
     target = publication_target or default_publication_target(delivery_kind)
+    if target not in TELEGRAM_PUBLICATION_TARGETS:
+        raise ValueError(
+            "Los destinos manuales requieren manifest v2 y permanecen desactivados."
+        )
     metadata = validate_publication_metadata(
         target,
         str(delivery_kind),
@@ -125,16 +133,25 @@ def replace_entries(
     manifest = Path(path)
     current = list(_read_payload(manifest)["entries"])
     affected = {str(name) for name in usernames}
+    target = publication_target or default_publication_target(delivery_kind)
+    if target not in TELEGRAM_PUBLICATION_TARGETS:
+        raise ValueError(
+            "Los destinos manuales requieren manifest v2 y permanecen desactivados."
+        )
+    if any(
+        publication_target_for_entry(entry) not in TELEGRAM_PUBLICATION_TARGETS
+        for entry in entries
+    ):
+        raise ValueError(
+            "Los destinos manuales requieren manifest v2 y permanecen desactivados."
+        )
     kept = [
         entry
         for entry in current
         if not (
             entry.get("username") in affected
             and entry.get("delivery_kind") == delivery_kind
-            and (
-                publication_target is None
-                or publication_target_for_entry(entry) == publication_target
-            )
+            and publication_target_for_entry(entry) == target
         )
     ]
     merged = kept + list(entries)
@@ -142,11 +159,26 @@ def replace_entries(
     return merged
 
 
-def remove_entries_for_accounts(path: str | os.PathLike, usernames: set[str]) -> int:
+def remove_entries_for_accounts(
+    path: str | os.PathLike,
+    usernames: set[str],
+    publication_targets: set[str] | frozenset[str] | None = None,
+) -> int:
     manifest = Path(path)
     current = list(_read_payload(manifest)["entries"])
     affected = {str(name) for name in usernames}
-    kept = [entry for entry in current if entry.get("username") not in affected]
+    targets = set(publication_targets) if publication_targets is not None else None
+    kept = [
+        entry
+        for entry in current
+        if not (
+            entry.get("username") in affected
+            and (
+                targets is None
+                or publication_target_for_entry(entry) in targets
+            )
+        )
+    ]
     removed = len(current) - len(kept)
     _write_payload(manifest, kept)
     return removed

@@ -20,7 +20,7 @@ from calendar_manifest import (
     remove_entries_for_accounts,
 )
 from database import DatabaseManager
-from social_publishing import is_telegram_publication_target
+from social_publishing import TELEGRAM_PUBLICATION_TARGETS, is_telegram_publication_target
 from trial_content import source_key_from_filename
 from console_encoding import ensure_stdout_utf8
 
@@ -285,7 +285,11 @@ def delete_calendarizations_for_accounts(account_names, calendar_root=None):
     }
 
     if calendar_root is None and _manifest_exists():
-        summary["deleted_files"] = remove_entries_for_accounts(_calendar_manifest_file(), set(targets))
+        summary["deleted_files"] = remove_entries_for_accounts(
+            _calendar_manifest_file(),
+            set(targets),
+            TELEGRAM_PUBLICATION_TARGETS,
+        )
         return summary
 
     if not targets or not calendar_path.exists():

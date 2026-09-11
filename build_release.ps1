@@ -1,7 +1,6 @@
 [CmdletBinding()]
 param(
     [string]$OutputDirectory = "releases",
-    [switch]$IncludeClientConfig,
     [switch]$IncludeClientDatabase,
     [switch]$BootstrapUpdater,
     [string]$DownloadUrl = "",
@@ -62,6 +61,8 @@ $BootstrapReleaseFiles = @(
 if ($BootstrapUpdater) {
     $ReleaseFiles = $BootstrapReleaseFiles
 }
+$PackageKind = if ($BootstrapUpdater) { "bootstrap" } else { "application" }
+$AssetSuffix = if ($BootstrapUpdater) { "-bootstrap" } else { "" }
 
 function Ensure-BundledFfmpegTool {
     param(
@@ -81,8 +82,12 @@ function Ensure-BundledFfmpegTool {
     Copy-Item -LiteralPath $Command.Source -Destination $Target -Force
 }
 
-Ensure-BundledFfmpegTool "ffmpeg.exe"
-Ensure-BundledFfmpegTool "ffprobe.exe"
+if ($ReleaseFiles -contains "tools/ffmpeg/bin/ffmpeg.exe") {
+    Ensure-BundledFfmpegTool "ffmpeg.exe"
+}
+if ($ReleaseFiles -contains "tools/ffmpeg/bin/ffprobe.exe") {
+    Ensure-BundledFfmpegTool "ffprobe.exe"
+}
 
 foreach ($File in $ReleaseFiles) {
     if (-not (Test-Path -LiteralPath (Join-Path $Root $File) -PathType Leaf)) {
@@ -92,7 +97,7 @@ foreach ($File in $ReleaseFiles) {
 
 $OutputPath = Join-Path $Root $OutputDirectory
 $StagePath = Join-Path ([System.IO.Path]::GetTempPath()) ("metodo_ig_release_" + [guid]::NewGuid().ToString("N"))
-$ZipPath = Join-Path $OutputPath ("MetodoIG-v{0}.zip" -f $Version)
+$ZipPath = Join-Path $OutputPath ("MetodoIG-v{0}{1}.zip" -f $Version, $AssetSuffix)
 $ManifestPath = Join-Path $OutputPath "release-manifest.json"
 $RepositoryManifestPath = Join-Path $Root "release-manifest.json"
 $PackageFiles = @($ReleaseFiles)
@@ -107,12 +112,13 @@ try {
         Copy-Item -LiteralPath (Join-Path $Root $File) -Destination $Destination
     }
 
-    if ($IncludeClientConfig) {
-        $ConfigSource = Join-Path $Root "update_config.json"
-        if (-not (Test-Path -LiteralPath $ConfigSource -PathType Leaf)) {
-            throw "No existe update_config.json para la entrega inicial."
-        }
-        Copy-Item -LiteralPath $ConfigSource -Destination (Join-Path $StagePath "update_config.json")
+    if ($BootstrapUpdater) {
+        $StagedVersionPath = Join-Path $StagePath "version.json"
+        $StagedVersion = Get-Content -Raw -LiteralPath $StagedVersionPath | ConvertFrom-Json
+        $StagedVersion | Add-Member -NotePropertyName update_phase -NotePropertyValue "bootstrap" -Force
+        $StagedVersionJson = $StagedVersion | ConvertTo-Json -Depth 4
+        $StageUtf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($StagedVersionPath, $StagedVersionJson, $StageUtf8NoBom)
     }
 
     if ($IncludeClientDatabase) {
@@ -134,10 +140,11 @@ try {
     $Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $ZipPath).Hash.ToLowerInvariant()
     $Manifest = [ordered]@{
         version = $Version
+        package_kind = $PackageKind
         url = $DownloadUrl
         github_repository = $GitHubRepository
         github_release_tag = "v$Version"
-        asset_name = "MetodoIG-v$Version.zip"
+        asset_name = "MetodoIG-v$Version$AssetSuffix.zip"
         sha256 = $Hash
         notes = $Notes
         files = $PackageFiles

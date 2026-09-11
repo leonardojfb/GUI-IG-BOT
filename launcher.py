@@ -106,6 +106,13 @@ def _run_update_check() -> bool:
     STATUS_FILE and, if the check failed, shows a gentle "configure your token"
     notice rather than dumping an error to a console.
     """
+    try:
+        previous_status = json.loads(STATUS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        previous_status = {}
+    if isinstance(previous_status, dict) and previous_status.get("recovery_required") is True:
+        return False
+
     messages: list[str] = []
     recovery_required = False
     try:
@@ -168,13 +175,14 @@ def _windowless_python() -> str:
 
 
 def main() -> int:
+    update_ready = _run_update_check()
+    if update_ready is False:
+        return 2
+
     timezone_error = _ensure_timezone_data()
     dependency_error = timezone_error or _ensure_pillow()
 
     _ensure_database()
-    update_ready = _run_update_check()
-    if update_ready is False:
-        return 2
     if dependency_error:
         try:
             STATUS_FILE.write_text(json.dumps({"error": dependency_error}), encoding="utf-8")

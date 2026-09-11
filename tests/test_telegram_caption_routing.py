@@ -1,3 +1,5 @@
+import json
+
 import organizadortg
 import database
 from Organizador import build_calendar_video_filename
@@ -143,43 +145,34 @@ def test_scan_calendar_structure_ignores_manual_publication_targets(tmp_path, mo
     video = tmp_path / "videos_finales" / "T1" / "clip.mp4"
     video.parent.mkdir(parents=True)
     video.write_bytes(b"manifest")
-    entries = [
-        build_entry(
-            "alice",
-            1,
-            "normal",
-            1,
-            1,
-            "T1",
-            str(video),
-            "clip__TANDA_T1__ACC1__D1__S1.mp4",
-        ),
-        build_entry(
-            "alice",
-            1,
-            "normal",
-            1,
-            2,
-            "T1",
-            str(video),
-            "story.mp4",
-            publication_target="instagram_story",
-            story_link_url="https://link.ejemplo/alice",
-            story_announcement_text="Mira el enlace",
-        ),
-        build_entry(
-            "alice",
-            1,
-            "normal",
-            1,
-            3,
-            "T1",
-            str(video),
-            "facebook.mp4",
-            publication_target="facebook_page_post",
-        ),
-    ]
-    replace_entries(tmp_path / "calendar_manifest.json", entries, {"alice"}, "normal")
+    reel = build_entry(
+        "alice",
+        1,
+        "normal",
+        1,
+        1,
+        "T1",
+        str(video),
+        "clip__TANDA_T1__ACC1__D1__S1.mp4",
+    )
+    story = {
+        **reel,
+        "id": "manual-story",
+        "slot": 2,
+        "telegram_filename": "story.mp4",
+        "publication_target": "instagram_story",
+    }
+    facebook = {
+        **reel,
+        "id": "manual-facebook",
+        "slot": 3,
+        "telegram_filename": "facebook.mp4",
+        "publication_target": "facebook_page_post",
+    }
+    (tmp_path / "calendar_manifest.json").write_text(
+        json.dumps({"version": 1, "entries": [reel, story, facebook]}),
+        encoding="utf-8",
+    )
 
     monkeypatch.setattr(organizadortg, "base_dir", str(tmp_path), raising=False)
     monkeypatch.setattr(

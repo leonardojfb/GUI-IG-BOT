@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from calendar_manifest import (
     build_entry,
     load_entries,
@@ -70,48 +72,49 @@ def test_manifest_defaults_trial_entry_to_explicit_trial_target(tmp_path):
     assert entry["manual_status"] == "planned"
 
 
-def test_replace_entries_keeps_other_normal_target_for_same_account(tmp_path):
+def test_manifest_v1_rejects_new_manual_publication_entries(tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"x")
+
+    with pytest.raises(ValueError, match="manifest v2"):
+        build_entry(
+            "alice",
+            1,
+            "normal",
+            1,
+            2,
+            "T",
+            str(source),
+            "post.mp4",
+            publication_target="instagram_post",
+        )
+
+
+def test_default_replace_only_replaces_default_target(tmp_path):
     source = tmp_path / "clip.mp4"
     source.write_bytes(b"x")
     manifest = tmp_path / "calendar_manifest.json"
-    reel = build_entry("alice", 1, "normal", 1, 1, "T", str(source), "reel.mp4")
-    post = build_entry(
-        "alice",
-        1,
-        "normal",
-        1,
-        2,
-        "T",
-        str(source),
-        "post.mp4",
-        publication_target="instagram_post",
+    manual = {
+        "id": "manual-post",
+        "username": "alice",
+        "delivery_kind": "normal",
+        "publication_target": "instagram_post",
+        "source_path": str(source),
+        "telegram_filename": "post.mp4",
+    }
+    manifest.write_text(
+        json.dumps({"version": 1, "entries": [manual]}),
+        encoding="utf-8",
     )
-    replace_entries(manifest, [reel, post], {"alice"}, "normal")
 
-    newer = build_entry(
-        "alice",
-        1,
-        "normal",
-        2,
-        1,
-        "T",
-        str(source),
-        "new.mp4",
-        publication_target="instagram_post",
-    )
-    rows = replace_entries(
-        manifest,
-        [newer],
-        {"alice"},
-        "normal",
-        publication_target="instagram_post",
-    )
+    reel = build_entry("alice", 1, "normal", 2, 1, "T", str(source), "reel.mp4")
+    rows = replace_entries(manifest, [reel], {"alice"}, "normal")
 
     assert [row["publication_target"] for row in rows] == [
-        "instagram_reel",
         "instagram_post",
+        "instagram_reel",
     ]
-    assert [row["telegram_filename"] for row in rows] == ["reel.mp4", "new.mp4"]
+    assert [row["telegram_filename"] for row in rows] == ["post.mp4", "reel.mp4"]
 
 
 def test_remove_entries_for_accounts_removes_all_kinds(tmp_path):

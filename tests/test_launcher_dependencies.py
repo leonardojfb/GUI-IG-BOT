@@ -76,3 +76,19 @@ def test_launcher_does_not_open_gui_when_update_requires_recovery(monkeypatch):
 
     assert launcher.main() == 2
     assert opened == []
+
+
+def test_recovery_required_marker_blocks_later_launch_without_being_cleared(
+    monkeypatch, tmp_path
+):
+    status_file = tmp_path / ".update_status.json"
+    status_file.write_text(
+        '{"error":"RECOVERY_REQUIRED: reparar","recovery_required":true}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launcher, "APP_DIR", tmp_path)
+    monkeypatch.setattr(launcher, "STATUS_FILE", status_file)
+
+    assert launcher._run_update_check() is False
+    persisted = status_file.read_text(encoding="utf-8")
+    assert '"recovery_required":true' in persisted.replace(" ", "")

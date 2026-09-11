@@ -12,7 +12,6 @@ LEGACY_UPDATEABLE_FILES = {
     "launch_gui.bat",
     "launcher.py",
     "updater.py",
-    "console_encoding.py",
     "organizador.db",
     "organizador.default.db",
     "version.json",
@@ -117,6 +116,22 @@ def test_legacy_updater_can_apply_import_compatible_python_files():
 
 def test_bootstrap_package_only_contains_files_an_old_updater_can_copy():
     assert _bootstrap_release_files_from_build_script() == {"updater.py", "version.json"}
+
+
+def test_builder_labels_application_and_bootstrap_manifests():
+    script = (REPO_ROOT / "build_release.ps1").read_text(encoding="utf-8")
+
+    assert '$PackageKind = if ($BootstrapUpdater) { "bootstrap" } else { "application" }' in script
+    assert "package_kind = $PackageKind" in script
+    assert '-NotePropertyName update_phase -NotePropertyValue "bootstrap"' in script
+    assert '"MetodoIG-v{0}{1}.zip" -f $Version, $AssetSuffix' in script
+
+
+def test_release_builder_never_embeds_client_update_config():
+    script = (REPO_ROOT / "build_release.ps1").read_text(encoding="utf-8")
+
+    assert "$IncludeClientConfig" not in script
+    assert 'Join-Path $StagePath "update_config.json"' not in script
 
 
 def test_current_updater_accepts_every_normal_release_file():

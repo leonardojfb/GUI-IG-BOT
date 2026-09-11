@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import os
 
 import pytest
@@ -111,6 +112,17 @@ def test_delete_calendarizations_removes_manifest_rows_only(tmp_path, monkeypatc
         build_entry("bob", 2, "normal", 1, 1, "T", str(video), "b__TANDA_T.mp4"),
     ]
     replace_entries(tmp_path / "calendar_manifest.json", entries, {"alice", "bob"}, "normal")
+    manifest_path = tmp_path / "calendar_manifest.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload["entries"].append(
+        {
+            **entries[0],
+            "id": "manual-alice-story",
+            "publication_target": "instagram_story",
+            "telegram_filename": "story.mp4",
+        }
+    )
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
     monkeypatch.setattr(organizadortg, "base_dir", str(tmp_path), raising=False)
     monkeypatch.setattr(organizadortg, "input_root", str(tmp_path / "CALENDARIO_POSTEO"), raising=False)
 
@@ -119,5 +131,9 @@ def test_delete_calendarizations_removes_manifest_rows_only(tmp_path, monkeypatc
     assert summary["accounts"] == 1
     assert summary["deleted_files"] == 1
     assert summary["deleted_folders"] == 0
-    assert [row["username"] for row in load_entries(tmp_path / "calendar_manifest.json")] == ["bob"]
+    remaining = load_entries(tmp_path / "calendar_manifest.json")
+    assert [(row["username"], row["publication_target"]) for row in remaining] == [
+        ("bob", "instagram_reel"),
+        ("alice", "instagram_story"),
+    ]
     assert legacy.exists()

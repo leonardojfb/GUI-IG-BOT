@@ -36,6 +36,11 @@ fallos funcionales en skips.
 La misma orden ejecutada nuevamente sobre el `HEAD` comprometido termino con
 `311 passed` en `123.15s`, sin skips ni fallos.
 
+Tras corregir los hallazgos de la primera revision independiente, la suite
+termino primero con `316 passed, 1 skipped` y, sobre el `HEAD` final, con
+`316 passed, 2 skipped` en `114.73s`. Los skips variables fueron de UI Tk sin
+display; ninguna prueba funcional fallo.
+
 Compilacion de los modulos modificados:
 
 ```powershell
@@ -44,33 +49,54 @@ py -3.14 -B -m py_compile updater.py launcher.py calendar_manifest.py database.p
 
 Resultado: codigo de salida `0`.
 
+Builder real ejecutado en ambos modos:
+
+```powershell
+.\build_release.ps1 -BootstrapUpdater -OutputDirectory releases/r00-validation/bootstrap
+.\build_release.ps1 -OutputDirectory releases/r00-validation/application
+```
+
+- Bootstrap: `MetodoIG-v1.0.41-bootstrap.zip`, solo `updater.py` y
+  `version.json`, con `update_phase=bootstrap` y SHA-256
+  `96b4773d8a09531fa7266247ac39aa90d26fbd6eb431a95addd52b5f1c0fd890`.
+- Application: `MetodoIG-v1.0.41.zip`, manifest completo, sin datos locales y
+  SHA-256 `6cb90e4f7d32305e4fe8cb725a3ceb4fda45f8be049165ad0d5c8cfff4a6f107`.
+- La prueba automatizada aplica bootstrap y application de la misma version en
+  secuencia; la segunda fase completa la app y elimina `update_phase`.
+
 ## Contratos incorporados
 
-- El manifest v1 conserva `caption_mode` y agrega destino de publicacion y
-  metadata manual mediante campos aditivos.
+- El manifest v1 conserva `caption_mode` y agrega el destino Reel/Trial explicito
+  mediante campos aditivos que los lectores anteriores ignoran.
+- Los destinos manuales permanecen bloqueados hasta publicar primero un lector
+  de manifest v2; no pueden escribirse dentro de v1.
 - Las entradas v1 sin destino siguen resolviendo Reel o Trial Reel segun
   `delivery_kind`.
-- Reemplazar un destino manual no elimina otros carriles de la misma cuenta.
+- Regenerar Reel/Trial solo reemplaza su propio destino y conserva cualquier
+  entrada manual preexistente.
 - Telegram solo consume los dos destinos explicitamente soportados por su flujo.
 - La DB conserva dominio Story compartido y override individual por cuenta.
 - La pantalla Cuentas permite guardar el dominio y editar/desactivar el override.
-- Un update normal exige `files`, exige que ZIP y manifest coincidan y rechaza
-  `organizador.db` e historiales aunque el manifest los solicite.
+- Un update normal exige `package_kind=application`, el conjunto completo de
+  archivos y coincidencia exacta ZIP/manifest. El bootstrap admite exactamente
+  `updater.py` y `version.json`.
+- Tanto application como bootstrap rechazan `organizador.db` e historiales
+  aunque el manifest los solicite.
 - Builder y updater comparten `console_encoding.py` en sus allowlists.
-- Un rollback no verificable produce `RECOVERY_REQUIRED`; el launcher no abre la
-  GUI en ese estado.
+- Un rollback no verificable retiene el backup, produce `RECOVERY_REQUIRED` y
+  deja un marcador durable; launcher y updater bloquean ejecuciones posteriores.
 
 ## Hashes del corte
 
 ```text
-835904b4a70ee25a25433475784a2d86b79eb5a57e469b5a626a533faf81536b  updater.py
-de4b01fd3305c7aa19d5b93e3392a8e5d81867d4e557d468a64a021662e4cfae  launcher.py
-833f771ebf594a175f86ef873cdba673b45b7307e1feab6986b71479bf54a19d  calendar_manifest.py
+6560ca85c8048e739d817e4feb9dfc09c68283c355cc62f4489cf5c12b7ba230  updater.py
+84e6b1219568f55450a7a480cb33b4b9269b560be134c722a47d7a3c511bcb83  launcher.py
+909c8b19a442b1c97024a7c1e70b52760e03909e525280d698291775c17d54a1  calendar_manifest.py
 0a2eb084fe92fa0bbf7b4755a0e396be853cdda56c732d8a62010e87f7ee894c  database.py
-75adb93f2663feb2f547bab786f093db08de88f6a160061d429d1b466335d39c  organizadortg.py
+d56b9ef100ef33df41ad087d4779398950579bbb4946ed1b2fb4e5ad831d700f  organizadortg.py
 c39b615b4db198129f9202ac5f4ff5d5347ab404712d1bc6389ae629c6ac039f  gui_premium_v7.py
 20d33bd5bc04b3b302573802a9990781785109c7d8c7cb1697c8546ba1d7a987  social_publishing.py
-597cfacfcd5dabd7c1be1865707121e3de3dc91c51d0d5b45c5452802318ed0d  build_release.ps1
+afdcb2ee2bf9a1c592f4d71462025296c0895a6a14cc4da4ce31e0eafb4d5101  build_release.ps1
 a2f53f199df8b659ba48a679ec5507b854723468911fd38f08bb446591816a46  requirements.txt
 b86674dfe4aa9f48596fe2e70bb067993a2bf13c6423c456f8f29385dd426860  release-manifest.json
 59af7fb08016a6e5a6cab8e0aed9cf8375441d47d7f2719712dc9d69e5ac9fac  version.json
@@ -85,6 +111,6 @@ b86674dfe4aa9f48596fe2e70bb067993a2bf13c6423c456f8f29385dd426860  release-manife
 - Convertir los recorridos UI hoy omitidos sin display en evidencia visual sobre
   Windows con display disponible.
 
-R01 y R02 tampoco estan cerrados: faltan pruebas por cohorte del updater antiguo,
-doble salto por puente, journal durable, backups retenidos, staging de runtime,
-healthcheck y la matriz completa de interrupciones U01-U24.
+R01 y R02 tampoco estan cerrados: faltan pruebas con cada updater antiguo real,
+enrolamiento de feeds por cohorte, journal durable ante terminacion abrupta,
+staging de runtime, healthcheck y la matriz completa de interrupciones U01-U24.
