@@ -59,3 +59,20 @@ def test_launcher_still_opens_gui_when_optional_dependency_repair_fails(monkeypa
     assert launcher.main() == 0
     assert opened
     assert "No se pudo instalar Pillow." in status_file.read_text(encoding="utf-8")
+
+
+def test_launcher_does_not_open_gui_when_update_requires_recovery(monkeypatch):
+    opened = []
+
+    monkeypatch.setattr(launcher, "_ensure_timezone_data", lambda: "")
+    monkeypatch.setattr(launcher, "_ensure_pillow", lambda: "")
+    monkeypatch.setattr(launcher, "_ensure_database", lambda: None)
+    monkeypatch.setattr(launcher, "_run_update_check", lambda: False)
+    monkeypatch.setattr(
+        launcher.subprocess,
+        "Popen",
+        lambda command, **kwargs: opened.append((command, kwargs)),
+    )
+
+    assert launcher.main() == 2
+    assert opened == []

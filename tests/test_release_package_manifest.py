@@ -2,6 +2,8 @@ import ast
 import re
 from pathlib import Path
 
+import updater
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LEGACY_UPDATEABLE_FILES = {
@@ -115,6 +117,20 @@ def test_legacy_updater_can_apply_import_compatible_python_files():
 
 def test_bootstrap_package_only_contains_files_an_old_updater_can_copy():
     assert _bootstrap_release_files_from_build_script() == {"updater.py", "version.json"}
+
+
+def test_current_updater_accepts_every_normal_release_file():
+    assert _release_files_from_build_script() <= updater.DEFAULT_UPDATEABLE_FILES
+
+
+def test_normal_release_and_updater_forbid_operational_data():
+    script = (REPO_ROOT / "build_release.ps1").read_text(encoding="utf-8")
+    forbidden = {"organizador.db", "dist_accounts_history.json"}
+
+    assert forbidden.isdisjoint(_release_files_from_build_script())
+    assert forbidden.isdisjoint(updater.DEFAULT_UPDATEABLE_FILES)
+    assert "$IncludeRealDatabase" not in script
+    assert "$IncludeClientHistory" not in script
 
 
 def test_legacy_updater_python_files_do_not_require_new_console_encoding_names():

@@ -110,7 +110,7 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual((self.app_dir / "airtable_sync.py").read_text(), "new airtable sync code")
         self.assertFalse((self.app_dir / "airtable_config.json").exists())
 
-    def test_apply_package_can_install_default_database_template_and_history(self):
+    def test_apply_package_can_install_default_database_template(self):
         package_path = self.app_dir / "release.zip"
         package_path.write_bytes(
             _zip_bytes(
@@ -118,7 +118,6 @@ class UpdaterTest(unittest.TestCase):
                     "version.json": json.dumps({"version": "1.0.1"}),
                     "database.py": "new code",
                     "organizador.default.db": b"default database template",
-                    "dist_accounts_history.json": "release history",
                 }
             )
         )
@@ -132,7 +131,6 @@ class UpdaterTest(unittest.TestCase):
                     "version.json",
                     "database.py",
                     "organizador.default.db",
-                    "dist_accounts_history.json",
                 ],
             },
         )
@@ -140,7 +138,7 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual(version, "1.0.1")
         self.assertEqual((self.app_dir / "database.py").read_text(), "new code")
         self.assertEqual((self.app_dir / "organizador.default.db").read_bytes(), b"default database template")
-        self.assertEqual((self.app_dir / "dist_accounts_history.json").read_text(), "release history")
+        self.assertEqual((self.app_dir / "dist_accounts_history.json").read_text(), "history")
         self.assertEqual((self.app_dir / "organizador.db").read_bytes(), b"user database")
 
     def test_apply_package_can_install_bundled_ffmpeg_tools(self):
@@ -172,7 +170,7 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual((self.app_dir / "tools/ffmpeg/bin/ffmpeg.exe").read_bytes(), b"ffmpeg binary")
         self.assertEqual((self.app_dir / "tools/ffmpeg/bin/ffprobe.exe").read_bytes(), b"ffprobe binary")
 
-    def test_apply_package_can_replace_database_when_manifest_explicitly_requests_it(self):
+    def test_apply_package_rejects_operational_data_even_when_manifest_requests_it(self):
         package_path = self.app_dir / "release.zip"
         package_path.write_bytes(
             _zip_bytes(
@@ -184,18 +182,61 @@ class UpdaterTest(unittest.TestCase):
             )
         )
 
-        version = updater.apply_package(
-            self.app_dir,
-            package_path,
-            {
-                "version": "1.0.1",
-                "files": ["version.json", "organizador.db", "dist_accounts_history.json"],
-            },
+        with self.assertRaisesRegex(updater.UpdateError, "no permitido"):
+            updater.apply_package(
+                self.app_dir,
+                package_path,
+                {
+                    "version": "1.0.1",
+                    "files": [
+                        "version.json",
+                        "organizador.db",
+                        "dist_accounts_history.json",
+                    ],
+                },
+            )
+
+        self.assertEqual((self.app_dir / "organizador.db").read_bytes(), b"user database")
+        self.assertEqual((self.app_dir / "dist_accounts_history.json").read_text(), "history")
+        self.assertEqual(updater.read_local_version(self.app_dir), "1.0.0")
+
+    def test_apply_package_requires_explicit_manifest_files(self):
+        package_path = self.app_dir / "release.zip"
+        package_path.write_bytes(self._package())
+
+        with self.assertRaisesRegex(updater.UpdateError, "lista files"):
+            updater.apply_package(
+                self.app_dir,
+                package_path,
+                {"version": "1.0.1"},
+            )
+
+        self.assertEqual((self.app_dir / "database.py").read_text(), "old code")
+        self.assertEqual(updater.read_local_version(self.app_dir), "1.0.0")
+
+    def test_apply_package_rejects_missing_manifest_file_before_writes(self):
+        package_path = self.app_dir / "release.zip"
+        package_path.write_bytes(
+            _zip_bytes(
+                {
+                    "version.json": json.dumps({"version": "1.0.1"}),
+                    "database.py": "new code",
+                }
+            )
         )
 
-        self.assertEqual(version, "1.0.1")
-        self.assertEqual((self.app_dir / "organizador.db").read_bytes(), b"release database")
-        self.assertEqual((self.app_dir / "dist_accounts_history.json").read_text(), "release history")
+        with self.assertRaisesRegex(updater.UpdateError, "Faltan archivos"):
+            updater.apply_package(
+                self.app_dir,
+                package_path,
+                {
+                    "version": "1.0.1",
+                    "files": ["version.json", "database.py", "launcher.py"],
+                },
+            )
+
+        self.assertEqual((self.app_dir / "database.py").read_text(), "old code")
+        self.assertEqual(updater.read_local_version(self.app_dir), "1.0.0")
 
     def test_hash_mismatch_does_not_change_installation(self):
         package = self._package()
@@ -245,6 +286,32 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual((self.app_dir / "database.py").read_text(), "old code")
         self.assertEqual(updater.read_local_version(self.app_dir), "1.0.0")
 
+    def test_rollback_failure_reports_recovery_required(self):
+        package_path = self.app_dir / "release.zip"
+        package_path.write_bytes(self._package())
+        original_copy = updater._atomic_copy
+        calls = 0
+
+        def failing_copy(source, destination):
+            nonlocal calls
+            calls += 1
+            if calls in {2, 3}:
+                raise OSError("simulated disk failure")
+            original_copy(source, destination)
+
+        with mock.patch.object(updater, "_atomic_copy", side_effect=failing_copy):
+            with self.assertRaisesRegex(updater.RecoveryRequiredError, "RECOVERY_REQUIRED"):
+                updater.apply_package(
+                    self.app_dir,
+                    package_path,
+                    {
+                        "version": "1.0.1",
+                        "files": ["version.json", "database.py", "launcher.py"],
+                    },
+                )
+
+        self.assertEqual(updater.read_local_version(self.app_dir), "1.0.0")
+
     def test_zip_path_traversal_is_rejected(self):
         package_path = self.app_dir / "unsafe.zip"
         package_path.write_bytes(
@@ -289,6 +356,43 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual(updater.read_local_version(self.app_dir), "1.0.1")
         self.assertEqual((self.app_dir / "database.py").read_text(), "new code")
         self.assertEqual((self.app_dir / "organizador.db").read_bytes(), b"user database")
+
+    def test_check_and_apply_propagates_recovery_required(self):
+        package = self._package()
+        manifest = json.dumps(
+            {
+                "version": "1.0.1",
+                "url": "https://updates.example.test/package.zip",
+                "sha256": hashlib.sha256(package).hexdigest(),
+                "files": ["version.json", "database.py", "launcher.py"],
+            }
+        ).encode("utf-8")
+        (self.app_dir / "update_config.json").write_text(
+            json.dumps({"manifest_url": "https://updates.example.test/manifest.json"}),
+            encoding="utf-8",
+        )
+        responses = {
+            "https://updates.example.test/manifest.json": manifest,
+            "https://updates.example.test/package.zip": package,
+        }
+
+        def opener(request, timeout):
+            return _Response(responses[request.full_url])
+
+        messages = []
+        with mock.patch.object(
+            updater,
+            "apply_package",
+            side_effect=updater.RecoveryRequiredError("RECOVERY_REQUIRED: prueba"),
+        ):
+            with self.assertRaises(updater.RecoveryRequiredError):
+                updater.check_and_apply(
+                    self.app_dir,
+                    opener=opener,
+                    status_callback=messages.append,
+                )
+
+        self.assertTrue(any("RECOVERY_REQUIRED" in message for message in messages))
 
     def test_check_and_apply_uses_github_api_for_private_release(self):
         package = self._package()

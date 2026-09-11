@@ -99,7 +99,7 @@ def _ensure_pillow() -> str:
     return ""
 
 
-def _run_update_check() -> None:
+def _run_update_check() -> bool:
     """Check for updates in-process (no console) and record the outcome.
 
     Any failure is non-fatal: the local app still opens. The GUI reads
@@ -107,20 +107,40 @@ def _run_update_check() -> None:
     notice rather than dumping an error to a console.
     """
     messages: list[str] = []
+    recovery_required = False
     try:
         from updater import check_and_apply
 
         check_and_apply(APP_DIR, status_callback=messages.append)
     except Exception as exc:  # noqa: BLE001 - update check must never block launch
-        messages.append(f"{exc}. Se abrira la version local.")
+        recovery_required = "RECOVERY_REQUIRED" in str(exc)
+        if recovery_required:
+            if not any("RECOVERY_REQUIRED" in message for message in messages):
+                messages.append(str(exc))
+        else:
+            messages.append(f"{exc}. Se abrira la version local.")
 
     # The updater only appends "Se abrira la version local." on a real failure
     # (bad/missing token, no connection), not for "already up to date".
-    error = next((m for m in messages if "Se abrira la version local" in m), "")
+    error = next(
+        (
+            message
+            for message in messages
+            if "RECOVERY_REQUIRED" in message or "Se abrira la version local" in message
+        ),
+        "",
+    )
     try:
-        STATUS_FILE.write_text(json.dumps({"error": error}), encoding="utf-8")
+        STATUS_FILE.write_text(
+            json.dumps(
+                {"error": error, "recovery_required": recovery_required},
+                ensure_ascii=True,
+            ),
+            encoding="utf-8",
+        )
     except OSError:
         pass
+    return not recovery_required
 
 
 def _ensure_database() -> None:
@@ -152,7 +172,9 @@ def main() -> int:
     dependency_error = timezone_error or _ensure_pillow()
 
     _ensure_database()
-    _run_update_check()
+    update_ready = _run_update_check()
+    if update_ready is False:
+        return 2
     if dependency_error:
         try:
             STATUS_FILE.write_text(json.dumps({"error": dependency_error}), encoding="utf-8")

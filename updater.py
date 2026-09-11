@@ -1,8 +1,8 @@
 """Small, defensive updater for the local Instagram GUI.
 
 The updater only writes files explicitly allowed by DEFAULT_UPDATEABLE_FILES.
-User data stays in the application directory unless a special release manifest
-explicitly includes one of the narrow data files below.
+User data stays in the application directory and cannot be replaced by a
+normal update package, even if a remote manifest requests it.
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "launch_gui.bat",
         "launcher.py",
         "updater.py",
-        "organizador.db",
+        "console_encoding.py",
         "organizador.default.db",
         "version.json",
         "requirements.txt",
@@ -62,7 +62,6 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "styles/colors.py",
         "styles/components.py",
         "styles/__init__.py",
-        "dist_accounts_history.json",
     }
 )
 
@@ -71,6 +70,10 @@ _VERSION_RE = re.compile(r"^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:[-+].*)?$")
 
 class UpdateError(RuntimeError):
     """An expected update failure that should not prevent the GUI from opening."""
+
+
+class RecoveryRequiredError(UpdateError):
+    """The previous installation could not be restored completely."""
 
 
 def _normalise_member(name: str) -> str:
@@ -214,6 +217,7 @@ def sha256_file(path: Path) -> str:
 
 def _archive_files(archive: zipfile.ZipFile) -> list[tuple[zipfile.ZipInfo, str]]:
     files: list[tuple[zipfile.ZipInfo, str]] = []
+    seen: dict[str, str] = {}
     for info in archive.infolist():
         if info.is_dir() or info.filename.endswith(("/", "\\")):
             continue
@@ -222,7 +226,34 @@ def _archive_files(archive: zipfile.ZipFile) -> list[tuple[zipfile.ZipInfo, str]
         unix_mode = (info.external_attr >> 16) & 0o170000
         if unix_mode == 0o120000:
             raise UpdateError(f"No se permiten enlaces simbolicos en ZIP: {relative}")
+        collision_key = relative.casefold()
+        if collision_key in seen:
+            raise UpdateError(
+                f"Ruta duplicada en ZIP: {seen[collision_key]!r} y {relative!r}"
+            )
+        seen[collision_key] = relative
         files.append((info, relative))
+    return files
+
+
+def _manifest_files(manifest: dict[str, Any]) -> list[str]:
+    raw_files = manifest.get("files")
+    if not isinstance(raw_files, list) or not raw_files:
+        raise UpdateError("El manifiesto necesita una lista files explicita")
+
+    files: list[str] = []
+    seen: dict[str, str] = {}
+    for item in raw_files:
+        if not isinstance(item, str):
+            raise UpdateError("La lista files solo puede contener rutas de texto")
+        relative = _normalise_member(item)
+        collision_key = relative.casefold()
+        if collision_key in seen:
+            raise UpdateError(
+                f"Ruta duplicada en manifiesto: {seen[collision_key]!r} y {relative!r}"
+            )
+        seen[collision_key] = relative
+        files.append(relative)
     return files
 
 
@@ -253,6 +284,13 @@ def apply_package(
     local_version = read_local_version(app_dir)
     if not is_newer(remote_version, local_version):
         return local_version
+    requested = _manifest_files(manifest)
+    requested_set = set(requested)
+    prohibited = sorted(requested_set - allowed)
+    if prohibited:
+        raise UpdateError(f"Archivo no permitido por el updater: {prohibited[0]}")
+    if VERSION_FILE not in requested_set:
+        raise UpdateError("La lista files no contiene version.json")
 
     with tempfile.TemporaryDirectory(prefix="metodo_ig_update_") as temp_name:
         extract_dir = Path(temp_name) / "package"
@@ -265,19 +303,14 @@ def apply_package(
         try:
             with zipfile.ZipFile(package_path) as archive:
                 entries = _archive_files(archive)
-                manifest_files = manifest.get("files")
-                requested = (
-                    {str(item).replace("\\", "/") for item in manifest_files}
-                    if isinstance(manifest_files, list)
-                    else allowed
-                )
-                selected = [
-                    (info, relative)
-                    for info, relative in entries
-                    if relative in allowed and relative in requested
-                ]
-                if not any(relative == VERSION_FILE for _, relative in selected):
-                    raise UpdateError("El ZIP no contiene version.json")
+                archive_names = {relative for _, relative in entries}
+                missing = sorted(requested_set - archive_names)
+                if missing:
+                    raise UpdateError(f"Faltan archivos requeridos en el ZIP: {missing[0]}")
+                undeclared = sorted(archive_names - requested_set)
+                if undeclared:
+                    raise UpdateError(f"El ZIP contiene archivos no declarados: {undeclared[0]}")
+                selected = entries
 
                 for info, relative in selected:
                     target = extract_dir / Path(relative)
@@ -305,16 +338,24 @@ def apply_package(
                     created.append(target)
                 _atomic_copy(source, target)
         except Exception as exc:
+            recovery_errors: list[str] = []
             for target in created:
                 try:
                     target.unlink()
                 except FileNotFoundError:
                     pass
+                except OSError as recovery_exc:
+                    recovery_errors.append(f"no se pudo eliminar {target}: {recovery_exc}")
             for target, backup in reversed(backups):
                 try:
                     _atomic_copy(backup, target)
-                except OSError:
-                    pass
+                except OSError as recovery_exc:
+                    recovery_errors.append(f"no se pudo restaurar {target}: {recovery_exc}")
+            if recovery_errors:
+                detail = "; ".join(recovery_errors)
+                raise RecoveryRequiredError(
+                    f"RECOVERY_REQUIRED: la instalacion anterior no pudo restaurarse: {detail}"
+                ) from exc
             if isinstance(exc, UpdateError):
                 raise
             raise UpdateError("No se pudo aplicar la actualizacion; se restauro la version anterior") from exc
@@ -373,6 +414,12 @@ def check_and_apply(
             new_version = apply_package(app_dir, package_path, manifest)
         report(f"aplicacion actualizada a {new_version}.")
         return True
+    except RecoveryRequiredError as exc:
+        message = f"{exc}. No se abrira la aplicacion hasta reparar la instalacion."
+        print(f"Actualizador: {message}", file=sys.stderr)
+        if status_callback:
+            status_callback(message)
+        raise
     except Exception as exc:
         message = f"{exc}. Se abrira la version local."
         print(f"Actualizador: {message}", file=sys.stderr)

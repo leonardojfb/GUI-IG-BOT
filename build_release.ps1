@@ -3,8 +3,6 @@ param(
     [string]$OutputDirectory = "releases",
     [switch]$IncludeClientConfig,
     [switch]$IncludeClientDatabase,
-    [switch]$IncludeRealDatabase,
-    [switch]$IncludeClientHistory,
     [switch]$BootstrapUpdater,
     [string]$DownloadUrl = "",
     [string]$GitHubRepository = "leonardojfb/GUI-IG-BOT",
@@ -127,24 +125,6 @@ try {
             throw "No se pudo generar organizador.default.db para la entrega inicial."
         }
         $PackageFiles += "organizador.default.db"
-    }
-
-    if ($IncludeRealDatabase) {
-        $DatabaseSource = Join-Path $Root "organizador.db"
-        if (-not (Test-Path -LiteralPath $DatabaseSource -PathType Leaf)) {
-            throw "No existe organizador.db para incluir la base de datos real."
-        }
-        Copy-Item -LiteralPath $DatabaseSource -Destination (Join-Path $StagePath "organizador.db")
-        $PackageFiles += "organizador.db"
-    }
-
-    if ($IncludeClientHistory) {
-        $HistorySource = Join-Path $Root "dist_accounts_history.json"
-        if (-not (Test-Path -LiteralPath $HistorySource -PathType Leaf)) {
-            throw "No existe dist_accounts_history.json para incluir historial."
-        }
-        Copy-Item -LiteralPath $HistorySource -Destination (Join-Path $StagePath "dist_accounts_history.json")
-        $PackageFiles += "dist_accounts_history.json"
     }
 
     if (Test-Path -LiteralPath $ZipPath) {
