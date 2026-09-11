@@ -83,6 +83,21 @@ Resultado: `2 passed in 241.07s`.
   producidos, `9` entradas vigentes en `calendar_manifest.json`, `9` envios
   fake de Telegram y `0` copias fisicas obligatorias en `CALENDARIO_POSTEO`.
 
+Inventario de BAT e imports:
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_r00_inventory.py -q
+```
+
+Resultado: `2 passed in 0.12s`.
+
+- `docs/R00_LAUNCH_IMPORT_INVENTORY.md` lista los `4` BAT/CMD del checkout y
+  todos los modulos Python declarados en `$ReleaseFiles`.
+- El inventario separa entrypoints de cliente, herramientas heredadas y modulos
+  con efectos top-level como `organizadortg.py`, `gui_premium_v7.py` y
+  `vercuentas.py`.
+
 ## Contratos incorporados
 
 - El manifest v1 conserva `caption_mode` y agrega el destino Reel/Trial explicito
@@ -123,7 +138,6 @@ b86674dfe4aa9f48596fe2e70bb067993a2bf13c6423c456f8f29385dd426860  release-manife
 
 ## Pendientes antes de cerrar R00
 
-- Inventariar y clasificar todos los BAT y los imports con efectos secundarios.
 - Verificar dependencias transitivas en una instalacion sin paquetes heredados.
 - Convertir los recorridos UI hoy omitidos sin display en evidencia visual sobre
   Windows con display disponible.
