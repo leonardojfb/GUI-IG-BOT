@@ -889,6 +889,21 @@ def airtable_sync_review_text(plan) -> str:
     return "\n".join(lines)
 
 
+def airtable_remote_delete_opt_in_text(plan) -> str:
+    """Pide autorizacion separada para bajas remotas detectadas en Airtable."""
+    usernames = list(plan.delete_usernames)
+    lines = [
+        "Airtable no incluye estas cuentas locales.",
+        "Confirma bajas remotas solo si quieres eliminarlas de la tabla local:",
+    ]
+    preview = ", ".join(f"@{name}" for name in usernames[:20])
+    extra = f" y {len(usernames) - 20} mas" if len(usernames) > 20 else ""
+    if preview:
+        lines.append(f"Eliminar localmente: {preview}{extra}")
+    lines.append("Si eliges No, se aplicaran altas y actualizaciones sin borrar esas cuentas.")
+    return "\n".join(lines)
+
+
 def airtable_mirror_review_text(plan) -> str:
     """Resume el espejo GUI -> Airtable antes de aplicar cambios destructivos."""
     lines = [
@@ -4389,8 +4404,17 @@ class InstagramAutoPro(ctk.CTk):
                 "Revisar sincronización", airtable_sync_review_text(plan), parent=self,
             ):
                 return
+            include_remote_deletes = False
+            if plan.delete_usernames:
+                include_remote_deletes = messagebox.askyesno(
+                    "Confirmar bajas remotas",
+                    airtable_remote_delete_opt_in_text(plan),
+                    parent=self,
+                )
             try:
-                counts = self.db.apply_airtable_account_plan(plan)
+                counts = self.db.apply_airtable_account_plan(
+                    plan.for_local_apply(include_remote_deletes=include_remote_deletes)
+                )
             except Exception:
                 messagebox.showerror(
                     "Airtable",

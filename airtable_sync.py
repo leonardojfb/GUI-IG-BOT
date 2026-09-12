@@ -108,6 +108,16 @@ class AccountSyncPlan:
     def changed(self) -> bool:
         return bool(self.create or self.update or self.delete_usernames)
 
+    def for_local_apply(self, include_remote_deletes: bool) -> "AccountSyncPlan":
+        if include_remote_deletes:
+            return self
+        return AccountSyncPlan(
+            create=self.create,
+            update=self.update,
+            delete_usernames=[],
+            categories_to_add=self.categories_to_add,
+        )
+
 
 @dataclass(frozen=True)
 class AirtableMirrorPlan:

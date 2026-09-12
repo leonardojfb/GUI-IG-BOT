@@ -26,6 +26,10 @@ username pasa a ser un alias versionable, no la identidad primaria del historial
   `SET(value)`, devuelve antes/despues por ID y fija `preview_revision`.
 - `CatalogService.apply_bulk_update()` aplica solo si la revision actual
   coincide con el preview; si otra ventana cambio una fila, rechaza el lote.
+- `AccountSyncPlan.for_local_apply(include_remote_deletes=False)` conserva altas
+  y actualizaciones pero omite bajas locales detectadas por ausencia remota.
+- `sync_airtable_accounts()` mantiene el preview general y agrega una segunda
+  confirmacion especifica para aplicar esas bajas remotas.
 
 ## Compatibilidad
 
@@ -55,8 +59,17 @@ py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_catalog
 
 Resultado: `5 passed in 1.41s`.
 
+Preview Airtable con bajas opt-in:
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+py -3.14 -B -m py_compile airtable_sync.py gui_premium_v7.py tests\test_airtable_sync.py
+py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_airtable_sync.py -q
+```
+
+Resultado: `25 passed in 1.25s`.
+
 ## Pendientes de R03
 
-- Preview de import Airtable con bajas remotas opt-in.
 - Separacion categoria unica vs etiquetas N:M.
 - Validacion de cambios contra calendarios ya confirmados.

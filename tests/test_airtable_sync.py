@@ -26,6 +26,7 @@ from gui_premium_v7 import (
     airtable_schema_preparation_text,
     airtable_sync_review_text,
     airtable_mirror_review_text,
+    airtable_remote_delete_opt_in_text,
 )
 
 
@@ -376,6 +377,32 @@ class AirtableMirrorTest(unittest.TestCase):
 
 
 class AirtableGuiConnectionTest(unittest.TestCase):
+    def test_import_review_has_separate_remote_delete_opt_in(self):
+        plan = build_account_sync_plan(
+            [{"username": "keep", "account_type": "MAIN"}],
+            [
+                {"id": 1, "username": "keep", "account_type": "MAIN"},
+                {"id": 2, "username": "gone", "account_type": "SPAM"},
+            ],
+        )
+
+        text = airtable_remote_delete_opt_in_text(plan)
+
+        self.assertIn("bajas remotas", text)
+        self.assertIn("@gone", text)
+        self.assertNotIn("@keep", text)
+
+    def test_gui_import_applies_delete_opt_in_plan(self):
+        source = open(
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "gui_premium_v7.py"),
+            encoding="utf-8",
+        ).read()
+        sync_source = source[source.index("    def sync_airtable_accounts(self):"):source.index("    def sync_gui_to_airtable(self):")]
+
+        self.assertIn("Confirmar bajas remotas", sync_source)
+        self.assertIn("include_remote_deletes", sync_source)
+        self.assertIn("plan.for_local_apply(include_remote_deletes=include_remote_deletes)", sync_source)
+
     def test_mirror_review_mentions_deletions_and_source(self):
         text = airtable_mirror_review_text(
             type("Plan", (), {
@@ -467,6 +494,22 @@ class AirtableLegacyMigrationTest(unittest.TestCase):
 
 
 class ReconciliationTest(unittest.TestCase):
+    def test_plan_for_local_apply_requires_explicit_remote_delete_opt_in(self):
+        plan = build_account_sync_plan(
+            [{"username": "keep", "account_type": "MAIN"}],
+            [
+                {"id": 1, "username": "keep", "account_type": "MAIN"},
+                {"id": 2, "username": "gone", "account_type": "SPAM"},
+            ],
+        )
+
+        without_delete = plan.for_local_apply(include_remote_deletes=False)
+        with_delete = plan.for_local_apply(include_remote_deletes=True)
+
+        self.assertEqual(plan.delete_usernames, ["gone"])
+        self.assertEqual(without_delete.delete_usernames, [])
+        self.assertEqual(with_delete.delete_usernames, ["gone"])
+
     def test_plans_create_update_delete_without_unmanaged_values(self):
         remote = [
             {
