@@ -13,6 +13,8 @@
   bytes.
 - `VaultStorage.verify_location()` distingue `ok`, `missing` y `hash_mismatch`
   sin borrar historial.
+- `VaultStorage.relocate_location()` permite apuntar una ubicacion a una nueva
+  ruta solo si los bytes coinciden con el SHA-256 del asset.
 - `database.py` agrega `vault_assets` y `vault_locations` de forma aditiva.
 - `VaultQuery` agrega familias (`content_families`), colecciones
   (`vault_collections`) y relaciones N:M sin mover bytes.
@@ -50,9 +52,18 @@ py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_vault_q
 
 Resultado: `5 passed in 2.11s`.
 
+Relocalizacion por hash:
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+py -3.14 -B -m py_compile vault\storage.py tests\test_vault_storage.py
+py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_vault_storage.py tests/test_vault_query.py -q
+```
+
+Resultado: `6 passed in 2.43s`.
+
 ## Pendientes de R04
 
 - Import gestionado conectado a productores/GUI.
 - Migracion asistida de bytes historicos con estimacion de espacio y progreso.
-- Relocalizacion de ubicaciones externas.
 - Miniaturas e inspector operativo.

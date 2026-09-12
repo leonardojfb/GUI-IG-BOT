@@ -122,6 +122,44 @@ class VaultStorage:
             "actual_sha256": actual_hash,
         }
 
+    def relocate_location(self, location_id: int, new_path: str | os.PathLike) -> dict[str, Any]:
+        target = Path(new_path)
+        if not target.is_file():
+            raise FileNotFoundError(str(target))
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT l.*, a.sha256
+            FROM vault_locations l
+            JOIN vault_assets a ON a.id = l.asset_id
+            WHERE l.id = ?
+            """,
+            (int(location_id),),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise ValueError(f"Ubicacion Vault no encontrada: {location_id}")
+        target_hash = hash_file(target)
+        if target_hash != row["sha256"]:
+            raise ValueError("La nueva ubicacion no coincide con el hash del asset")
+        cur.execute(
+            """
+            UPDATE vault_locations
+            SET path = ?, status = 'ok', last_verified_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (str(target), int(location_id)),
+        )
+        self.conn.commit()
+        return {
+            "location_id": int(location_id),
+            "asset_id": row["asset_id"],
+            "path": str(target),
+            "managed": bool(row["managed"]),
+            "status": "ok",
+            "sha256": row["sha256"],
+        }
+
     def locations_for_asset(self, asset_id: int) -> list[dict[str, Any]]:
         cur = self.conn.cursor()
         cur.execute(

@@ -58,6 +58,35 @@ def test_register_external_keeps_missing_location_as_reviewable_history(tmp_path
         database.DB_PATH = previous
 
 
+def test_relocate_external_location_requires_same_hash(tmp_path):
+    db, previous = _temporary_db(tmp_path)
+    try:
+        source = tmp_path / "external.mp4"
+        source.write_bytes(b"external")
+        moved = tmp_path / "moved.mp4"
+        moved.write_bytes(b"external")
+        wrong = tmp_path / "wrong.mp4"
+        wrong.write_bytes(b"different")
+        storage = VaultStorage(db, tmp_path / "vault")
+        location = storage.register_external(source)
+
+        try:
+            storage.relocate_location(location["location_id"], wrong)
+        except ValueError as exc:
+            assert "hash" in str(exc)
+        else:
+            raise AssertionError("relocation with different bytes should be rejected")
+
+        relocated = storage.relocate_location(location["location_id"], moved)
+
+        assert relocated["path"] == str(moved)
+        assert relocated["status"] == "ok"
+        assert storage.locations_for_asset(location["asset_id"])[0]["path"] == str(moved)
+    finally:
+        db.close()
+        database.DB_PATH = previous
+
+
 def test_managed_import_rejects_source_changed_during_copy(tmp_path, monkeypatch):
     db, previous = _temporary_db(tmp_path)
     try:
