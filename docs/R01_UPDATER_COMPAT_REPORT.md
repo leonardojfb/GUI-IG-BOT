@@ -109,9 +109,36 @@ py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_updater
 
 Resultado: `20 passed in 1.09s`.
 
+## Journal durable
+
+`apply_package()` escribe `.update_journal.json` cuando empieza la fase de
+aplicacion, despues de crear el backup y antes de copiar archivos al directorio
+real. En una salida limpia, el journal se elimina. Si el proceso muere entre
+copias, el siguiente `check_and_apply()` detecta el journal antes de consultar
+red y levanta `RECOVERY_REQUIRED`.
+
+Reglas:
+
+- `.update_status.json` sigue teniendo prioridad si ya existe un error de
+  recuperacion explicito;
+- `.update_journal.json` bloquea nuevas comprobaciones antes de red;
+- el mensaje incluye el `backup_dir` cuando quedo persistido;
+- un rollback exitoso limpia el journal y conserva el comportamiento no fatal;
+- un rollback no verificable mantiene `RECOVERY_REQUIRED` y deja evidencia para
+  reparacion manual.
+
+Evidencia focal:
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_updater.py -q
+```
+
+Resultado: `22 passed in 1.17s`.
+
 ## Estado R01
 
 Cerrado para compatibilidad bootstrap con updaters historicos reales y
-resolucion local de feeds por cohorte. Sigue pendiente dentro de R01/R02:
-journal durable ante terminacion abrupta, staging de runtime, healthcheck y
-matriz U01-U24.
+resolucion local de feeds por cohorte. Cerrado tambien el bloqueo por journal
+durable ante terminacion abrupta. Sigue pendiente dentro de R01/R02: staging de
+runtime, healthcheck y matriz U01-U24.

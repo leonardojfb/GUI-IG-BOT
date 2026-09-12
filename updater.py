@@ -24,6 +24,8 @@ from typing import Any, Callable, Iterable
 APP_DIR = Path(__file__).resolve().parent
 VERSION_FILE = "version.json"
 CONFIG_FILE = "update_config.json"
+STATUS_FILE = ".update_status.json"
+JOURNAL_FILE = ".update_journal.json"
 
 # Keep this list deliberately narrow. Adding a code file to a release requires
 # adding it here and to RELEASE_FILES in build_release.ps1.
@@ -308,7 +310,7 @@ def _validated_package_files(
 
 
 def _mark_recovery_required(app_dir: Path, message: str, backup_dir: Path) -> None:
-    status_path = app_dir / ".update_status.json"
+    status_path = app_dir / STATUS_FILE
     payload = {
         "error": message,
         "recovery_required": True,
@@ -323,15 +325,57 @@ def _mark_recovery_required(app_dir: Path, message: str, backup_dir: Path) -> No
         pass
 
 
+def _write_update_journal(
+    app_dir: Path,
+    local_version: str,
+    remote_version: str,
+    package_kind: str,
+    backup_dir: Path,
+) -> None:
+    payload = {
+        "phase": "applying",
+        "local_version": local_version,
+        "remote_version": remote_version,
+        "package_kind": package_kind,
+        "backup_dir": str(backup_dir),
+    }
+    (app_dir / JOURNAL_FILE).write_text(
+        json.dumps(payload, ensure_ascii=True, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _clear_update_journal(app_dir: Path) -> None:
+    try:
+        (app_dir / JOURNAL_FILE).unlink()
+    except FileNotFoundError:
+        pass
+
+
 def _existing_recovery_error(app_dir: Path) -> str:
-    status_path = app_dir / ".update_status.json"
+    status_path = app_dir / STATUS_FILE
     try:
         payload = json.loads(status_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        payload = None
+    if isinstance(payload, dict) and payload.get("recovery_required") is True:
+        return str(payload.get("error") or "RECOVERY_REQUIRED: la instalacion requiere reparacion")
+
+    journal_path = app_dir / JOURNAL_FILE
+    try:
+        journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
         return ""
-    if not isinstance(payload, dict) or payload.get("recovery_required") is not True:
-        return ""
-    return str(payload.get("error") or "RECOVERY_REQUIRED: la instalacion requiere reparacion")
+    except (OSError, json.JSONDecodeError):
+        return "RECOVERY_REQUIRED: actualizacion interrumpida; revisa la instalacion antes de continuar"
+    if isinstance(journal, dict):
+        backup_dir = str(journal.get("backup_dir") or "").strip()
+        detail = f" Backup: {backup_dir}" if backup_dir else ""
+        return (
+            "RECOVERY_REQUIRED: actualizacion interrumpida; "
+            f"revisa la instalacion antes de continuar.{detail}"
+        )
+    return "RECOVERY_REQUIRED: actualizacion interrumpida; revisa la instalacion antes de continuar"
 
 
 def _atomic_copy(source: Path, destination: Path) -> None:
@@ -407,6 +451,13 @@ def apply_package(
             backup_dir = Path(
                 tempfile.mkdtemp(prefix=f"from-{local_version}-", dir=str(recovery_root))
             )
+            _write_update_journal(
+                app_dir,
+                local_version,
+                remote_version,
+                package_kind,
+                backup_dir,
+            )
             for file_name in sorted(
                 relative for _, relative in selected if relative != VERSION_FILE
             ) + [VERSION_FILE]:
@@ -451,6 +502,7 @@ def apply_package(
                 if backup_dir is not None:
                     _mark_recovery_required(app_dir, message, backup_dir)
                 raise RecoveryRequiredError(message) from exc
+            _clear_update_journal(app_dir)
             if backup_dir is not None:
                 shutil.rmtree(backup_dir, ignore_errors=True)
             if isinstance(exc, UpdateError):
@@ -459,6 +511,7 @@ def apply_package(
 
         if backup_dir is not None:
             shutil.rmtree(backup_dir, ignore_errors=True)
+        _clear_update_journal(app_dir)
 
     return remote_version
 

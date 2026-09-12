@@ -172,6 +172,6 @@ b86674dfe4aa9f48596fe2e70bb067993a2bf13c6423c456f8f29385dd426860  release-manife
 R01 ya valida bootstrap contra updaters historicos reales desde `v1.0.2` hasta
 `v1.0.41`; `v1.0.1` no contiene updater y queda como reinstalacion asistida.
 R01 tambien resuelve feeds por cohorte desde `update_config.json` sin romper el
-`manifest_url` historico. R01/R02 todavia tienen fuera de este cierre: journal
-durable ante terminacion abrupta, staging de runtime, healthcheck y la matriz
-completa de interrupciones U01-U24.
+`manifest_url` historico y bloquea updates si queda un journal durable de
+actualizacion interrumpida. R01/R02 todavia tienen fuera de este cierre: staging
+de runtime, healthcheck y la matriz completa de interrupciones U01-U24.

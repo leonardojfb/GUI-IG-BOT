@@ -393,6 +393,41 @@ class UpdaterTest(unittest.TestCase):
 
         self.assertEqual(calls, [])
 
+    def test_incomplete_update_journal_blocks_update_before_network(self):
+        (self.app_dir / ".update_journal.json").write_text(
+            json.dumps(
+                {
+                    "phase": "applying",
+                    "local_version": "1.0.0",
+                    "remote_version": "1.0.1",
+                    "backup_dir": str(self.app_dir / ".update_recovery" / "from-1.0.0-test"),
+                }
+            ),
+            encoding="utf-8",
+        )
+        calls = []
+
+        def opener(request, timeout):
+            calls.append(request.full_url)
+            raise AssertionError("network must not be used")
+
+        with self.assertRaisesRegex(updater.RecoveryRequiredError, "interrumpida"):
+            updater.check_and_apply(self.app_dir, opener=opener)
+
+        self.assertEqual(calls, [])
+
+    def test_apply_package_removes_update_journal_after_success(self):
+        package_path = self.app_dir / "release.zip"
+        package_path.write_bytes(self._package())
+
+        updater.apply_package(
+            self.app_dir,
+            package_path,
+            self._application_manifest(),
+        )
+
+        self.assertFalse((self.app_dir / ".update_journal.json").exists())
+
     def test_rollback_failure_reports_recovery_required(self):
         package_path = self.app_dir / "release.zip"
         package_path.write_bytes(self._package())
