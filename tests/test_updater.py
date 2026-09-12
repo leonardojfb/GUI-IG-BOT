@@ -3,6 +3,7 @@ import io
 import json
 import tempfile
 import unittest
+import urllib.error
 import zipfile
 from pathlib import Path
 from unittest import mock
@@ -307,6 +308,176 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual((self.app_dir / "database.py").read_text(), "old code")
         self.assertEqual(updater.read_local_version(self.app_dir), "1.0.0")
 
+    def test_u01_missing_manifest_url_does_not_download_or_mutate_installation(self):
+        (self.app_dir / "update_config.json").write_text(
+            json.dumps({"manifest_url": ""}),
+            encoding="utf-8",
+        )
+        calls = []
+        messages = []
+
+        def opener(request, timeout):
+            calls.append(request.full_url)
+            raise AssertionError("network must not be used")
+
+        self.assertFalse(
+            updater.check_and_apply(
+                self.app_dir,
+                opener=opener,
+                status_callback=messages.append,
+            )
+        )
+        self.assertEqual(calls, [])
+        self.assertTrue(any("manifest_url no configurada" in message for message in messages))
+        self.assertEqual((self.app_dir / "database.py").read_text(), "old code")
+
+    def test_u02_network_error_does_not_mutate_installation(self):
+        (self.app_dir / "update_config.json").write_text(
+            json.dumps({"manifest_url": "https://updates.example.test/manifest.json"}),
+            encoding="utf-8",
+        )
+        messages = []
+
+        def opener(request, timeout):
+            raise urllib.error.URLError("offline")
+
+        self.assertFalse(
+            updater.check_and_apply(
+                self.app_dir,
+                opener=opener,
+                status_callback=messages.append,
+            )
+        )
+        self.assertTrue(any("No se pudo consultar" in message for message in messages))
+        self.assertEqual((self.app_dir / "database.py").read_text(), "old code")
+
+    def test_u03_github_auth_errors_are_actionable_and_non_mutating(self):
+        for status_code in (401, 403, 404):
+            with self.subTest(status_code=status_code):
+                (self.app_dir / "update_config.json").write_text(
+                    json.dumps({"manifest_url": "https://updates.example.test/manifest.json"}),
+                    encoding="utf-8",
+                )
+                messages = []
+
+                def opener(request, timeout):
+                    raise urllib.error.HTTPError(
+                        request.full_url,
+                        status_code,
+                        "auth failed",
+                        hdrs=None,
+                        fp=None,
+                    )
+
+                self.assertFalse(
+                    updater.check_and_apply(
+                        self.app_dir,
+                        opener=opener,
+                        status_callback=messages.append,
+                    )
+                )
+                self.assertTrue(any("token" in message and "Contents" in message for message in messages))
+                self.assertEqual((self.app_dir / "database.py").read_text(), "old code")
+
+    def test_u04_invalid_manifest_json_does_not_download_or_mutate_installation(self):
+        (self.app_dir / "update_config.json").write_text(
+            json.dumps({"manifest_url": "https://updates.example.test/manifest.json"}),
+            encoding="utf-8",
+        )
+        calls = []
+
+        def opener(request, timeout):
+            calls.append(request.full_url)
+            return _Response(b"{invalid")
+
+        self.assertFalse(updater.check_and_apply(self.app_dir, opener=opener))
+        self.assertEqual(calls, ["https://updates.example.test/manifest.json"])
+        self.assertEqual((self.app_dir / "database.py").read_text(), "old code")
+
+    def test_u05_manifest_json_must_be_object_before_package_download(self):
+        (self.app_dir / "update_config.json").write_text(
+            json.dumps({"manifest_url": "https://updates.example.test/manifest.json"}),
+            encoding="utf-8",
+        )
+        calls = []
+
+        def opener(request, timeout):
+            calls.append(request.full_url)
+            return _Response(b'["not", "object"]')
+
+        self.assertFalse(updater.check_and_apply(self.app_dir, opener=opener))
+        self.assertEqual(calls, ["https://updates.example.test/manifest.json"])
+        self.assertEqual((self.app_dir / "database.py").read_text(), "old code")
+
+    def test_u06_invalid_remote_version_does_not_download_or_mutate_installation(self):
+        (self.app_dir / "update_config.json").write_text(
+            json.dumps({"manifest_url": "https://updates.example.test/manifest.json"}),
+            encoding="utf-8",
+        )
+        manifest = json.dumps({"version": "next", "url": "https://updates.example.test/package.zip", "sha256": "0" * 64}).encode("utf-8")
+        calls = []
+
+        def opener(request, timeout):
+            calls.append(request.full_url)
+            return _Response(manifest)
+
+        self.assertFalse(updater.check_and_apply(self.app_dir, opener=opener))
+        self.assertEqual(calls, ["https://updates.example.test/manifest.json"])
+        self.assertEqual((self.app_dir / "database.py").read_text(), "old code")
+
+    def test_u07_same_or_older_remote_version_does_not_download_package(self):
+        for remote_version in ("1.0.0", "0.9.9"):
+            with self.subTest(remote_version=remote_version):
+                (self.app_dir / "update_config.json").write_text(
+                    json.dumps({"manifest_url": "https://updates.example.test/manifest.json"}),
+                    encoding="utf-8",
+                )
+                manifest = json.dumps(
+                    self._application_manifest(
+                        version=remote_version,
+                        url="https://updates.example.test/package.zip",
+                        sha256="0" * 64,
+                    )
+                ).encode("utf-8")
+                calls = []
+                messages = []
+
+                def opener(request, timeout):
+                    calls.append(request.full_url)
+                    return _Response(manifest)
+
+                self.assertFalse(
+                    updater.check_and_apply(
+                        self.app_dir,
+                        opener=opener,
+                        status_callback=messages.append,
+                    )
+                )
+                self.assertEqual(calls, ["https://updates.example.test/manifest.json"])
+                self.assertTrue(any("ya esta instalada" in message for message in messages))
+
+    def test_u08_missing_or_invalid_package_url_and_hash_do_not_download(self):
+        cases = [
+            {"url": "", "sha256": "0" * 64},
+            {"url": "https://updates.example.test/package.zip", "sha256": "not-a-hash"},
+        ]
+        for extra in cases:
+            with self.subTest(extra=extra):
+                (self.app_dir / "update_config.json").write_text(
+                    json.dumps({"manifest_url": "https://updates.example.test/manifest.json"}),
+                    encoding="utf-8",
+                )
+                manifest = json.dumps(self._application_manifest(**extra)).encode("utf-8")
+                calls = []
+
+                def opener(request, timeout):
+                    calls.append(request.full_url)
+                    return _Response(manifest)
+
+                self.assertFalse(updater.check_and_apply(self.app_dir, opener=opener))
+                self.assertEqual(calls, ["https://updates.example.test/manifest.json"])
+                self.assertEqual((self.app_dir / "database.py").read_text(), "old code")
+
     def test_load_config_resolves_manifest_feed_for_selected_channel(self):
         (self.app_dir / "update_config.json").write_text(
             json.dumps(
@@ -360,6 +531,103 @@ class UpdaterTest(unittest.TestCase):
 
         with self.assertRaisesRegex(updater.UpdateError, "canal de actualizaciones"):
             updater.load_config(self.app_dir)
+
+    def test_u10_invalid_package_kind_is_rejected_before_writes(self):
+        package_path = self.app_dir / "release.zip"
+        files = self._application_files()
+        package_path.write_bytes(_zip_bytes(files))
+
+        with self.assertRaisesRegex(updater.UpdateError, "package_kind"):
+            updater.apply_package(
+                self.app_dir,
+                package_path,
+                {
+                    "version": "1.0.1",
+                    "package_kind": "patch",
+                    "files": sorted(files),
+                },
+            )
+
+        self.assertEqual((self.app_dir / "database.py").read_text(), "old code")
+
+    def test_u13_manifest_files_must_include_version_json(self):
+        package_path = self.app_dir / "release.zip"
+        files = self._application_files()
+        files.pop("version.json")
+        package_path.write_bytes(_zip_bytes(files))
+
+        with self.assertRaisesRegex(updater.UpdateError, "version.json"):
+            updater.apply_package(
+                self.app_dir,
+                package_path,
+                self._application_manifest(files=files),
+            )
+
+        self.assertEqual(updater.read_local_version(self.app_dir), "1.0.0")
+
+    def test_u16_zip_symlink_is_rejected_before_extraction(self):
+        package_path = self.app_dir / "release.zip"
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            for name, content in self._application_files().items():
+                if name == "database.py":
+                    info = zipfile.ZipInfo(name)
+                    info.external_attr = 0o120777 << 16
+                    archive.writestr(info, "not real code")
+                else:
+                    archive.writestr(name, content)
+        package_path.write_bytes(buffer.getvalue())
+
+        with self.assertRaisesRegex(updater.UpdateError, "enlaces simbolicos"):
+            updater.apply_package(
+                self.app_dir,
+                package_path,
+                self._application_manifest(),
+            )
+
+        self.assertEqual((self.app_dir / "database.py").read_text(), "old code")
+
+    def test_u17_zip_case_collision_is_rejected_before_writes(self):
+        package_path = self.app_dir / "release.zip"
+        files = self._application_files()
+        package_bytes = _zip_bytes({**files, "Database.py": "collision"})
+        package_path.write_bytes(package_bytes)
+
+        with self.assertRaisesRegex(updater.UpdateError, "Ruta duplicada"):
+            updater.apply_package(
+                self.app_dir,
+                package_path,
+                self._application_manifest(),
+            )
+
+        self.assertEqual((self.app_dir / "database.py").read_text(), "old code")
+
+    def test_u18_zip_undeclared_file_is_rejected_before_writes(self):
+        package_path = self.app_dir / "release.zip"
+        files = self._application_files()
+        package_path.write_bytes(_zip_bytes({**files, "extra.py": "unexpected"}))
+
+        with self.assertRaisesRegex(updater.UpdateError, "no declarados"):
+            updater.apply_package(
+                self.app_dir,
+                package_path,
+                self._application_manifest(),
+            )
+
+        self.assertEqual((self.app_dir / "database.py").read_text(), "old code")
+
+    def test_u20_packaged_version_must_match_manifest_version(self):
+        package_path = self.app_dir / "release.zip"
+        package_path.write_bytes(_zip_bytes(self._application_files(version="1.0.2")))
+
+        with self.assertRaisesRegex(updater.UpdateError, "distinta del manifiesto"):
+            updater.apply_package(
+                self.app_dir,
+                package_path,
+                self._application_manifest(version="1.0.1"),
+            )
+
+        self.assertEqual(updater.read_local_version(self.app_dir), "1.0.0")
 
     def test_healthcheck_reports_ok_without_network_for_complete_install(self):
         self._write_required_application_files()

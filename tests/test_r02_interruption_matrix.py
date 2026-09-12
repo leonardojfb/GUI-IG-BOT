@@ -14,8 +14,8 @@ def test_r02_interruption_matrix_lists_u01_through_u24_once():
     assert len(ids) == len(set(ids))
 
 
-def test_r02_interruption_matrix_marks_unautomated_gaps_explicitly():
+def test_r02_interruption_matrix_has_no_unautomated_gaps():
     text = MATRIX_PATH.read_text(encoding="utf-8")
 
-    assert "no todos los cortes tienen" in text
-    assert text.count("falta test dedicado") >= 1
+    assert "falta test dedicado" not in text
+    assert "cada corte U01-U24 tiene una" in text

@@ -175,5 +175,5 @@ R01 tambien resuelve feeds por cohorte desde `update_config.json` sin romper el
 `manifest_url` historico y bloquea updates si queda un journal durable de
 actualizacion interrumpida; ademas agrega healthcheck local sin red y staging
 bootstrap -> application con datos de cliente preservados. R02 define la matriz
-U01-U24; todavia queda fuera de este cierre automatizar los gaps marcados como
-"falta test dedicado".
+U01-U24 y cada corte queda enlazado a una prueba automatizada o equivalente con
+nombre explicito.
