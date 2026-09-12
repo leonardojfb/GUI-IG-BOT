@@ -75,6 +75,17 @@ class UpdaterTest(unittest.TestCase):
             **extra,
         }
 
+    def _write_required_application_files(self):
+        for name in updater.APPLICATION_REQUIRED_FILES:
+            path = self.app_dir / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if name == "version.json":
+                path.write_text(json.dumps({"version": "1.0.0"}), encoding="utf-8")
+            elif name.endswith(".exe"):
+                path.write_bytes(b"binary")
+            else:
+                path.write_text(f"installed {name}", encoding="utf-8")
+
     def _package(self, version="1.0.1"):
         return _zip_bytes(self._application_files(version))
 
@@ -349,6 +360,41 @@ class UpdaterTest(unittest.TestCase):
 
         with self.assertRaisesRegex(updater.UpdateError, "canal de actualizaciones"):
             updater.load_config(self.app_dir)
+
+    def test_healthcheck_reports_ok_without_network_for_complete_install(self):
+        self._write_required_application_files()
+        (self.app_dir / "update_config.json").write_text(
+            json.dumps(
+                {
+                    "channel": "stable",
+                    "manifest_feeds": {
+                        "stable": "https://updates.example.test/stable.json",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = updater.healthcheck(self.app_dir)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["version"], "1.0.0")
+        self.assertEqual(result["manifest_url"], "https://updates.example.test/stable.json")
+        self.assertEqual(result["missing_required_files"], [])
+        self.assertEqual(result["errors"], [])
+
+    def test_healthcheck_reports_missing_files_and_recovery_marker(self):
+        (self.app_dir / ".update_journal.json").write_text(
+            json.dumps({"phase": "applying"}),
+            encoding="utf-8",
+        )
+
+        result = updater.healthcheck(self.app_dir)
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["recovery_required"])
+        self.assertIn("launcher.py", result["missing_required_files"])
+        self.assertTrue(any("RECOVERY_REQUIRED" in error for error in result["errors"]))
 
     def test_rollback_restores_files_after_copy_failure(self):
         package_path = self.app_dir / "release.zip"

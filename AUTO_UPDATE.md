@@ -14,6 +14,18 @@ Tambien puedes configurar el manifiesto y el token desde la pestaña `Actualizac
 
 Si `manifest_url` esta vacia o no hay internet, la GUI se abre con la version local.
 
+## Diagnostico local
+
+Antes de publicar o al revisar una instalacion de cliente, ejecuta:
+
+```powershell
+py updater.py --healthcheck
+```
+
+El comando no consulta internet ni importa la GUI. Devuelve JSON con version
+local, canal, manifiesto resuelto, archivos faltantes y cualquier bloqueo
+`RECOVERY_REQUIRED` por `.update_status.json` o `.update_journal.json`.
+
 ## Publicar una version
 
 1. Cambia `version` y `release_date` en `version.json`.
@@ -21,6 +33,10 @@ Si `manifest_url` esta vacia o no hay internet, la GUI se abre con la version lo
 3. Publica `releases\MetodoIG-vX.Y.Z.zip` en GitHub Releases.
 4. Sube el ZIP como asset de la release `vX.Y.Z` en GitHub y publica `release-manifest.json` en la URL configurada. Para repositorios privados el actualizador resuelve el asset por la API de GitHub usando el token; no modifica la URL a mano.
 
-Para la primera entrega puedes ejecutar el build con `-IncludeClientConfig -IncludeClientDatabase`, despues de haber configurado `update_config.json`. Las releases posteriores no incluyen ni reemplazan `organizador.db`.
+Para la primera entrega puedes ejecutar el build con `-IncludeClientDatabase`
+para incluir una plantilla limpia `organizador.default.db`. No empaquetes
+`update_config.json`: cada cliente conserva su configuracion local de canal,
+manifiesto y token. Las releases posteriores no incluyen ni reemplazan
+`organizador.db`.
 
 Las releases normales no contienen `organizador.db`, estados de Telegram, historiales, configuraciones, cuentas, calendarios ni videos. Solo la entrega inicial puede incluir `organizador.db` mediante `-IncludeClientDatabase`; el actualizador nunca escribe ese archivo ni los demás datos del socio.

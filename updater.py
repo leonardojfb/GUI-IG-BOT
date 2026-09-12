@@ -391,6 +391,52 @@ def _atomic_copy(source: Path, destination: Path) -> None:
             pass
 
 
+def healthcheck(app_dir: Path = APP_DIR) -> dict[str, Any]:
+    app_dir = Path(app_dir).resolve()
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    try:
+        version = read_local_version(app_dir)
+    except UpdateError as exc:
+        version = ""
+        errors.append(str(exc))
+
+    recovery_error = _existing_recovery_error(app_dir)
+    if recovery_error:
+        errors.append(recovery_error)
+
+    missing_required = sorted(
+        name for name in APPLICATION_REQUIRED_FILES if not (app_dir / Path(name)).exists()
+    )
+    if missing_required:
+        errors.append("Faltan archivos requeridos: " + ", ".join(missing_required[:5]))
+
+    missing_optional = sorted(
+        name for name in OPTIONAL_APPLICATION_FILES if not (app_dir / Path(name)).exists()
+    )
+    if missing_optional:
+        warnings.append("Faltan archivos opcionales: " + ", ".join(missing_optional))
+
+    try:
+        config = load_config(app_dir)
+    except UpdateError as exc:
+        config = {}
+        errors.append(str(exc))
+
+    return {
+        "ok": not errors,
+        "version": version,
+        "recovery_required": bool(recovery_error),
+        "manifest_url": str(config.get("manifest_url", "")).strip(),
+        "channel": str(config.get("channel", "")).strip(),
+        "missing_required_files": missing_required,
+        "missing_optional_files": missing_optional,
+        "errors": errors,
+        "warnings": warnings,
+    }
+
+
 def apply_package(
     app_dir: Path,
     package_path: Path,
@@ -589,11 +635,16 @@ def check_and_apply(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Actualizador de Metodo IG VIDEOS")
     parser.add_argument("--check-and-apply", action="store_true")
+    parser.add_argument("--healthcheck", action="store_true")
     args = parser.parse_args()
+    if args.healthcheck:
+        result = healthcheck()
+        print(json.dumps(result, ensure_ascii=True, indent=2))
+        return 0 if result["ok"] else 2
     if args.check_and_apply:
         check_and_apply()
         return 0
-    parser.error("Usa --check-and-apply")
+    parser.error("Usa --check-and-apply o --healthcheck")
     return 2
 
 

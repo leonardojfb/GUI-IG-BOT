@@ -136,9 +136,38 @@ py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_updater
 
 Resultado: `22 passed in 1.17s`.
 
+## Healthcheck local
+
+`updater.healthcheck()` inspecciona la instalacion sin red y sin importar la GUI.
+Tambien queda disponible como:
+
+```powershell
+py updater.py --healthcheck
+```
+
+Salida:
+
+- `ok`: `true` solo si no hay errores;
+- `version`: version local valida, si se pudo leer;
+- `recovery_required`: `true` si existe `.update_status.json` o
+  `.update_journal.json` bloqueante;
+- `manifest_url` y `channel`: configuracion local ya resuelta por cohorte;
+- `missing_required_files`: archivos de aplicacion que faltan;
+- `missing_optional_files`: archivos opcionales ausentes;
+- `errors` y `warnings`: diagnostico para soporte.
+
+Evidencia focal:
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_updater.py -q
+```
+
+Resultado: `24 passed in 1.22s`.
+
 ## Estado R01
 
 Cerrado para compatibilidad bootstrap con updaters historicos reales y
 resolucion local de feeds por cohorte. Cerrado tambien el bloqueo por journal
-durable ante terminacion abrupta. Sigue pendiente dentro de R01/R02: staging de
-runtime, healthcheck y matriz U01-U24.
+durable ante terminacion abrupta y el healthcheck local. Sigue pendiente dentro
+de R01/R02: staging de runtime y matriz U01-U24.
