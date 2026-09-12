@@ -296,6 +296,60 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual((self.app_dir / "database.py").read_text(), "old code")
         self.assertEqual(updater.read_local_version(self.app_dir), "1.0.0")
 
+    def test_load_config_resolves_manifest_feed_for_selected_channel(self):
+        (self.app_dir / "update_config.json").write_text(
+            json.dumps(
+                {
+                    "channel": "bootstrap",
+                    "manifest_url": "https://updates.example.test/stable.json",
+                    "manifest_feeds": {
+                        "stable": "https://updates.example.test/stable.json",
+                        "bootstrap": "https://updates.example.test/bootstrap.json",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        config = updater.load_config(self.app_dir)
+
+        self.assertEqual(config["channel"], "bootstrap")
+        self.assertEqual(
+            config["manifest_url"],
+            "https://updates.example.test/bootstrap.json",
+        )
+
+    def test_load_config_keeps_legacy_manifest_url_when_no_feeds_are_configured(self):
+        (self.app_dir / "update_config.json").write_text(
+            json.dumps(
+                {
+                    "channel": "stable",
+                    "manifest_url": "https://updates.example.test/legacy.json",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        config = updater.load_config(self.app_dir)
+
+        self.assertEqual(config["manifest_url"], "https://updates.example.test/legacy.json")
+
+    def test_load_config_rejects_unknown_channel_feed_before_network(self):
+        (self.app_dir / "update_config.json").write_text(
+            json.dumps(
+                {
+                    "channel": "canary",
+                    "manifest_feeds": {
+                        "stable": "https://updates.example.test/stable.json",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(updater.UpdateError, "canal de actualizaciones"):
+            updater.load_config(self.app_dir)
+
     def test_rollback_restores_files_after_copy_failure(self):
         package_path = self.app_dir / "release.zip"
         package_path.write_bytes(self._package())

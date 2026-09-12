@@ -67,8 +67,51 @@ py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_legacy_
 
 Resultado: `1 passed in 5.19s`.
 
+## Enrolamiento por cohorte
+
+`updater.load_config()` mantiene compatibilidad con el formato historico:
+
+```json
+{
+  "manifest_url": "https://updates.example.test/stable.json"
+}
+```
+
+Si una instalacion tiene `manifest_feeds`, el updater resuelve la URL final
+desde `channel` antes de tocar red:
+
+```json
+{
+  "channel": "bootstrap",
+  "manifest_url": "https://updates.example.test/stable.json",
+  "manifest_feeds": {
+    "stable": "https://updates.example.test/stable.json",
+    "bootstrap": "https://updates.example.test/bootstrap.json"
+  }
+}
+```
+
+Reglas:
+
+- sin `manifest_feeds`, se usa `manifest_url` como antes;
+- con `manifest_feeds`, `channel` por defecto es `stable`;
+- si el canal elegido no existe o no tiene URL, el update falla antes de red y
+  el launcher conserva la app local salvo que exista `RECOVERY_REQUIRED`;
+- `update_config.json` sigue siendo local del cliente y no se empaqueta en la
+  release normal.
+
+Evidencia focal:
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_updater.py -q
+```
+
+Resultado: `20 passed in 1.09s`.
+
 ## Estado R01
 
-Cerrado para compatibilidad bootstrap con updaters historicos reales. Sigue
-pendiente dentro de R01/R02: enrolamiento de feeds por cohorte, journal durable
-ante terminacion abrupta, staging de runtime, healthcheck y matriz U01-U24.
+Cerrado para compatibilidad bootstrap con updaters historicos reales y
+resolucion local de feeds por cohorte. Sigue pendiente dentro de R01/R02:
+journal durable ante terminacion abrupta, staging de runtime, healthcheck y
+matriz U01-U24.

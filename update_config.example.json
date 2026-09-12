@@ -1,5 +1,10 @@
 {
+  "channel": "stable",
   "manifest_url": "https://raw.githubusercontent.com/leonardojfb/GUI-IG-BOT/main/release-manifest.json",
+  "manifest_feeds": {
+    "stable": "https://raw.githubusercontent.com/leonardojfb/GUI-IG-BOT/main/release-manifest.json",
+    "bootstrap": "https://raw.githubusercontent.com/leonardojfb/GUI-IG-BOT/main/release-manifest-bootstrap.json"
+  },
   "timeout_seconds": 15,
   "check_on_start": true,
   "access_token": ""

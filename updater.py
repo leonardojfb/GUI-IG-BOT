@@ -118,6 +118,24 @@ def read_local_version(app_dir: Path = APP_DIR) -> str:
     return str(value)
 
 
+def _resolve_manifest_feed(config: dict[str, Any]) -> dict[str, Any]:
+    feeds = config.get("manifest_feeds")
+    if feeds is None:
+        return config
+    if not isinstance(feeds, dict):
+        raise UpdateError("manifest_feeds debe ser un objeto")
+
+    channel = str(config.get("channel") or "stable").strip() or "stable"
+    manifest_url = feeds.get(channel)
+    if not isinstance(manifest_url, str) or not manifest_url.strip():
+        raise UpdateError(f"canal de actualizaciones no configurado: {channel}")
+
+    resolved = dict(config)
+    resolved["channel"] = channel
+    resolved["manifest_url"] = manifest_url.strip()
+    return resolved
+
+
 def load_config(app_dir: Path = APP_DIR) -> dict[str, Any]:
     config_path = app_dir / CONFIG_FILE
     if not config_path.exists():
@@ -125,7 +143,7 @@ def load_config(app_dir: Path = APP_DIR) -> dict[str, Any]:
     config = _read_json(config_path)
     if config.get("check_on_start", True) is False:
         return {}
-    return config
+    return _resolve_manifest_feed(config)
 
 
 def _request_bytes(
