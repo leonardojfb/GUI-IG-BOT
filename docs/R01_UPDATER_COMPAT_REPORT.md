@@ -198,4 +198,5 @@ Resultado: `1 passed in 10.70s`.
 Cerrado para compatibilidad bootstrap con updaters historicos reales y
 resolucion local de feeds por cohorte. Cerrado tambien el bloqueo por journal
 durable ante terminacion abrupta, el healthcheck local y el staging de runtime.
-Sigue pendiente dentro de R01/R02: matriz U01-U24.
+R02 define la matriz U01-U24; sigue pendiente automatizar los gaps marcados
+como "falta test dedicado".
