@@ -31,6 +31,7 @@ paquete incompleto.
 | `vault/migration.py` | Si | Define plan/ejecucion explicita de migracion externa a managed; no copia hasta llamada explicita. | Bajo/medio | R04 estima bytes y migra ubicaciones seleccionadas conservando referencias externas. |
 | `vault/query.py` | Si | Define consultas y membresias de biblioteca; no abre DB hasta instanciar/llamar metodos. | Bajo | Servicio R04 para familias, colecciones y busqueda paginada. |
 | `vault/storage.py` | Si | Define hash/storage helpers; no lee ni copia archivos hasta llamar metodos. | Bajo/medio | Servicio R04; import gestionado usa copia temporal y promocion atomica. |
+| `vault/thumbnails.py` | Si | Define cache de miniaturas; Pillow se importa solo al generar imagenes. | Bajo/medio | R04 crea thumbnails de imagen y reporta corruptos/sin soporte sin romper biblioteca. |
 | `cleaner.py` | Si | Define helpers de limpieza; acciones bajo funciones. | Bajo | No ejecutar limpieza en import. |
 | `console_encoding.py` | Si | Solo define helper. | Bajo | Puede importarse temprano. |
 | `database.py` | Si | Define `DB_PATH` desde `__file__`; no abre conexion hasta `DatabaseManager()`. | Medio: la ruta por defecto cambia segun instalacion importada. | Tests y procesos temporales deben parchear `database.DB_PATH` antes de crear `DatabaseManager()`. |

@@ -32,6 +32,11 @@
 - Tandas (`videos.py`), Editor single/batch y Forge (`gui_premium_v7.py`)
   llaman el enlace Vault solo despues de render/log exitoso; si Vault falla, el
   render ya completado no se invalida.
+- `VaultThumbnailer` crea miniaturas JPEG en cache separada para imagenes,
+  reporta imagen corrupta como `error` y videos como `unsupported` hasta tener
+  extractor de frames.
+- `VaultQuery.inspect_asset()` devuelve asset, ubicaciones verificadas,
+  familias, colecciones, logs asociados y miniatura para el inspector operativo.
 - `build_release.ps1`, `updater.py` y `docs/R00_LAUNCH_IMPORT_INVENTORY.md`
   incluyen los modulos `vault/*` agregados en R04.
 
@@ -114,6 +119,17 @@ py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_vault_i
 
 Resultado: `24 passed in 36.55s`.
 
+Miniaturas e inspector:
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+py -3.14 -B -m py_compile vault\query.py vault\thumbnails.py tests\test_vault_query.py tests\test_vault_thumbnails.py
+py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_vault_query.py tests/test_vault_thumbnails.py tests/test_vault_storage.py tests/test_vault_backfill.py tests/test_vault_integration.py -q
+```
+
+Resultado: `20 passed in 7.19s`.
+
 ## Pendientes de R04
 
-- Miniaturas e inspector operativo.
+- Integracion visual completa de la biblioteca en GUI.
+- Extractor de frames para thumbnails de video.

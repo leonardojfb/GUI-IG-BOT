@@ -1,5 +1,6 @@
 import database
 
+from vault.integration import register_transform_output
 from vault.query import VaultQuery
 from vault.storage import VaultStorage
 
@@ -68,6 +69,40 @@ def test_library_query_filters_status_type_family_collection_and_paginates(tmp_p
         assert [row["id"] for row in page["items"]] == kept[1:3]
         assert page["limit"] == 2
         assert page["offset"] == 1
+    finally:
+        db.close()
+        database.DB_PATH = previous
+
+
+def test_asset_inspector_returns_locations_memberships_logs_and_thumbnail(tmp_path):
+    Image = __import__("PIL.Image", fromlist=["Image"])
+    db, previous = _temporary_db(tmp_path)
+    try:
+        source = tmp_path / "input.mp4"
+        output = tmp_path / "output.png"
+        source.write_bytes(b"source")
+        Image.new("RGB", (320, 180), "blue").save(output)
+        storage = VaultStorage(db, tmp_path / "vault")
+        query = VaultQuery(db)
+        log_id = db.save_video_transform_log("editor", source, output, {"asset": "output"})
+        asset = register_transform_output(db, storage, log_id)
+        family = query.create_family("Family")
+        collection = query.create_collection("Collection")
+        query.add_asset_to_family(family["id"], asset["asset_id"], role="original")
+        query.add_asset_to_collection(collection["id"], asset["asset_id"])
+
+        report = query.inspect_asset(
+            asset["asset_id"],
+            storage=storage,
+            thumbnail_cache=tmp_path / "thumbs",
+        )
+
+        assert report["asset"]["id"] == asset["asset_id"]
+        assert report["locations"][0]["status"] == "ok"
+        assert report["families"][0]["name"] == "Family"
+        assert report["collections"][0]["name"] == "Collection"
+        assert report["transform_logs"][0]["process_kind"] == "editor"
+        assert report["thumbnail"]["status"] == "ok"
     finally:
         db.close()
         database.DB_PATH = previous

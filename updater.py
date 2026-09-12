@@ -66,6 +66,7 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "vault/migration.py",
         "vault/query.py",
         "vault/storage.py",
+        "vault/thumbnails.py",
         "logo_elittisse.svg",
         "tools/ffmpeg/bin/ffmpeg.exe",
         "tools/ffmpeg/bin/ffprobe.exe",

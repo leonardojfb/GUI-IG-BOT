@@ -138,6 +138,69 @@ class VaultQuery:
             "offset": safe_offset,
         }
 
+    def inspect_asset(self, asset_id: int, *, storage, thumbnail_cache) -> dict[str, Any]:
+        asset = self._asset(asset_id)
+        locations = []
+        for location in storage.locations_for_asset(asset_id):
+            locations.append(storage.verify_location(location["id"]))
+        from vault.thumbnails import VaultThumbnailer
+
+        thumbnail = VaultThumbnailer(storage, thumbnail_cache).ensure_thumbnail(asset_id)
+        return {
+            "asset": asset,
+            "locations": locations,
+            "families": self.families_for_asset(asset_id),
+            "collections": self.collections_for_asset(asset_id),
+            "transform_logs": self.transform_logs_for_asset(asset_id),
+            "thumbnail": thumbnail,
+        }
+
+    def families_for_asset(self, asset_id: int) -> list[dict[str, Any]]:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT f.*, m.role
+            FROM content_family_assets m
+            JOIN content_families f ON f.id = m.family_id
+            WHERE m.asset_id = ?
+            ORDER BY f.name COLLATE NOCASE, m.role
+            """,
+            (int(asset_id),),
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+    def collections_for_asset(self, asset_id: int) -> list[dict[str, Any]]:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT c.*
+            FROM vault_collection_assets m
+            JOIN vault_collections c ON c.id = m.collection_id
+            WHERE m.asset_id = ?
+            ORDER BY c.name COLLATE NOCASE
+            """,
+            (int(asset_id),),
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+    def transform_logs_for_asset(self, asset_id: int) -> list[dict[str, Any]]:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT id, process_kind, source_path, output_path, output_filename,
+                   tanda_name, source_identity, source_vault_asset_id,
+                   output_vault_asset_id, details_json, created_at
+            FROM video_transform_logs
+            WHERE source_vault_asset_id = ?
+               OR output_vault_asset_id = ?
+               OR source_path IN (SELECT path FROM vault_locations WHERE asset_id = ?)
+               OR output_path IN (SELECT path FROM vault_locations WHERE asset_id = ?)
+            ORDER BY datetime(created_at) DESC, id DESC
+            """,
+            (int(asset_id), int(asset_id), int(asset_id), int(asset_id)),
+        )
+        return [dict(row) for row in cur.fetchall()]
+
     def _create_named(self, table: str, name: str, notes: str) -> dict[str, Any]:
         label = self._label(name, "El nombre no puede estar vacio")
         cur = self.conn.cursor()
@@ -152,6 +215,14 @@ class VaultQuery:
         self.conn.commit()
         cur.execute(f"SELECT * FROM {table} WHERE name = ?", (label,))
         return dict(cur.fetchone())
+
+    def _asset(self, asset_id: int) -> dict[str, Any]:
+        cur = self.conn.cursor()
+        cur.execute("SELECT * FROM vault_assets WHERE id = ?", (int(asset_id),))
+        row = cur.fetchone()
+        if not row:
+            raise ValueError(f"No existe asset: {asset_id}")
+        return dict(row)
 
     def _require_row(self, table: str, row_id: int, label: str) -> None:
         cur = self.conn.cursor()
