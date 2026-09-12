@@ -1,6 +1,7 @@
 import database
 
 from vault.backfill import backfill_transform_log_references
+from vault.migration import migrate_external_locations, plan_external_migration
 from vault.storage import VaultStorage
 
 
@@ -47,5 +48,44 @@ def test_backfill_is_idempotent_and_reports_existing_locations(tmp_path):
         assert second["already_registered"] == 2
         assert len(storage.list_assets()) == 1
         assert len(storage.locations_for_asset(storage.list_assets()[0]["id"])) == 2
+    finally:
+        db.close()
+
+
+def test_external_migration_plan_estimates_bytes_without_copying(tmp_path):
+    db = database.DatabaseManager(str(tmp_path / "organizador.db"))
+    try:
+        source = tmp_path / "external.mp4"
+        source.write_bytes(b"external")
+        storage = VaultStorage(db, tmp_path / "vault")
+        location = storage.register_external(source)
+
+        plan = plan_external_migration(db)
+
+        assert plan["total_locations"] == 1
+        assert plan["copy_bytes"] == source.stat().st_size
+        assert plan["locations"][0]["location_id"] == location["location_id"]
+        assert plan["locations"][0]["path"] == str(source)
+        assert not list((tmp_path / "vault").rglob("*.mp4"))
+    finally:
+        db.close()
+
+
+def test_external_migration_requires_explicit_location_ids_and_preserves_external_history(tmp_path):
+    db = database.DatabaseManager(str(tmp_path / "organizador.db"))
+    try:
+        source = tmp_path / "external.mp4"
+        source.write_bytes(b"external")
+        storage = VaultStorage(db, tmp_path / "vault")
+        location = storage.register_external(source)
+
+        empty = migrate_external_locations(db, storage, location_ids=[])
+        migrated = migrate_external_locations(db, storage, location_ids=[location["location_id"]])
+
+        assert empty["migrated"] == 0
+        assert migrated["migrated"] == 1
+        locations = storage.locations_for_asset(location["asset_id"])
+        assert {bool(row["managed"]) for row in locations} == {False, True}
+        assert source.exists()
     finally:
         db.close()

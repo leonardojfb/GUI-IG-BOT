@@ -23,6 +23,9 @@
 - `backfill_transform_log_references()` registra `source_path` y `output_path`
   historicos como ubicaciones externas cuando existen; archivos faltantes quedan
   reportados y no se copian bytes.
+- `plan_external_migration()` estima ubicaciones y bytes listos para copiar;
+  `migrate_external_locations()` migra solo IDs seleccionados y conserva la
+  referencia externa original.
 - `build_release.ps1`, `updater.py` y `docs/R00_LAUNCH_IMPORT_INVENTORY.md`
   incluyen los modulos `vault/*` agregados en R04.
 
@@ -75,8 +78,17 @@ py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_vault_b
 
 Resultado: `8 passed in 3.38s`.
 
+Migracion asistida de bytes:
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+py -3.14 -B -m py_compile vault\backfill.py vault\migration.py vault\storage.py database.py updater.py tests\test_vault_backfill.py
+py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_vault_backfill.py tests/test_vault_storage.py tests/test_vault_query.py -q
+```
+
+Resultado: `10 passed in 3.95s`.
+
 ## Pendientes de R04
 
 - Import gestionado conectado a productores/GUI.
-- Migracion asistida de bytes historicos con estimacion de espacio y progreso.
 - Miniaturas e inspector operativo.
