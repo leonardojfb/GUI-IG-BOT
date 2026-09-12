@@ -1,6 +1,6 @@
 import database
 
-from catalog.service import CatalogService
+from catalog.service import CLEAR, SET, UNSET, CatalogService
 
 
 def _temporary_db(tmp_path):
@@ -100,6 +100,81 @@ def test_trial_capability_requires_instagram_identity(tmp_path):
 
         refreshed = {account["username"]: account for account in db.get_all_accounts()}
         assert refreshed["fb"]["trials_active"] == 0
+    finally:
+        db.close()
+        database.DB_PATH = previous
+
+
+def test_bulk_preview_and_apply_distinguishes_unset_clear_and_set(tmp_path):
+    db, previous = _temporary_db(tmp_path)
+    try:
+        db.add_virtual_account("one", "MAIN")
+        db.update_account("one", assigned_va="Laura", trials_active=1)
+        db.add_virtual_account("two", "MAIN")
+        db.update_account("two", assigned_va="Leo")
+        db.add_virtual_account("three", "SPAM")
+        db.update_account("three", assigned_va="Maria")
+        service = CatalogService(db)
+        service.ensure_identity_catalog()
+        accounts = {account["username"]: account for account in db.get_all_accounts()}
+
+        preview = service.preview_bulk_update(
+            [accounts["one"]["id"], accounts["two"]["id"]],
+            {
+                "account_type": SET("TRIALS"),
+                "assigned_va": CLEAR,
+                "trials_active": UNSET,
+            },
+        )
+
+        assert [row["id"] for row in preview["rows"]] == [
+            accounts["one"]["id"],
+            accounts["two"]["id"],
+        ]
+        assert preview["rows"][0]["before"]["assigned_va"] == "Laura"
+        assert preview["rows"][0]["after"]["assigned_va"] == "Sin Asignar"
+        assert preview["rows"][0]["after"]["trials_active"] == 1
+        assert preview["rows"][1]["after"]["account_type"] == "TRIALS"
+
+        changed = service.apply_bulk_update(preview)
+
+        assert changed == 2
+        refreshed = {account["username"]: account for account in db.get_all_accounts()}
+        assert refreshed["one"]["account_type"] == "TRIALS"
+        assert refreshed["one"]["assigned_va"] == "Sin Asignar"
+        assert refreshed["one"]["trials_active"] == 1
+        assert refreshed["two"]["account_type"] == "TRIALS"
+        assert refreshed["three"]["account_type"] == "SPAM"
+        assert refreshed["three"]["assigned_va"] == "Maria"
+    finally:
+        db.close()
+        database.DB_PATH = previous
+
+
+def test_bulk_apply_rejects_stale_preview_revision(tmp_path):
+    db, previous = _temporary_db(tmp_path)
+    try:
+        db.add_virtual_account("one", "MAIN")
+        db.update_account("one", assigned_va="Laura")
+        service = CatalogService(db)
+        service.ensure_identity_catalog()
+        [account] = db.get_all_accounts()
+
+        preview = service.preview_bulk_update(
+            [account["id"]],
+            {"assigned_va": SET("Leo")},
+        )
+        db.update_account("one", assigned_va="Maria")
+
+        try:
+            service.apply_bulk_update(preview)
+        except ValueError as exc:
+            assert "revision" in str(exc)
+        else:
+            raise AssertionError("stale preview should be rejected")
+
+        [refreshed] = db.get_all_accounts()
+        assert refreshed["assigned_va"] == "Maria"
     finally:
         db.close()
         database.DB_PATH = previous

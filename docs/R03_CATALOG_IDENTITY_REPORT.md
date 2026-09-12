@@ -22,6 +22,10 @@ username pasa a ser un alias versionable, no la identidad primaria del historial
   mismo `identity_id` y archiva el alias anterior.
 - `CatalogService.set_trial_capability()` solo permite activar Trial en
   identidades Instagram. Facebook u otras plataformas fallan antes de mutar.
+- `CatalogService.preview_bulk_update()` distingue `UNSET`, `CLEAR` y
+  `SET(value)`, devuelve antes/despues por ID y fija `preview_revision`.
+- `CatalogService.apply_bulk_update()` aplica solo si la revision actual
+  coincide con el preview; si otra ventana cambio una fila, rechaza el lote.
 
 ## Compatibilidad
 
@@ -42,9 +46,17 @@ py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_catalog
 
 Resultado: `52 passed, 7 subtests passed in 70.39s`.
 
+Bulk revisable:
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_catalog_identity.py -q
+```
+
+Resultado: `5 passed in 1.41s`.
+
 ## Pendientes de R03
 
-- Bulk revisable con `UNSET`, `CLEAR` y `SET(value)`.
 - Preview de import Airtable con bajas remotas opt-in.
 - Separacion categoria unica vs etiquetas N:M.
 - Validacion de cambios contra calendarios ya confirmados.
