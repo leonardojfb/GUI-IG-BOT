@@ -165,6 +165,30 @@ CREATE TABLE IF NOT EXISTS video_transform_logs (
 CREATE INDEX IF NOT EXISTS idx_video_transform_logs_process_created
 ON video_transform_logs(process_kind, created_at);
 
+CREATE TABLE IF NOT EXISTS vault_assets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sha256 TEXT NOT NULL UNIQUE,
+    media_type TEXT NOT NULL DEFAULT 'file',
+    size_bytes INTEGER NOT NULL DEFAULT 0,
+    display_name TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS vault_locations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_id INTEGER NOT NULL,
+    path TEXT NOT NULL UNIQUE,
+    managed INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'ok',
+    last_verified_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (asset_id) REFERENCES vault_assets(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vault_locations_asset
+ON vault_locations(asset_id);
+
 CREATE TABLE IF NOT EXISTS social_publishing_settings (
     setting_key TEXT PRIMARY KEY,
     setting_value TEXT NOT NULL DEFAULT '',
