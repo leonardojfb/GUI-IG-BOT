@@ -114,6 +114,21 @@ Resultado: `1 passed in 23.35s`.
   aunque la dependencia no esta en `requirements.txt`; se corrigio con import
   lazy dentro del helper de cliente Telegram.
 
+Smoke visual con display Windows:
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/smoke_ui_visual.py -q -rs
+```
+
+Resultado: `1 passed in 5.28s`.
+
+- La prueba abre `InstagramAutoPro` con DB temporal, fuerza ventana visible,
+  captura `%TEMP%\metodoig_r00_ui_visual.png` y valida tamano minimo,
+  diversidad visual y presencia del fondo oscuro propio del GUI.
+- La captura revisada muestra Dashboard, sidebar, tabla principal, botones y
+  toast inicial visibles en `1200x760`.
+
 ## Contratos incorporados
 
 - El manifest v1 conserva `caption_mode` y agrega el destino Reel/Trial explicito
@@ -152,11 +167,8 @@ b86674dfe4aa9f48596fe2e70bb067993a2bf13c6423c456f8f29385dd426860  release-manife
 59af7fb08016a6e5a6cab8e0aed9cf8375441d47d7f2719712dc9d69e5ac9fac  version.json
 ```
 
-## Pendientes antes de cerrar R00
+## Pendientes fuera de R00
 
-- Convertir los recorridos UI hoy omitidos sin display en evidencia visual sobre
-  Windows con display disponible.
-
-R01 y R02 tampoco estan cerrados: faltan pruebas con cada updater antiguo real,
+R01 y R02 no estan cerrados: faltan pruebas con cada updater antiguo real,
 enrolamiento de feeds por cohorte, journal durable ante terminacion abrupta,
 staging de runtime, healthcheck y la matriz completa de interrupciones U01-U24.
