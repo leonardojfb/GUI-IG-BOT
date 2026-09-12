@@ -178,3 +178,49 @@ def test_bulk_apply_rejects_stale_preview_revision(tmp_path):
     finally:
         db.close()
         database.DB_PATH = previous
+
+
+def test_category_remains_unique_while_tags_are_many_to_many(tmp_path):
+    db, previous = _temporary_db(tmp_path)
+    try:
+        db.add_virtual_account("one", "MAIN")
+        service = CatalogService(db)
+        service.ensure_identity_catalog()
+        [account] = db.get_all_accounts()
+
+        assert service.set_account_category(account["id"], "SPAM") is True
+        assert service.add_account_tag(account["id"], "hot") is True
+        assert service.add_account_tag(account["id"], "trial-ready") is True
+        assert service.add_account_tag(account["id"], "hot") is False
+
+        [refreshed] = db.get_all_accounts()
+        assert refreshed["account_type"] == "SPAM"
+        assert service.tags_for_account(account["id"]) == ["hot", "trial-ready"]
+
+        assert service.remove_account_tag(account["id"], "hot") is True
+        assert service.tags_for_account(account["id"]) == ["trial-ready"]
+        assert refreshed["account_type"] not in service.tags_for_account(account["id"])
+    finally:
+        db.close()
+        database.DB_PATH = previous
+
+
+def test_tag_schema_is_additive_for_existing_databases(tmp_path):
+    db, previous = _temporary_db(tmp_path)
+    try:
+        service = CatalogService(db)
+        service.ensure_identity_catalog()
+
+        cur = db.conn.cursor()
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?)",
+            ("account_tags", "virtual_account_tags"),
+        )
+
+        assert {row["name"] for row in cur.fetchall()} == {
+            "account_tags",
+            "virtual_account_tags",
+        }
+    finally:
+        db.close()
+        database.DB_PATH = previous

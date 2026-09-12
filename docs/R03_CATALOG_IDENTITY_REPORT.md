@@ -30,6 +30,11 @@ username pasa a ser un alias versionable, no la identidad primaria del historial
   y actualizaciones pero omite bajas locales detectadas por ausencia remota.
 - `sync_airtable_accounts()` mantiene el preview general y agrega una segunda
   confirmacion especifica para aplicar esas bajas remotas.
+- `account_type` permanece como categoria unica operativa; las etiquetas viven
+  en `account_tags` + `virtual_account_tags` como relacion N:M aditiva.
+- `CatalogService.set_account_category()`, `add_account_tag()`,
+  `remove_account_tag()` y `tags_for_account()` exponen esa separacion sin
+  tocar distribucion, calendario ni filtros existentes.
 
 ## Compatibilidad
 
@@ -69,7 +74,16 @@ py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_airtabl
 
 Resultado: `25 passed in 1.25s`.
 
+Categoria unica + etiquetas N:M:
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+py -3.14 -B -m py_compile database.py catalog\service.py tests\test_catalog_identity.py
+py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_catalog_identity.py -q
+```
+
+Resultado: `7 passed in 3.65s`.
+
 ## Pendientes de R03
 
-- Separacion categoria unica vs etiquetas N:M.
 - Validacion de cambios contra calendarios ya confirmados.

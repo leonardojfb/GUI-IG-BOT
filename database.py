@@ -17,6 +17,20 @@ CREATE TABLE IF NOT EXISTS account_categories (
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS account_tags (
+    name TEXT PRIMARY KEY,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS virtual_account_tags (
+    account_id INTEGER NOT NULL,
+    tag_name TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (account_id, tag_name),
+    FOREIGN KEY (account_id) REFERENCES virtual_accounts(id),
+    FOREIGN KEY (tag_name) REFERENCES account_tags(name)
+);
+
 CREATE TABLE IF NOT EXISTS virtual_assistants (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE NOT NULL,

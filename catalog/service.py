@@ -153,6 +153,70 @@ class CatalogService:
         self.conn.commit()
         return bool(cur.rowcount)
 
+    def set_account_category(self, account_id: int, category: str) -> bool:
+        category_name = self._normalise_label(category, "La categoria no puede estar vacia")
+        self._account_by_id(account_id)
+        cur = self.conn.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+        try:
+            cur.execute(
+                "INSERT OR IGNORE INTO account_categories (name) VALUES (?)",
+                (category_name,),
+            )
+            cur.execute(
+                "UPDATE virtual_accounts SET account_type = ? WHERE id = ?",
+                (category_name, int(account_id)),
+            )
+        except Exception:
+            self.conn.rollback()
+            raise
+        self.conn.commit()
+        return bool(cur.rowcount)
+
+    def add_account_tag(self, account_id: int, tag: str) -> bool:
+        tag_name = self._normalise_label(tag, "La etiqueta no puede estar vacia")
+        self._account_by_id(account_id)
+        cur = self.conn.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+        try:
+            cur.execute("INSERT OR IGNORE INTO account_tags (name) VALUES (?)", (tag_name,))
+            cur.execute(
+                """
+                INSERT OR IGNORE INTO virtual_account_tags (account_id, tag_name)
+                VALUES (?, ?)
+                """,
+                (int(account_id), tag_name),
+            )
+        except Exception:
+            self.conn.rollback()
+            raise
+        self.conn.commit()
+        return bool(cur.rowcount)
+
+    def remove_account_tag(self, account_id: int, tag: str) -> bool:
+        tag_name = self._normalise_label(tag, "La etiqueta no puede estar vacia")
+        cur = self.conn.cursor()
+        cur.execute(
+            "DELETE FROM virtual_account_tags WHERE account_id = ? AND tag_name = ?",
+            (int(account_id), tag_name),
+        )
+        self.conn.commit()
+        return bool(cur.rowcount)
+
+    def tags_for_account(self, account_id: int) -> list[str]:
+        self._account_by_id(account_id)
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT tag_name
+            FROM virtual_account_tags
+            WHERE account_id = ?
+            ORDER BY tag_name COLLATE NOCASE
+            """,
+            (int(account_id),),
+        )
+        return [row["tag_name"] for row in cur.fetchall()]
+
     def preview_bulk_update(
         self,
         account_ids: list[int],
@@ -235,6 +299,21 @@ class CatalogService:
     def _normalise_platform(value: Any) -> str:
         platform = str(value or "").strip().lower()
         return platform or "needs_review"
+
+    @staticmethod
+    def _normalise_label(value: Any, empty_message: str) -> str:
+        label = str(value or "").strip()
+        if not label:
+            raise ValueError(empty_message)
+        return label
+
+    def _account_by_id(self, account_id: int) -> dict[str, Any]:
+        cur = self.conn.cursor()
+        cur.execute("SELECT * FROM virtual_accounts WHERE id = ?", (int(account_id),))
+        row = cur.fetchone()
+        if not row:
+            raise ValueError(f"Cuenta no encontrada: {account_id}")
+        return dict(row)
 
     def _normalise_bulk_patch(self, patch: dict[str, PatchValue]) -> dict[str, PatchValue]:
         normalized = {}
