@@ -165,9 +165,37 @@ py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_updater
 
 Resultado: `24 passed in 1.22s`.
 
+## Staging de runtime
+
+`tests/test_update_staging.py` construye una instalacion temporal que representa
+un cliente ya instalado, con archivos de app antiguos y datos locales:
+
+- `organizador.db`;
+- `telegram_state_v11.json`;
+- `update_config.json`.
+
+Luego aplica:
+
+1. paquete `bootstrap` con `updater.py` y `version.json` en fase `bootstrap`;
+2. paquete `application` completo con la misma version numerica;
+3. `healthcheck()` sobre la instalacion final.
+
+La validacion exige que la version final no conserve `update_phase`, que los
+datos locales no cambien, que no queden `.update_journal.json` ni
+`.update_status.json`, y que el healthcheck final sea `ok`.
+
+Evidencia focal:
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_update_staging.py -q
+```
+
+Resultado: `1 passed in 10.70s`.
+
 ## Estado R01
 
 Cerrado para compatibilidad bootstrap con updaters historicos reales y
 resolucion local de feeds por cohorte. Cerrado tambien el bloqueo por journal
-durable ante terminacion abrupta y el healthcheck local. Sigue pendiente dentro
-de R01/R02: staging de runtime y matriz U01-U24.
+durable ante terminacion abrupta, el healthcheck local y el staging de runtime.
+Sigue pendiente dentro de R01/R02: matriz U01-U24.

@@ -173,6 +173,6 @@ R01 ya valida bootstrap contra updaters historicos reales desde `v1.0.2` hasta
 `v1.0.41`; `v1.0.1` no contiene updater y queda como reinstalacion asistida.
 R01 tambien resuelve feeds por cohorte desde `update_config.json` sin romper el
 `manifest_url` historico y bloquea updates si queda un journal durable de
-actualizacion interrumpida; ademas agrega healthcheck local sin red. R01/R02
-todavia tienen fuera de este cierre: staging de runtime y la matriz completa de
-interrupciones U01-U24.
+actualizacion interrumpida; ademas agrega healthcheck local sin red y staging
+bootstrap -> application con datos de cliente preservados. R01/R02 todavia
+tienen fuera de este cierre: matriz completa de interrupciones U01-U24.
