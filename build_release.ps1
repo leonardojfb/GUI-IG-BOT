@@ -47,6 +47,7 @@ $ReleaseFiles = @(
     "catalog/service.py",
     "vault/__init__.py",
     "vault/backfill.py",
+    "vault/integration.py",
     "vault/migration.py",
     "vault/query.py",
     "vault/storage.py",

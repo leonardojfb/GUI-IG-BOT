@@ -158,6 +158,8 @@ CREATE TABLE IF NOT EXISTS video_transform_logs (
     output_filename TEXT NOT NULL,
     tanda_name TEXT,
     source_identity TEXT,
+    source_vault_asset_id INTEGER,
+    output_vault_asset_id INTEGER,
     details_json TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -304,6 +306,8 @@ class DatabaseManager:
             "ALTER TABLE virtual_accounts ADD COLUMN story_link_override TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE virtual_accounts ADD COLUMN identity_id TEXT",
             "ALTER TABLE virtual_assistants ADD COLUMN timezone TEXT DEFAULT 'America/Argentina/Buenos_Aires'",
+            "ALTER TABLE video_transform_logs ADD COLUMN source_vault_asset_id INTEGER",
+            "ALTER TABLE video_transform_logs ADD COLUMN output_vault_asset_id INTEGER",
         ]
         cur = self.conn.cursor()
         for sql in migrations:
@@ -819,7 +823,8 @@ class DatabaseManager:
         rows = self.conn.execute(
             """
             SELECT id, process_kind, source_path, output_path, output_filename,
-                   tanda_name, source_identity, details_json, created_at
+                   tanda_name, source_identity, source_vault_asset_id,
+                   output_vault_asset_id, details_json, created_at
             FROM video_transform_logs
             ORDER BY datetime(created_at) DESC, id DESC
             LIMIT ?
