@@ -29,6 +29,9 @@
 - `video_transform_logs` suma columnas opcionales `source_vault_asset_id` y
   `output_vault_asset_id`; `register_transform_output()` importa el output ya
   renderizado a Vault managed y enlaza el log.
+- Tandas (`videos.py`), Editor single/batch y Forge (`gui_premium_v7.py`)
+  llaman el enlace Vault solo despues de render/log exitoso; si Vault falla, el
+  render ya completado no se invalida.
 - `build_release.ps1`, `updater.py` y `docs/R00_LAUNCH_IMPORT_INVENTORY.md`
   incluyen los modulos `vault/*` agregados en R04.
 
@@ -101,8 +104,16 @@ py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_vault_i
 
 Resultado: `15 passed in 5.65s`.
 
+Productores conectados a Vault:
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+py -3.14 -B -m py_compile gui_premium_v7.py videos.py vault\integration.py tests\test_vault_integration.py
+py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_vault_integration.py tests/test_video_transform_logs.py tests/test_video_editor_transform_logs.py tests/test_render_concurrency.py tests/test_forge_concurrency.py -q
+```
+
+Resultado: `24 passed in 36.55s`.
+
 ## Pendientes de R04
 
-- Conectar llamadas `register_transform_output()` en productores/GUI despues de
-  render exitoso.
 - Miniaturas e inspector operativo.

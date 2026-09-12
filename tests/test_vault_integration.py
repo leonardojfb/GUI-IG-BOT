@@ -1,7 +1,7 @@
 import sqlite3
 
 import database
-from vault.integration import register_transform_output
+from vault.integration import register_transform_output, register_transform_output_if_possible
 from vault.storage import VaultStorage
 
 
@@ -46,6 +46,25 @@ def test_register_transform_output_is_idempotent_for_same_log(tmp_path):
         db.close()
 
 
+def test_register_transform_output_if_possible_reports_error_without_raising(tmp_path):
+    db = database.DatabaseManager(str(tmp_path / "organizador.db"))
+    try:
+        source = tmp_path / "input.mp4"
+        output = tmp_path / "missing-output.mp4"
+        source.write_bytes(b"source")
+        log_id = db.save_video_transform_log("editor", source, output, {})
+        storage = VaultStorage(db, tmp_path / "vault")
+
+        result = register_transform_output_if_possible(db, storage, log_id)
+
+        assert result["status"] == "error"
+        assert "missing-output.mp4" in result["error"]
+        [log] = db.list_video_transform_logs()
+        assert log["output_vault_asset_id"] is None
+    finally:
+        db.close()
+
+
 def test_existing_database_migrates_transform_log_vault_columns(tmp_path):
     db_path = tmp_path / "organizador.db"
     conn = sqlite3.connect(db_path)
@@ -76,3 +95,20 @@ def test_existing_database_migrates_transform_log_vault_columns(tmp_path):
         assert {"source_vault_asset_id", "output_vault_asset_id"}.issubset(columns)
     finally:
         db.close()
+
+
+def test_gui_transform_logging_registers_output_to_vault():
+    source = open("gui_premium_v7.py", encoding="utf-8").read()
+    vault_helper = source[source.index("def _register_transform_output_if_possible_to_vault("):source.index("def _format_transform_summary")]
+
+    assert source.count("_register_transform_output_if_possible_to_vault(") >= 4
+    assert "VaultStorage" in vault_helper
+
+
+def test_tandas_transform_logging_registers_output_to_vault():
+    source = open("videos.py", encoding="utf-8").read()
+    helper = source[source.index("def _register_transform_output_if_possible_to_vault("):source.index("def _ffmpeg_tool_command")]
+    body = source[source.index("def process_tandas("):source.index("def process_mix_rules")]
+
+    assert "_register_transform_output_if_possible_to_vault(db, log_id)" in body
+    assert "VaultStorage" in helper

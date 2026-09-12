@@ -36,6 +36,17 @@ FFMPEG_METADATA_CLEAN_ARGS = [
 ]
 
 
+def _register_transform_output_if_possible_to_vault(db_ref, transform_log_id):
+    try:
+        from vault.integration import register_transform_output_if_possible
+        from vault.storage import VaultStorage
+
+        storage = VaultStorage(db_ref, os.path.join(BASE_DIR, "content_vault"))
+        return register_transform_output_if_possible(db_ref, storage, transform_log_id)
+    except Exception as exc:
+        return {"status": "error", "transform_log_id": transform_log_id, "error": str(exc)}
+
+
 def _ffmpeg_tool_command(tool_name):
     executable_name = f"{tool_name}.exe" if os.name == "nt" else tool_name
     bundled = Path(__file__).resolve().parent / "tools" / "ffmpeg" / "bin" / executable_name
@@ -194,7 +205,7 @@ def process_tandas(db: DatabaseManager, tandas: list, performance=None):
                         "tanda_name": tanda_name,
                         "ffmpeg_threads": performance.ffmpeg_threads,
                     }
-                    db.save_video_transform_log(
+                    log_id = db.save_video_transform_log(
                         "tandas",
                         os.path.abspath(path_v1),
                         os.path.abspath(out_path),
@@ -202,6 +213,7 @@ def process_tandas(db: DatabaseManager, tandas: list, performance=None):
                         tanda_name=tanda_name,
                         source_identity=f"p1:{p1_id}|p2:{p2_id}",
                     )
+                    _register_transform_output_if_possible_to_vault(db, log_id)
 
 def process_mix_rules(db: DatabaseManager, rules: list):
     """Procesar videos usando reglas de mezcla legacy."""

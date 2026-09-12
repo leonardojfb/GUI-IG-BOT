@@ -135,7 +135,7 @@ def _save_forge_transform_log(
 ):
     details = dict(params or {})
     details["iphone_metadata"] = meta or {}
-    return db.save_video_transform_log(
+    log_id = db.save_video_transform_log(
         process_kind,
         os.path.abspath(source_path),
         os.path.abspath(output_path),
@@ -143,6 +143,19 @@ def _save_forge_transform_log(
         tanda_name=tanda_name,
         source_identity=source_identity,
     )
+    _register_transform_output_if_possible_to_vault(db, log_id)
+    return log_id
+
+
+def _register_transform_output_if_possible_to_vault(db, transform_log_id):
+    try:
+        from vault.integration import register_transform_output_if_possible
+        from vault.storage import VaultStorage
+
+        storage = VaultStorage(db, os.path.join(_BASE_DIR, "content_vault"))
+        return register_transform_output_if_possible(db, storage, transform_log_id)
+    except Exception as exc:
+        return {"status": "error", "transform_log_id": transform_log_id, "error": str(exc)}
 
 
 def _format_transform_summary(details):
@@ -5143,7 +5156,7 @@ class InstagramAutoPro(ctk.CTk):
                 messagebox.showinfo("Edición completada", f"Video guardado en:\n{result}")
                 if hasattr(self, "db") and hasattr(self.db, "save_video_transform_log"):
                     import video_editor
-                    self.db.save_video_transform_log(
+                    log_id = self.db.save_video_transform_log(
                         "video_editor",
                         os.path.abspath(video),
                         os.path.abspath(result),
@@ -5153,6 +5166,7 @@ class InstagramAutoPro(ctk.CTk):
                             "ffmpeg_threads": performance.ffmpeg_threads,
                         },
                     )
+                    _register_transform_output_if_possible_to_vault(self.db, log_id)
             else:
                 messagebox.showerror("Renderizar", result)
         try:
@@ -5195,7 +5209,7 @@ class InstagramAutoPro(ctk.CTk):
                 if hasattr(self, "db") and hasattr(self.db, "save_video_transform_log"):
                     import video_editor
                     for source, output, job_overlays in jobs:
-                        self.db.save_video_transform_log(
+                        log_id = self.db.save_video_transform_log(
                             "video_editor",
                             os.path.abspath(source),
                             os.path.abspath(output),
@@ -5205,6 +5219,7 @@ class InstagramAutoPro(ctk.CTk):
                                 "ffmpeg_threads": performance.ffmpeg_threads,
                             },
                         )
+                        _register_transform_output_if_possible_to_vault(self.db, log_id)
             else:
                 messagebox.showerror("Renderizar lote", result)
 
