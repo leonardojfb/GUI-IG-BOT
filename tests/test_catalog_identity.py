@@ -1,5 +1,6 @@
 import database
 
+from calendar_manifest import build_entry, replace_entries
 from catalog.service import CLEAR, SET, UNSET, CatalogService
 
 
@@ -221,6 +222,106 @@ def test_tag_schema_is_additive_for_existing_databases(tmp_path):
             "account_tags",
             "virtual_account_tags",
         }
+    finally:
+        db.close()
+        database.DB_PATH = previous
+
+
+def test_bulk_preview_blocks_apply_when_selected_account_has_confirmed_calendar(tmp_path):
+    db, previous = _temporary_db(tmp_path)
+    try:
+        db.add_virtual_account("one", "MAIN")
+        service = CatalogService(db)
+        service.ensure_identity_catalog()
+        [account] = db.get_all_accounts()
+        source = tmp_path / "video.mp4"
+        source.write_bytes(b"video")
+        manifest = tmp_path / "calendar_manifest.json"
+        replace_entries(
+            manifest,
+            [
+                build_entry(
+                    "one",
+                    account["id"],
+                    "normal",
+                    1,
+                    2,
+                    "TANDA_A",
+                    str(source),
+                    "one__TANDA_TANDA_A.mp4",
+                    manual_status="confirmed",
+                )
+            ],
+            {"one"},
+            "normal",
+        )
+
+        preview = service.preview_bulk_update(
+            [account["id"]],
+            {"account_type": SET("SPAM")},
+            manifest_file=manifest,
+        )
+
+        assert preview["calendar_conflicts"][0]["username"] == "one"
+        assert preview["calendar_conflicts"][0]["manual_status"] == "confirmed"
+        try:
+            service.apply_bulk_update(preview)
+        except ValueError as exc:
+            assert "calendario" in str(exc)
+        else:
+            raise AssertionError("calendar conflict should require explicit override")
+
+        assert service.apply_bulk_update(
+            preview,
+            allow_confirmed_calendar_changes=True,
+        ) == 1
+    finally:
+        db.close()
+        database.DB_PATH = previous
+
+
+def test_category_change_validates_confirmed_calendar_conflicts(tmp_path):
+    db, previous = _temporary_db(tmp_path)
+    try:
+        db.add_virtual_account("one", "MAIN")
+        service = CatalogService(db)
+        service.ensure_identity_catalog()
+        [account] = db.get_all_accounts()
+        source = tmp_path / "video.mp4"
+        source.write_bytes(b"video")
+        manifest = tmp_path / "calendar_manifest.json"
+        replace_entries(
+            manifest,
+            [
+                build_entry(
+                    "one",
+                    account["id"],
+                    "normal",
+                    1,
+                    1,
+                    "TANDA_A",
+                    str(source),
+                    "one__TANDA_TANDA_A.mp4",
+                    manual_status="planned",
+                )
+            ],
+            {"one"},
+            "normal",
+        )
+
+        try:
+            service.set_account_category(account["id"], "SPAM", manifest_file=manifest)
+        except ValueError as exc:
+            assert "calendario" in str(exc)
+        else:
+            raise AssertionError("category change should require calendar override")
+
+        assert service.set_account_category(
+            account["id"],
+            "SPAM",
+            manifest_file=manifest,
+            allow_confirmed_calendar_changes=True,
+        ) is True
     finally:
         db.close()
         database.DB_PATH = previous

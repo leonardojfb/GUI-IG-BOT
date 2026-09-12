@@ -35,6 +35,12 @@ username pasa a ser un alias versionable, no la identidad primaria del historial
 - `CatalogService.set_account_category()`, `add_account_tag()`,
   `remove_account_tag()` y `tags_for_account()` exponen esa separacion sin
   tocar distribucion, calendario ni filtros existentes.
+- `CatalogService.calendar_conflicts_for_accounts()` revisa
+  `calendar_manifest.json` y reporta entradas activas por `account_id` o
+  username antes de mutar el catalogo.
+- `preview_bulk_update(..., manifest_file=...)` incluye
+  `calendar_conflicts`; `apply_bulk_update()` y `set_account_category()`
+  rechazan esos cambios hasta recibir `allow_confirmed_calendar_changes=True`.
 
 ## Compatibilidad
 
@@ -84,6 +90,17 @@ py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_catalog
 
 Resultado: `7 passed in 3.65s`.
 
+Validacion contra calendarios confirmados:
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+py -3.14 -B -m py_compile catalog\service.py tests\test_catalog_identity.py
+py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_catalog_identity.py -q
+```
+
+Resultado: `9 passed in 3.64s`.
+
 ## Pendientes de R03
 
-- Validacion de cambios contra calendarios ya confirmados.
+- Integracion visual de etiquetas en la tabla de cuentas.
+- Flujo GUI para override explicito de conflictos de calendario.

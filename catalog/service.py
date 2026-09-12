@@ -3,7 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+
+from calendar_manifest import load_entries, publication_target_for_entry
 
 
 @dataclass(frozen=True)
@@ -153,9 +156,20 @@ class CatalogService:
         self.conn.commit()
         return bool(cur.rowcount)
 
-    def set_account_category(self, account_id: int, category: str) -> bool:
+    def set_account_category(
+        self,
+        account_id: int,
+        category: str,
+        manifest_file: str | Path | None = None,
+        allow_confirmed_calendar_changes: bool = False,
+    ) -> bool:
         category_name = self._normalise_label(category, "La categoria no puede estar vacia")
         self._account_by_id(account_id)
+        self._assert_calendar_change_allowed(
+            [int(account_id)],
+            manifest_file,
+            allow_confirmed_calendar_changes,
+        )
         cur = self.conn.cursor()
         cur.execute("BEGIN IMMEDIATE")
         try:
@@ -221,6 +235,7 @@ class CatalogService:
         self,
         account_ids: list[int],
         patch: dict[str, PatchValue],
+        manifest_file: str | Path | None = None,
     ) -> dict[str, Any]:
         normalized_patch = self._normalise_bulk_patch(patch)
         rows = self._accounts_by_ids(account_ids)
@@ -251,14 +266,24 @@ class CatalogService:
                 for field, patch_value in normalized_patch.items()
             },
             "preview_revision": self._bulk_revision(rows),
+            "calendar_conflicts": self.calendar_conflicts_for_accounts(
+                [row["id"] for row in rows],
+                manifest_file,
+            ),
             "rows": preview_rows,
         }
 
-    def apply_bulk_update(self, preview: dict[str, Any]) -> int:
+    def apply_bulk_update(
+        self,
+        preview: dict[str, Any],
+        allow_confirmed_calendar_changes: bool = False,
+    ) -> int:
         account_ids = [int(account_id) for account_id in preview.get("account_ids", [])]
         rows = self._accounts_by_ids(account_ids)
         if self._bulk_revision(rows) != preview.get("preview_revision"):
             raise ValueError("La revision del catalogo cambio; genera un nuevo preview")
+        if preview.get("calendar_conflicts") and not allow_confirmed_calendar_changes:
+            raise ValueError("Hay cambios con calendario confirmado; requiere confirmacion explicita")
 
         assignments = []
         params: list[Any] = []
@@ -294,6 +319,51 @@ class CatalogService:
             raise
         self.conn.commit()
         return int(cur.rowcount)
+
+    def calendar_conflicts_for_accounts(
+        self,
+        account_ids: list[int],
+        manifest_file: str | Path | None,
+    ) -> list[dict[str, Any]]:
+        if manifest_file is None or not Path(manifest_file).exists():
+            return []
+        rows = self._accounts_by_ids(account_ids)
+        selected_ids = {int(row["id"]) for row in rows}
+        selected_names = {str(row["username"]).casefold() for row in rows}
+        conflicts = []
+        for entry in load_entries(manifest_file, require_source=False):
+            status = str(entry.get("manual_status") or "planned").strip().casefold()
+            if status in {"cancelled", "canceled", "deleted", "removed"}:
+                continue
+            entry_account_id = entry.get("account_id")
+            entry_username = str(entry.get("username") or "").casefold()
+            if entry_account_id not in selected_ids and entry_username not in selected_names:
+                continue
+            conflicts.append(
+                {
+                    "id": entry.get("id"),
+                    "username": entry.get("username"),
+                    "account_id": entry.get("account_id"),
+                    "delivery_kind": entry.get("delivery_kind"),
+                    "publication_target": publication_target_for_entry(entry),
+                    "day": entry.get("day"),
+                    "slot": entry.get("slot"),
+                    "tanda": entry.get("tanda"),
+                    "manual_status": entry.get("manual_status") or "planned",
+                }
+            )
+        return conflicts
+
+    def _assert_calendar_change_allowed(
+        self,
+        account_ids: list[int],
+        manifest_file: str | Path | None,
+        allow_confirmed_calendar_changes: bool,
+    ) -> None:
+        if allow_confirmed_calendar_changes:
+            return
+        if self.calendar_conflicts_for_accounts(account_ids, manifest_file):
+            raise ValueError("Hay cambios con calendario confirmado; requiere confirmacion explicita")
 
     @staticmethod
     def _normalise_platform(value: Any) -> str:
