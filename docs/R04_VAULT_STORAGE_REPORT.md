@@ -20,8 +20,11 @@
   (`vault_collections`) y relaciones N:M sin mover bytes.
 - `VaultQuery.search_assets()` filtra por tipo, salud, familia y coleccion con
   paginacion estable.
+- `backfill_transform_log_references()` registra `source_path` y `output_path`
+  historicos como ubicaciones externas cuando existen; archivos faltantes quedan
+  reportados y no se copian bytes.
 - `build_release.ps1`, `updater.py` y `docs/R00_LAUNCH_IMPORT_INVENTORY.md`
-  incluyen `vault/__init__.py`, `vault/storage.py` y `vault/query.py`.
+  incluyen los modulos `vault/*` agregados en R04.
 
 ## Compatibilidad
 
@@ -61,6 +64,16 @@ py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_vault_s
 ```
 
 Resultado: `6 passed in 2.43s`.
+
+Backfill conservador de referencias:
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+py -3.14 -B -m py_compile vault\backfill.py vault\storage.py database.py updater.py tests\test_vault_backfill.py
+py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_vault_backfill.py tests/test_vault_storage.py tests/test_vault_query.py -q
+```
+
+Resultado: `8 passed in 3.38s`.
 
 ## Pendientes de R04
 

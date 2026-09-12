@@ -26,6 +26,7 @@ paquete incompleto.
 | `catalog/__init__.py` | Si | Solo declara el paquete. | Bajo | Apto para import. |
 | `catalog/service.py` | Si | Define `CatalogService`; no abre DB ni ejecuta migraciones hasta instanciar/llamar metodos. | Bajo | Servicio R03 sobre `DatabaseManager`; mantiene wrappers legacy hasta migrar consumidores. |
 | `vault/__init__.py` | Si | Solo declara el paquete. | Bajo | Apto para import. |
+| `vault/backfill.py` | Si | Define backfill de referencias; no escanea DB ni archivos hasta llamada explicita. | Bajo/medio | R04 registra referencias historicas externas sin copiar bytes durante update. |
 | `vault/query.py` | Si | Define consultas y membresias de biblioteca; no abre DB hasta instanciar/llamar metodos. | Bajo | Servicio R04 para familias, colecciones y busqueda paginada. |
 | `vault/storage.py` | Si | Define hash/storage helpers; no lee ni copia archivos hasta llamar metodos. | Bajo/medio | Servicio R04; import gestionado usa copia temporal y promocion atomica. |
 | `cleaner.py` | Si | Define helpers de limpieza; acciones bajo funciones. | Bajo | No ejecutar limpieza en import. |

@@ -61,6 +61,7 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "catalog/__init__.py",
         "catalog/service.py",
         "vault/__init__.py",
+        "vault/backfill.py",
         "vault/query.py",
         "vault/storage.py",
         "logo_elittisse.svg",
