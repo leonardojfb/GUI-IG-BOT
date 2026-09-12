@@ -28,9 +28,34 @@ CREATE TABLE IF NOT EXISTS virtual_accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
     account_type TEXT NOT NULL, 
+    identity_id TEXT,
     assigned_va TEXT DEFAULT 'Sin Asignar',
     videos_posted INTEGER DEFAULT 0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS social_identities (
+    identity_id TEXT PRIMARY KEY,
+    legacy_account_id INTEGER UNIQUE,
+    platform TEXT NOT NULL DEFAULT 'needs_review',
+    display_name TEXT NOT NULL,
+    archived INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (legacy_account_id) REFERENCES virtual_accounts(id)
+);
+
+CREATE TABLE IF NOT EXISTS identity_aliases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    identity_id TEXT NOT NULL,
+    alias TEXT NOT NULL,
+    alias_type TEXT NOT NULL DEFAULT 'username',
+    is_current INTEGER NOT NULL DEFAULT 1,
+    source TEXT NOT NULL DEFAULT 'manual',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    archived_at TEXT,
+    FOREIGN KEY (identity_id) REFERENCES social_identities(identity_id),
+    UNIQUE(identity_id, alias_type, alias)
 );
 
 CREATE TABLE IF NOT EXISTS batch_tandas (
@@ -200,6 +225,7 @@ class DatabaseManager:
             "ALTER TABLE virtual_accounts ADD COLUMN account_link TEXT DEFAULT ''",
             "ALTER TABLE virtual_accounts ADD COLUMN story_link_override_enabled INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE virtual_accounts ADD COLUMN story_link_override TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE virtual_accounts ADD COLUMN identity_id TEXT",
             "ALTER TABLE virtual_assistants ADD COLUMN timezone TEXT DEFAULT 'America/Argentina/Buenos_Aires'",
         ]
         cur = self.conn.cursor()

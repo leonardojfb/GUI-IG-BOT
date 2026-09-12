@@ -43,6 +43,8 @@ $ReleaseFiles = @(
     "telegram_core.py",
     "cleaner.py",
     "vercuentas.py",
+    "catalog/__init__.py",
+    "catalog/service.py",
     "logo_elittisse.svg",
     "tools/ffmpeg/bin/ffmpeg.exe",
     "tools/ffmpeg/bin/ffprobe.exe",

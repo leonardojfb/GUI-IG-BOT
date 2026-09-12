@@ -23,6 +23,8 @@ paquete incompleto.
 | `Organizador.py` | Parcial | Llama `ensure_stdout_utf8()` al importar; define rutas desde `__file__`. No abre DB top-level. | Bajo/medio: muta encoding del proceso y sus rutas dependen del modulo cargado. | Apto para import en tests/launcher si se parchean `base_dir`, `source_root`, `output_root` antes de operar. |
 | `airtable_sync.py` | Si | Solo define tipos/helpers; requests se ejecuta por funcion. | Bajo | Mantener side-effect-light. |
 | `calendar_manifest.py` | Si | Solo define constantes/helpers. | Bajo | Lector/writer compatible; no debe hacer I/O al importar. |
+| `catalog/__init__.py` | Si | Solo declara el paquete. | Bajo | Apto para import. |
+| `catalog/service.py` | Si | Define `CatalogService`; no abre DB ni ejecuta migraciones hasta instanciar/llamar metodos. | Bajo | Servicio R03 sobre `DatabaseManager`; mantiene wrappers legacy hasta migrar consumidores. |
 | `cleaner.py` | Si | Define helpers de limpieza; acciones bajo funciones. | Bajo | No ejecutar limpieza en import. |
 | `console_encoding.py` | Si | Solo define helper. | Bajo | Puede importarse temprano. |
 | `database.py` | Si | Define `DB_PATH` desde `__file__`; no abre conexion hasta `DatabaseManager()`. | Medio: la ruta por defecto cambia segun instalacion importada. | Tests y procesos temporales deben parchear `database.DB_PATH` antes de crear `DatabaseManager()`. |
