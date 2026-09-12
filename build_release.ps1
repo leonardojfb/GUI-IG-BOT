@@ -46,6 +46,7 @@ $ReleaseFiles = @(
     "catalog/__init__.py",
     "catalog/service.py",
     "vault/__init__.py",
+    "vault/query.py",
     "vault/storage.py",
     "logo_elittisse.svg",
     "tools/ffmpeg/bin/ffmpeg.exe",

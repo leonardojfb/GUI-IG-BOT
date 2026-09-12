@@ -189,6 +189,45 @@ CREATE TABLE IF NOT EXISTS vault_locations (
 CREATE INDEX IF NOT EXISTS idx_vault_locations_asset
 ON vault_locations(asset_id);
 
+CREATE TABLE IF NOT EXISTS content_families (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS vault_collections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS content_family_assets (
+    family_id INTEGER NOT NULL,
+    asset_id INTEGER NOT NULL,
+    role TEXT NOT NULL DEFAULT 'asset',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (family_id, asset_id, role),
+    FOREIGN KEY (family_id) REFERENCES content_families(id),
+    FOREIGN KEY (asset_id) REFERENCES vault_assets(id)
+);
+
+CREATE TABLE IF NOT EXISTS vault_collection_assets (
+    collection_id INTEGER NOT NULL,
+    asset_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (collection_id, asset_id),
+    FOREIGN KEY (collection_id) REFERENCES vault_collections(id),
+    FOREIGN KEY (asset_id) REFERENCES vault_assets(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_family_assets_asset
+ON content_family_assets(asset_id);
+
+CREATE INDEX IF NOT EXISTS idx_vault_collection_assets_asset
+ON vault_collection_assets(asset_id);
+
 CREATE TABLE IF NOT EXISTS social_publishing_settings (
     setting_key TEXT PRIMARY KEY,
     setting_value TEXT NOT NULL DEFAULT '',

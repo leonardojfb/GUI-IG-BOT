@@ -14,8 +14,12 @@
 - `VaultStorage.verify_location()` distingue `ok`, `missing` y `hash_mismatch`
   sin borrar historial.
 - `database.py` agrega `vault_assets` y `vault_locations` de forma aditiva.
+- `VaultQuery` agrega familias (`content_families`), colecciones
+  (`vault_collections`) y relaciones N:M sin mover bytes.
+- `VaultQuery.search_assets()` filtra por tipo, salud, familia y coleccion con
+  paginacion estable.
 - `build_release.ps1`, `updater.py` y `docs/R00_LAUNCH_IMPORT_INVENTORY.md`
-  incluyen `vault/__init__.py` y `vault/storage.py`.
+  incluyen `vault/__init__.py`, `vault/storage.py` y `vault/query.py`.
 
 ## Compatibilidad
 
@@ -36,9 +40,18 @@ py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_vault_s
 
 Resultado: `15 passed in 27.17s`.
 
+Familias, colecciones y query:
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+py -3.14 -B -m py_compile vault\query.py vault\storage.py database.py updater.py tests\test_vault_query.py
+py -3.14 -B -m pytest -c NUL --noconftest -p no:cacheprovider tests/test_vault_query.py tests/test_vault_storage.py -q
+```
+
+Resultado: `5 passed in 2.11s`.
+
 ## Pendientes de R04
 
-- Familias, colecciones y query paginado.
 - Import gestionado conectado a productores/GUI.
 - Migracion asistida de bytes historicos con estimacion de espacio y progreso.
 - Relocalizacion de ubicaciones externas.
