@@ -19,6 +19,7 @@ Fecha: 2026-09-13
   - Ciclos directos o transitivos.
 - `VaultLineage.record_usage()` agrega eventos append-only de uso por asset, tipo y referencia externa.
 - `VaultLineage.parents_for_asset()`, `children_for_asset()` y `usages_for_asset()` exponen auditoria para UI/servicios futuros.
+- `vault.integration.register_transform_output()` registra el source como ubicacion externa, enlaza `source_vault_asset_id` y guarda linaje source -> output cuando ambos assets existen.
 - `VaultSignatures.ensure_file_signatures()` guarda firmas tecnicas reproducibles: `sha256`, `size_bytes`, `extension` y `media_type`.
 - `VaultSignatures.record_signature()` permite guardar firmas futuras o manuales sin cambiar el schema.
 - `VaultSignatures.find_assets_by_signature()` consulta candidatos por firma y puede excluir el asset actual para auditorias de similitud.
@@ -39,6 +40,7 @@ Fecha: 2026-09-13
 - Los eventos de uso son append-only para no borrar historial operativo durante updates.
 - Las firmas tecnicas se generan solo por llamada explicita y validan que el `sha256` del archivo coincida con el asset antes de persistir.
 - La auditoria de reutilizacion es read-only y por defecto solo devuelve candidatos que ya tienen usos registrados.
+- Registrar linaje desde transform logs no copia el source; solo lo referencia como ubicacion externa cuando el archivo existe.
 
 ## Pruebas agregadas
 
@@ -46,6 +48,7 @@ Fecha: 2026-09-13
 - `tests/test_vault_lineage.py::test_lineage_rejects_self_and_direct_cycles`
 - `tests/test_vault_lineage.py::test_usage_events_are_append_only_and_queryable`
 - `tests/test_vault_lineage.py::test_vault_inspector_includes_lineage_and_usage`
+- `tests/test_vault_integration.py::test_register_transform_output_records_source_lineage`
 - `tests/test_vault_signatures.py::test_file_signatures_are_idempotent_and_queryable`
 - `tests/test_vault_signatures.py::test_signature_search_can_exclude_current_asset`
 - `tests/test_vault_signatures.py::test_vault_inspector_includes_signatures`
@@ -55,7 +58,7 @@ Fecha: 2026-09-13
 
 ## Pendiente R06
 
-- Registrar linaje automaticamente desde productores concretos como Forge, editor, Trials y futuros pipelines.
+- Completar linaje automatico en productores que todavia no pasen por `register_transform_output()`.
 - Registrar usos al crear entradas reales de calendario/Telegram cuando el planificador compartido R08 exista.
 - Agregar firmas perceptuales adicionales para detectar reutilizacion visual aunque cambie el hash exacto.
 - Exponer linaje, firmas, usos y candidatos en la UI del Vault con estados claros antes de bloquear o sugerir reutilizacion.

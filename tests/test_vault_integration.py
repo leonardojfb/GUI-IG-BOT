@@ -2,6 +2,7 @@ import sqlite3
 
 import database
 from vault.integration import register_transform_output, register_transform_output_if_possible
+from vault.lineage import VaultLineage
 from vault.storage import VaultStorage
 
 
@@ -42,6 +43,30 @@ def test_register_transform_output_is_idempotent_for_same_log(tmp_path):
 
         assert first["asset_id"] == second["asset_id"]
         assert len(storage.locations_for_asset(first["asset_id"])) == 1
+    finally:
+        db.close()
+
+
+def test_register_transform_output_records_source_lineage(tmp_path):
+    db = database.DatabaseManager(str(tmp_path / "organizador.db"))
+    try:
+        source = tmp_path / "input.mp4"
+        output = tmp_path / "output.mp4"
+        source.write_bytes(b"source")
+        output.write_bytes(b"output")
+        log_id = db.save_video_transform_log("forge", source, output, {"step": "render"})
+        storage = VaultStorage(db, tmp_path / "vault")
+
+        result = register_transform_output(db, storage, log_id)
+        repeated = register_transform_output(db, storage, log_id)
+
+        [log] = db.list_video_transform_logs()
+        parents = VaultLineage(db).parents_for_asset(result["asset_id"])
+        assert log["source_vault_asset_id"] == parents[0]["parent_asset_id"]
+        assert parents[0]["child_asset_id"] == result["asset_id"]
+        assert parents[0]["relation_kind"] == "forge"
+        assert repeated["asset_id"] == result["asset_id"]
+        assert len(VaultLineage(db).parents_for_asset(result["asset_id"])) == 1
     finally:
         db.close()
 
