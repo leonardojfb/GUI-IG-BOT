@@ -104,6 +104,33 @@ class VaultLineage:
         self.conn.commit()
         return int(cur.lastrowid)
 
+    def record_usage_once(
+        self,
+        asset_id: int,
+        usage_kind: str,
+        external_ref: str,
+        details: dict[str, Any] | None = None,
+    ) -> int:
+        asset = int(asset_id)
+        kind = self._required(usage_kind, "usage_kind")
+        ref = self._required(external_ref, "external_ref")
+        self._require_asset(asset)
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT id
+            FROM vault_asset_usages
+            WHERE asset_id = ? AND usage_kind = ? AND external_ref = ?
+            ORDER BY id
+            LIMIT 1
+            """,
+            (asset, kind, ref),
+        )
+        existing = cur.fetchone()
+        if existing:
+            return int(existing["id"])
+        return self.record_usage(asset, kind, ref, details)
+
     def usages_for_asset(self, asset_id: int) -> list[dict[str, Any]]:
         cur = self.conn.cursor()
         cur.execute(

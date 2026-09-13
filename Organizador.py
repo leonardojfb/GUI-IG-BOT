@@ -9,6 +9,7 @@ from calendar_manifest import build_entry, manifest_path, replace_entries
 from captions.service import CaptionService, MissingCaptionError
 from database import DatabaseManager
 from console_encoding import ensure_stdout_utf8
+from vault.calendar_usage import record_calendar_manifest_usages
 
 ensure_stdout_utf8()
 
@@ -1119,6 +1120,7 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
                 affected_usernames,
                 "normal",
             )
+            record_calendar_manifest_usages(db, manifest_entries)
     finally:
         db.close()
 

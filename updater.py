@@ -65,6 +65,7 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "captions/service.py",
         "vault/__init__.py",
         "vault/backfill.py",
+        "vault/calendar_usage.py",
         "vault/integration.py",
         "vault/lineage.py",
         "vault/migration.py",

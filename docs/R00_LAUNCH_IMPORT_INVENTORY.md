@@ -30,6 +30,7 @@ paquete incompleto.
 | `captions/service.py` | Si | Define `CaptionService`; no abre DB hasta instanciar con `DatabaseManager`. | Bajo/medio | Servicio R05 para pools, versiones, snapshots, bindings y migracion conservadora. |
 | `vault/__init__.py` | Si | Solo declara el paquete. | Bajo | Apto para import. |
 | `vault/backfill.py` | Si | Define backfill de referencias; no escanea DB ni archivos hasta llamada explicita. | Bajo/medio | R04 registra referencias historicas externas sin copiar bytes durante update. |
+| `vault/calendar_usage.py` | Si | Define registro idempotente de usos desde manifest; no abre DB hasta llamar funciones. | Bajo/medio | R06 enlaza calendario con usos Vault cuando ya existe asset resoluble; no crea archivos ni cambia manifest. |
 | `vault/integration.py` | Si | Define enlace explicito entre transform logs y Vault; no importa archivos hasta llamada explicita. | Bajo/medio | R04 permite registrar outputs gestionados despues de render confirmado. |
 | `vault/lineage.py` | Si | Define linaje y usos de assets; no abre DB hasta instanciar `VaultLineage`. | Bajo/medio | R06 registra derivaciones y usos append-only sin mover archivos ni calendarizar por si mismo. |
 | `vault/migration.py` | Si | Define plan/ejecucion explicita de migracion externa a managed; no copia hasta llamada explicita. | Bajo/medio | R04 estima bytes y migra ubicaciones seleccionadas conservando referencias externas. |

@@ -25,6 +25,7 @@ import render_performance
 from calendar_manifest import build_entry, manifest_path, replace_entries
 from captions.service import CaptionService, MissingCaptionError
 from database import DatabaseManager
+from vault.calendar_usage import record_calendar_manifest_usages
 from airtable_sync import (
     AirtableConfig,
     AirtableSyncError,
@@ -3113,6 +3114,7 @@ class InstagramAutoPro(ctk.CTk):
                     )
             if affected:
                 replace_entries(manifest_path(_BASE_DIR), entries, affected, "trial")
+                record_calendar_manifest_usages(self.db, entries)
             count = len(entries)
             shortages = ", ".join(f"@{u}: faltan {n}" for u, n in plan.shortfalls.items())
             return f"OK: {count} videos Trial" + (f"\nSin reutilizar: {shortages}" if shortages else "")
@@ -3849,6 +3851,7 @@ class InstagramAutoPro(ctk.CTk):
 
                 if affected:
                     replace_entries(manifest_path(_BASE_DIR), entries, affected, "normal")
+                    record_calendar_manifest_usages(self.db, entries)
 
                 lines += ["=" * 60,
                           f"✅  Estructura creada en : {cal_root}",

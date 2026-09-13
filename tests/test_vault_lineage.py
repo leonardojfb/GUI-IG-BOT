@@ -77,6 +77,24 @@ def test_usage_events_are_append_only_and_queryable(tmp_path):
     db.close()
 
 
+def test_usage_once_is_idempotent_for_same_external_ref(tmp_path):
+    db = DatabaseManager(str(tmp_path / "organizador.db"))
+    storage = VaultStorage(db, tmp_path / "vault")
+    src = tmp_path / "asset.mp4"
+    src.write_bytes(b"asset")
+    asset_id = storage.import_managed(src)["asset_id"]
+    lineage = VaultLineage(db)
+
+    first = lineage.record_usage_once(asset_id, "calendar", "entry-1", {"username": "alice"})
+    second = lineage.record_usage_once(asset_id, "calendar", "entry-1", {"username": "alice"})
+
+    assert second == first
+    assert [(row["usage_kind"], row["external_ref"]) for row in lineage.usages_for_asset(asset_id)] == [
+        ("calendar", "entry-1")
+    ]
+    db.close()
+
+
 def test_vault_inspector_includes_lineage_and_usage(tmp_path):
     db = DatabaseManager(str(tmp_path / "organizador.db"))
     storage = VaultStorage(db, tmp_path / "vault")
