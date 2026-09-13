@@ -4,11 +4,13 @@ import pytest
 
 from calendar_manifest import (
     build_entry,
+    build_entry_v2,
     load_entries,
     manifest_path,
     publication_target_for_entry,
     remove_entries_for_accounts,
     replace_entries,
+    replace_entries_v2,
 )
 
 
@@ -57,6 +59,38 @@ def test_load_entries_skips_missing_source_when_required(tmp_path):
     loaded = load_entries(manifest, require_source=True)
 
     assert [e["username"] for e in loaded] == ["ok"]
+
+
+def test_load_entries_accepts_manifest_v2_without_rewriting(tmp_path):
+    manifest = tmp_path / "calendar_manifest.json"
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"video")
+    entry = {
+        "id": "entry-v2",
+        "username": "alice",
+        "account_id": 1,
+        "delivery_kind": "normal",
+        "day": 1,
+        "slot": 2,
+        "tanda": "T",
+        "source_path": str(source),
+        "telegram_filename": "clip.mp4",
+        "publication_target": "instagram_reel",
+        "lane": "reel",
+        "placement": "feed",
+        "media_class": "video",
+        "method": "telegram",
+        "policy_snapshot": {"reuse": "legacy-v1"},
+    }
+    manifest.write_text(
+        json.dumps({"version": 2, "entries": [entry], "lanes": {"reel": {"enabled": True}}}),
+        encoding="utf-8",
+    )
+
+    loaded = load_entries(manifest)
+
+    assert loaded == [entry]
+    assert json.loads(manifest.read_text(encoding="utf-8"))["version"] == 2
 
 
 def test_manifest_defaults_trial_entry_to_explicit_trial_target(tmp_path):
@@ -119,6 +153,118 @@ def test_manifest_v1_rejects_new_manual_publication_entries(tmp_path):
             "post.mp4",
             publication_target="instagram_post",
         )
+
+
+def test_build_entry_v2_stores_lane_dimensions_and_manual_target(tmp_path):
+    source = tmp_path / "story.jpg"
+    source.write_bytes(b"image")
+
+    entry = build_entry_v2(
+        username="alice",
+        account_id=1,
+        delivery_kind="normal",
+        day=3,
+        slot=4,
+        tanda="STORY",
+        source_path=str(source),
+        display_filename="story.jpg",
+        publication_target="instagram_story",
+        lane="story",
+        placement="story",
+        media_class="image",
+        method="manual",
+        policy_snapshot={"reuse_policy": "same_lane_block"},
+        story_link_url="https://example.test",
+        story_announcement_text="Nuevo post",
+    )
+
+    assert entry["manifest_entry_version"] == 2
+    assert entry["publication_target"] == "instagram_story"
+    assert entry["telegram_filename"] == "story.jpg"
+    assert entry["lane"] == "story"
+    assert entry["placement"] == "story"
+    assert entry["media_class"] == "image"
+    assert entry["method"] == "manual"
+    assert entry["policy_snapshot"] == {"reuse_policy": "same_lane_block"}
+    assert entry["story_link_url"] == "https://example.test"
+    assert entry["story_announcement_text"] == "Nuevo post"
+
+
+def test_replace_entries_v2_replaces_only_target_lane_and_window(tmp_path):
+    manifest = tmp_path / "calendar_manifest.json"
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"x")
+    reel = build_entry_v2(
+        "alice",
+        1,
+        "normal",
+        1,
+        1,
+        "T",
+        str(source),
+        "reel.mp4",
+        publication_target="instagram_reel",
+        lane="reel",
+        placement="feed",
+        media_class="video",
+        method="telegram",
+        policy_snapshot={"version": 1},
+    )
+    story = build_entry_v2(
+        "alice",
+        1,
+        "normal",
+        1,
+        2,
+        "T",
+        str(source),
+        "story.jpg",
+        publication_target="instagram_story",
+        lane="story",
+        placement="story",
+        media_class="image",
+        method="manual",
+        policy_snapshot={"version": 1},
+        story_link_url="https://example.test/a",
+        story_announcement_text="Story",
+    )
+    bob_reel = build_entry_v2(
+        "bob",
+        2,
+        "normal",
+        1,
+        1,
+        "T",
+        str(source),
+        "bob.mp4",
+        publication_target="instagram_reel",
+        lane="reel",
+        placement="feed",
+        media_class="video",
+        method="telegram",
+        policy_snapshot={"version": 1},
+    )
+    manifest.write_text(
+        json.dumps({"version": 2, "entries": [reel, story, bob_reel]}),
+        encoding="utf-8",
+    )
+    replacement = {
+        **reel,
+        "id": "replacement",
+        "telegram_filename": "reel-new.mp4",
+        "display_filename": "reel-new.mp4",
+    }
+
+    rows = replace_entries_v2(
+        manifest,
+        [replacement],
+        usernames={"alice"},
+        lane="reel",
+        window={"start_day": 1, "end_day": 1},
+    )
+
+    assert [row["id"] for row in rows] == [story["id"], bob_reel["id"], "replacement"]
+    assert json.loads(manifest.read_text(encoding="utf-8"))["version"] == 2
 
 
 def test_default_replace_only_replaces_default_target(tmp_path):

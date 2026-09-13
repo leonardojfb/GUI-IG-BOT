@@ -8,12 +8,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from social_publishing import (
+    PUBLICATION_TARGETS,
     TELEGRAM_PUBLICATION_TARGETS,
     default_publication_target,
     validate_publication_metadata,
 )
 
 MANIFEST_VERSION = 1
+SUPPORTED_MANIFEST_VERSIONS = {1, 2}
 MANIFEST_FILENAME = "calendar_manifest.json"
 
 
@@ -85,12 +87,88 @@ def build_entry(
     return entry
 
 
+def build_entry_v2(
+    username: str,
+    account_id: int | None,
+    delivery_kind: str,
+    day: int,
+    slot: int,
+    tanda: str,
+    source_path: str,
+    display_filename: str,
+    *,
+    publication_target: str,
+    lane: str,
+    placement: str,
+    media_class: str,
+    method: str,
+    policy_snapshot: dict,
+    transform_log_id: int | None = None,
+    caption_mode: str | None = None,
+    created_at: str | None = None,
+    caption: str = "",
+    story_link_url: str = "",
+    story_announcement_text: str = "",
+    caption_snapshot: dict | None = None,
+    platform_payload: dict | None = None,
+    manual_status: str = "planned",
+) -> dict:
+    if publication_target not in PUBLICATION_TARGETS:
+        raise ValueError(f"publication_target no soportado: {publication_target}")
+    metadata = validate_publication_metadata(
+        publication_target,
+        str(delivery_kind),
+        caption,
+        story_link_url,
+        story_announcement_text,
+        platform_payload,
+    )
+    entry = {
+        "id": str(uuid.uuid4()),
+        "manifest_entry_version": 2,
+        "username": str(username),
+        "account_id": account_id,
+        "delivery_kind": str(delivery_kind),
+        "day": int(day),
+        "slot": int(slot),
+        "tanda": str(tanda),
+        "source_path": str(Path(source_path).resolve()),
+        "telegram_filename": str(display_filename),
+        "display_filename": str(display_filename),
+        "transform_log_id": transform_log_id,
+        "created_at": created_at or _now_utc(),
+        "publication_target": publication_target,
+        "lane": _required_label(lane, "lane"),
+        "placement": _required_label(placement, "placement"),
+        "media_class": _required_label(media_class, "media_class"),
+        "method": _required_label(method, "method"),
+        "policy_snapshot": dict(policy_snapshot or {}),
+        "caption": metadata["caption"],
+        "story_link_url": metadata["story_link_url"],
+        "story_announcement_text": metadata["story_announcement_text"],
+        "platform_payload": metadata["platform_payload"],
+        "manual_status": str(manual_status or "planned"),
+    }
+    if caption_mode:
+        entry["caption_mode"] = str(caption_mode)
+    if caption_snapshot:
+        entry["caption_snapshot"] = dict(caption_snapshot)
+    return entry
+
+
+def _required_label(value: str, field: str) -> str:
+    label = str(value or "").strip()
+    if not label:
+        raise ValueError(f"{field} no puede estar vacio")
+    return label
+
+
 def _read_payload(path: Path) -> dict:
     if not path.exists():
         return {"version": MANIFEST_VERSION, "entries": []}
     with path.open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
-    if payload.get("version") != MANIFEST_VERSION:
+    if payload.get("version") not in SUPPORTED_MANIFEST_VERSIONS:
         raise ValueError(f"Unsupported calendar manifest version: {payload.get('version')}")
     entries = payload.get("entries")
     if not isinstance(entries, list):
@@ -101,6 +179,20 @@ def _read_payload(path: Path) -> dict:
 def _write_payload(path: Path, entries: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"version": MANIFEST_VERSION, "entries": entries}
+    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+        os.replace(temp_name, path)
+    finally:
+        if os.path.exists(temp_name):
+            os.unlink(temp_name)
+
+
+def _write_payload_version(path: Path, entries: list[dict], version: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"version": int(version), "entries": entries}
     fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -159,6 +251,35 @@ def replace_entries(
     ]
     merged = kept + list(entries)
     _write_payload(manifest, merged)
+    return merged
+
+
+def replace_entries_v2(
+    path: str | os.PathLike,
+    entries: list[dict],
+    usernames: set[str],
+    lane: str,
+    window: dict | None = None,
+) -> list[dict]:
+    manifest = Path(path)
+    payload = _read_payload(manifest)
+    if payload.get("version") != 2:
+        raise ValueError("replace_entries_v2 requiere calendar_manifest version 2")
+    affected = {str(name) for name in usernames}
+    target_lane = _required_label(lane, "lane")
+    start_day = int((window or {}).get("start_day", 1))
+    end_day = int((window or {}).get("end_day", 999999))
+    kept = [
+        entry
+        for entry in payload["entries"]
+        if not (
+            entry.get("username") in affected
+            and entry.get("lane") == target_lane
+            and start_day <= int(entry.get("day") or 0) <= end_day
+        )
+    ]
+    merged = kept + list(entries)
+    _write_payload_version(manifest, merged, 2)
     return merged
 
 
