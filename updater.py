@@ -66,6 +66,7 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "vault/__init__.py",
         "vault/backfill.py",
         "vault/integration.py",
+        "vault/lineage.py",
         "vault/migration.py",
         "vault/query.py",
         "vault/storage.py",

@@ -290,6 +290,33 @@ ON content_family_assets(asset_id);
 CREATE INDEX IF NOT EXISTS idx_vault_collection_assets_asset
 ON vault_collection_assets(asset_id);
 
+CREATE TABLE IF NOT EXISTS vault_asset_lineage (
+    child_asset_id INTEGER NOT NULL,
+    parent_asset_id INTEGER NOT NULL,
+    relation_kind TEXT NOT NULL,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (child_asset_id, parent_asset_id, relation_kind),
+    FOREIGN KEY (child_asset_id) REFERENCES vault_assets(id),
+    FOREIGN KEY (parent_asset_id) REFERENCES vault_assets(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vault_asset_lineage_parent
+ON vault_asset_lineage(parent_asset_id);
+
+CREATE TABLE IF NOT EXISTS vault_asset_usages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_id INTEGER NOT NULL,
+    usage_kind TEXT NOT NULL,
+    external_ref TEXT NOT NULL,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (asset_id) REFERENCES vault_assets(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vault_asset_usages_asset
+ON vault_asset_usages(asset_id, created_at);
+
 CREATE TABLE IF NOT EXISTS social_publishing_settings (
     setting_key TEXT PRIMARY KEY,
     setting_value TEXT NOT NULL DEFAULT '',

@@ -144,7 +144,9 @@ class VaultQuery:
         for location in storage.locations_for_asset(asset_id):
             locations.append(storage.verify_location(location["id"]))
         from vault.thumbnails import VaultThumbnailer
+        from vault.lineage import VaultLineage
 
+        lineage = VaultLineage(self.db)
         thumbnail = VaultThumbnailer(storage, thumbnail_cache).ensure_thumbnail(asset_id)
         return {
             "asset": asset,
@@ -152,6 +154,9 @@ class VaultQuery:
             "families": self.families_for_asset(asset_id),
             "collections": self.collections_for_asset(asset_id),
             "transform_logs": self.transform_logs_for_asset(asset_id),
+            "parents": lineage.parents_for_asset(asset_id),
+            "children": lineage.children_for_asset(asset_id),
+            "usages": lineage.usages_for_asset(asset_id),
             "thumbnail": thumbnail,
         }
 
