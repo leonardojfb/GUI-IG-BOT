@@ -181,6 +181,11 @@ def test_build_entry_v2_stores_lane_dimensions_and_manual_target(tmp_path):
         media_class="image",
         method="manual",
         policy_snapshot={"reuse_policy": "same_lane_block"},
+        schedule_snapshot={
+            "timezone": "America/New_York",
+            "local_time": "09:00 AM",
+            "source": "schedule_config",
+        },
         story_link_url="https://example.test",
         story_announcement_text="Nuevo post",
     )
@@ -193,8 +198,41 @@ def test_build_entry_v2_stores_lane_dimensions_and_manual_target(tmp_path):
     assert entry["media_class"] == "image"
     assert entry["method"] == "manual"
     assert entry["policy_snapshot"] == {"reuse_policy": "same_lane_block"}
+    assert entry["schedule_snapshot"] == {
+        "day": 3,
+        "slot": 4,
+        "lane": "story",
+        "placement": "story",
+        "timezone": "America/New_York",
+        "local_time": "09:00 AM",
+        "source": "schedule_config",
+    }
     assert entry["story_link_url"] == "https://example.test"
     assert entry["story_announcement_text"] == "Nuevo post"
+
+
+def test_build_entry_v2_rejects_schedule_snapshot_for_wrong_lane(tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"x")
+
+    with pytest.raises(ValueError, match="schedule_snapshot lane no coincide"):
+        build_entry_v2(
+            "alice",
+            1,
+            "normal",
+            1,
+            1,
+            "T",
+            str(source),
+            "clip.mp4",
+            publication_target="instagram_reel",
+            lane="reel",
+            placement="feed",
+            media_class="video",
+            method="telegram",
+            policy_snapshot={"version": 1},
+            schedule_snapshot={"lane": "story"},
+        )
 
 
 def test_replace_entries_v2_replaces_only_target_lane_and_window(tmp_path):
@@ -497,6 +535,11 @@ def test_preview_migrate_manifest_v1_to_v2_returns_lane_contract_without_writing
         "telegram",
         "telegram",
     ]
+    assert [entry["schedule_snapshot"]["lane"] for entry in preview["merged_entries"]] == [
+        "reel",
+        "trial_reel",
+    ]
+    assert [entry["schedule_snapshot"]["slot"] for entry in preview["merged_entries"]] == [1, 1]
     assert preview["merged_entries"][0]["policy_snapshot"]["source_manifest_version"] == 1
     assert manifest.read_text(encoding="utf-8") == before
 

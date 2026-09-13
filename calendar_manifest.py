@@ -121,6 +121,7 @@ def build_entry_v2(
     story_link_url: str = "",
     story_announcement_text: str = "",
     caption_snapshot: dict | None = None,
+    schedule_snapshot: dict | None = None,
     platform_payload: dict | None = None,
     manual_status: str = "planned",
 ) -> dict:
@@ -160,6 +161,13 @@ def build_entry_v2(
         "platform_payload": metadata["platform_payload"],
         "manual_status": str(manual_status or "planned"),
     }
+    entry["schedule_snapshot"] = _normalize_schedule_snapshot(
+        schedule_snapshot,
+        day=int(day),
+        slot=int(slot),
+        lane=entry["lane"],
+        placement=entry["placement"],
+    )
     if caption_mode:
         entry["caption_mode"] = str(caption_mode)
     if caption_snapshot:
@@ -172,6 +180,31 @@ def _required_label(value: str, field: str) -> str:
     if not label:
         raise ValueError(f"{field} no puede estar vacio")
     return label
+
+
+def _normalize_schedule_snapshot(
+    snapshot: dict | None,
+    *,
+    day: int,
+    slot: int,
+    lane: str,
+    placement: str,
+) -> dict:
+    normalized = dict(snapshot or {})
+    if normalized.get("lane") not in {None, lane}:
+        raise ValueError("schedule_snapshot lane no coincide con la entrada")
+    if normalized.get("placement") not in {None, placement}:
+        raise ValueError("schedule_snapshot placement no coincide con la entrada")
+    for key, expected in {
+        "day": int(day),
+        "slot": int(slot),
+    }.items():
+        if key in normalized and int(normalized[key]) != expected:
+            raise ValueError(f"schedule_snapshot {key} no coincide con la entrada")
+        normalized[key] = expected
+    normalized["lane"] = lane
+    normalized["placement"] = placement
+    return normalized
 
 
 def _read_payload(path: Path) -> dict:
@@ -357,6 +390,14 @@ def _migrate_entry_v1_to_v2(entry: dict) -> dict:
     migrated["media_class"] = _media_class_for_filename(display_filename)
     migrated["method"] = migrated.get("method") or "telegram"
     migrated["display_filename"] = str(display_filename)
+    migrated["schedule_snapshot"] = _normalize_schedule_snapshot(
+        migrated.get("schedule_snapshot"),
+        day=int(migrated.get("day") or 0),
+        slot=int(migrated.get("slot") or 0),
+        lane=migrated["lane"],
+        placement=migrated["placement"],
+    )
+    migrated["schedule_snapshot"].setdefault("source_manifest_version", 1)
     policy_snapshot = dict(migrated.get("policy_snapshot") or {})
     policy_snapshot.setdefault("source_manifest_version", 1)
     policy_snapshot.setdefault("migration", "r07_v1_to_v2")
