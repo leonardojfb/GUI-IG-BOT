@@ -317,6 +317,22 @@ CREATE TABLE IF NOT EXISTS vault_asset_usages (
 CREATE INDEX IF NOT EXISTS idx_vault_asset_usages_asset
 ON vault_asset_usages(asset_id, created_at);
 
+CREATE TABLE IF NOT EXISTS vault_asset_signatures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_id INTEGER NOT NULL,
+    signature_kind TEXT NOT NULL,
+    algorithm TEXT NOT NULL DEFAULT 'literal',
+    signature_value TEXT NOT NULL,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(asset_id, signature_kind, algorithm),
+    FOREIGN KEY (asset_id) REFERENCES vault_assets(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vault_asset_signatures_lookup
+ON vault_asset_signatures(signature_kind, signature_value);
+
 CREATE TABLE IF NOT EXISTS social_publishing_settings (
     setting_key TEXT PRIMARY KEY,
     setting_value TEXT NOT NULL DEFAULT '',

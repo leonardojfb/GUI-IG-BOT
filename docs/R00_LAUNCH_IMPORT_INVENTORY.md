@@ -34,6 +34,7 @@ paquete incompleto.
 | `vault/lineage.py` | Si | Define linaje y usos de assets; no abre DB hasta instanciar `VaultLineage`. | Bajo/medio | R06 registra derivaciones y usos append-only sin mover archivos ni calendarizar por si mismo. |
 | `vault/migration.py` | Si | Define plan/ejecucion explicita de migracion externa a managed; no copia hasta llamada explicita. | Bajo/medio | R04 estima bytes y migra ubicaciones seleccionadas conservando referencias externas. |
 | `vault/query.py` | Si | Define consultas y membresias de biblioteca; no abre DB hasta instanciar/llamar metodos. | Bajo | Servicio R04 para familias, colecciones y busqueda paginada. |
+| `vault/signatures.py` | Si | Define firmas auditables de assets; no abre DB ni lee archivos hasta instanciar/llamar metodos. | Bajo/medio | R06 guarda firmas tecnicas y busquedas por firma sin decidir reutilizacion automaticamente. |
 | `vault/storage.py` | Si | Define hash/storage helpers; no lee ni copia archivos hasta llamar metodos. | Bajo/medio | Servicio R04; import gestionado usa copia temporal y promocion atomica. |
 | `vault/thumbnails.py` | Si | Define cache de miniaturas; Pillow se importa solo al generar imagenes. | Bajo/medio | R04 crea thumbnails de imagen y reporta corruptos/sin soporte sin romper biblioteca. |
 | `cleaner.py` | Si | Define helpers de limpieza; acciones bajo funciones. | Bajo | No ejecutar limpieza en import. |

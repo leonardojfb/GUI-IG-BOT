@@ -69,6 +69,7 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "vault/lineage.py",
         "vault/migration.py",
         "vault/query.py",
+        "vault/signatures.py",
         "vault/storage.py",
         "vault/thumbnails.py",
         "logo_elittisse.svg",

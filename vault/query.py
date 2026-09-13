@@ -145,8 +145,10 @@ class VaultQuery:
             locations.append(storage.verify_location(location["id"]))
         from vault.thumbnails import VaultThumbnailer
         from vault.lineage import VaultLineage
+        from vault.signatures import VaultSignatures
 
         lineage = VaultLineage(self.db)
+        signatures = VaultSignatures(self.db)
         thumbnail = VaultThumbnailer(storage, thumbnail_cache).ensure_thumbnail(asset_id)
         return {
             "asset": asset,
@@ -157,6 +159,7 @@ class VaultQuery:
             "parents": lineage.parents_for_asset(asset_id),
             "children": lineage.children_for_asset(asset_id),
             "usages": lineage.usages_for_asset(asset_id),
+            "signatures": signatures.signatures_for_asset(asset_id),
             "thumbnail": thumbnail,
         }
 
