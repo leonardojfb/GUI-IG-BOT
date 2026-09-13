@@ -18,6 +18,7 @@ Fecha: 2026-09-13
   - `normal_source_captions` como captions individuales normales.
   - `trial_source_captions` como captions individuales Trial.
 - La migracion registra mapeo auditable y es idempotente; no asigna captions por orden a assets sin linaje probado.
+- `DatabaseManager.set_normal_source_caption()` y `set_trial_source_caption()` siguen escribiendo sus tablas legacy y ademas crean/actualizan versiones R05 para que las pantallas actuales no mantengan una biblioteca paralela.
 - `calendar_manifest.build_entry()` acepta `caption_snapshot` opcional y conserva el texto literal en `caption`.
 - `organizadortg.caption_for_calendar_row()` prefiere `caption_snapshot` + `caption` antes de recalcular desde TXT o tablas mutables.
 - `build_release.ps1`, `updater.DEFAULT_UPDATEABLE_FILES` y el inventario R00 incluyen los nuevos modulos.
@@ -31,7 +32,7 @@ Fecha: 2026-09-13
 
 ## Pendiente R05
 
-- Conectar pantallas actuales de edicion de captions para escribir primero al servicio versionado.
+- Hacer que las pantallas muestren IDs/versiones y preview de diferencias antes de guardar.
 - Resolver captions durante preview/confirmacion del planificador compartido cuando R08 exista.
 - Persistir snapshots para todas las rutas nuevas de Logistica, no solo aceptar/leer el contrato.
 - Agregar UI de preview/reconciliacion de migracion TXT.

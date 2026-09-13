@@ -73,9 +73,20 @@ def test_legacy_caption_migration_is_idempotent_and_records_mapping(tmp_path):
     txt = tmp_path / "captions.txt"
     txt.write_text("General uno\n#uno\n\nGeneral dos\n#dos\n", encoding="utf-8")
     db.add_tanda("T1", "p1", "p2", str(txt))
-    db.set_normal_source_caption("T1", "source-a", "Individual A")
     db.set_tanda_trial("T1", True)
-    db.set_trial_source_caption("T1", "trial-a", "Trial A")
+    db.conn.execute(
+        """
+        INSERT INTO normal_source_captions (tanda_name, source_key, caption_text)
+        VALUES ('T1', 'source-a', 'Individual A')
+        """
+    )
+    db.conn.execute(
+        """
+        INSERT INTO trial_source_captions (tanda_name, source_key, caption_text)
+        VALUES ('T1', 'trial-a', 'Trial A')
+        """
+    )
+    db.conn.commit()
 
     service = CaptionService(db)
     first = service.migrate_legacy_captions()
@@ -94,4 +105,47 @@ def test_legacy_caption_migration_is_idempotent_and_records_mapping(tmp_path):
         ("normal_individual", "source-a", "imported"),
         ("trial_individual", "trial-a", "imported"),
     }
+    db.close()
+
+
+def test_legacy_normal_caption_setter_writes_versioned_caption(tmp_path):
+    db = DatabaseManager(str(tmp_path / "organizador.db"))
+    db.add_tanda("T1", "p1", "p2", None)
+
+    db.set_normal_source_caption("T1", "source-a", "Caption A v1")
+    db.set_normal_source_caption("T1", "source-a", "Caption A v2")
+
+    service = CaptionService(db)
+    [mapping] = [
+        row for row in service.get_migration_mappings("T1")
+        if row["legacy_kind"] == "normal_individual" and row["source_key"] == "source-a"
+    ]
+    snapshot = service.snapshot(mapping["caption_id"], version=1)
+    latest = service.snapshot(mapping["caption_id"])
+
+    assert snapshot.text == "Caption A v1"
+    assert latest.caption_version == 2
+    assert latest.text == "Caption A v2"
+    db.close()
+
+
+def test_legacy_trial_caption_setter_writes_versioned_caption(tmp_path):
+    db = DatabaseManager(str(tmp_path / "organizador.db"))
+    db.add_tanda("T1", "p1", "p2", None)
+    db.set_tanda_trial("T1", True)
+
+    db.set_trial_source_caption("T1", "source-a", "Trial A v1")
+    db.set_trial_source_caption("T1", "source-a", "Trial A v2")
+
+    service = CaptionService(db)
+    [mapping] = [
+        row for row in service.get_migration_mappings("T1")
+        if row["legacy_kind"] == "trial_individual" and row["source_key"] == "source-a"
+    ]
+    snapshot = service.snapshot(mapping["caption_id"], version=1)
+    latest = service.snapshot(mapping["caption_id"])
+
+    assert snapshot.text == "Trial A v1"
+    assert latest.caption_version == 2
+    assert latest.text == "Trial A v2"
     db.close()

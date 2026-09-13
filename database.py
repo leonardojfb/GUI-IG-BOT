@@ -696,6 +696,14 @@ class DatabaseManager:
             (tanda_name, source_key, caption_text),
         )
         self.conn.commit()
+        if str(caption_text or "").strip():
+            from captions.service import CaptionService
+            CaptionService(self).upsert_legacy_source_caption(
+                "trial_individual",
+                tanda_name,
+                source_key,
+                caption_text,
+            )
 
     def get_trial_source_captions(self, tanda_name: str) -> dict[str, str]:
         cur = self.conn.cursor()
@@ -718,6 +726,14 @@ class DatabaseManager:
             (tanda_name, source_key, caption_text),
         )
         self.conn.commit()
+        if str(caption_text or "").strip():
+            from captions.service import CaptionService
+            CaptionService(self).upsert_legacy_source_caption(
+                "normal_individual",
+                tanda_name,
+                source_key,
+                caption_text,
+            )
 
     def get_normal_source_captions(self, tanda_name: str) -> dict[str, str]:
         cur = self.conn.cursor()

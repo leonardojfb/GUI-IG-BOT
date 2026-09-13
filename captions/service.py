@@ -241,6 +241,56 @@ class CaptionService:
             text_hash=row["text_hash"],
         )
 
+    def upsert_legacy_source_caption(
+        self,
+        legacy_kind: str,
+        tanda_name: str,
+        source_key: str,
+        text: str,
+    ) -> CaptionVersion | None:
+        text = str(text or "").strip()
+        if not text:
+            return None
+        if legacy_kind not in {"normal_individual", "trial_individual"}:
+            raise ValueError(f"legacy_kind invalido: {legacy_kind}")
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT pool_id, caption_id
+            FROM caption_migration_map
+            WHERE legacy_kind = ? AND tanda_name = ? AND source_key = ?
+            """,
+            (legacy_kind, tanda_name, source_key),
+        )
+        mapping = cur.fetchone()
+        if mapping and mapping["caption_id"]:
+            latest = self._latest_version(mapping["caption_id"])
+            if latest["text_hash"] == self._hash_text(text):
+                return self._version_from_row(latest)
+            return self.create_version(
+                mapping["caption_id"],
+                text,
+                source_ref=f"{legacy_kind}:{tanda_name}:{source_key}",
+            )
+
+        pool_name = "normal individual" if legacy_kind == "normal_individual" else "trial individual"
+        pool = self.create_pool("tanda", tanda_name, pool_name)
+        version = self.create_version(
+            pool.pool_id,
+            text,
+            source_ref=f"{legacy_kind}:{tanda_name}:{source_key}",
+        )
+        self._record_migration(
+            legacy_kind,
+            tanda_name,
+            source_key,
+            pool.pool_id,
+            version.caption_id,
+            version.source_ref,
+            "imported",
+        )
+        return version
+
     def migrate_legacy_captions(self) -> dict[str, int]:
         report = {
             "general_imported": 0,
