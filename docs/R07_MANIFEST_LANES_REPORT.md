@@ -20,6 +20,8 @@ Fecha: 2026-09-13
 - Toda escritura crea `.calendar_manifest_journal.json` antes del reemplazo atomico; si el reemplazo termina bien se limpia, y si falla queda como evidencia para reconciliacion.
 - `preview_replace_entries_v2()` calcula el diff sin escribir: entradas agregadas, removidas, conservadas, total final, selector y revision base.
 - `apply_manifest_preview()` aplica solo si la revision base sigue vigente; si otro proceso cambio el manifest entre preview y apply, rechaza la escritura.
+- `preview_migrate_manifest_v1_to_v2()` convierte entradas legacy v1 a contrato v2 sin escribir.
+- La migracion v1->v2 preserva `id`, captions, filenames y campos existentes; agrega `manifest_entry_version`, `lane`, `placement`, `media_class`, `method`, `display_filename` y `policy_snapshot`.
 
 ## Compatibilidad de actualizacion
 
@@ -30,6 +32,7 @@ Fecha: 2026-09-13
 - Si queda un journal pendiente o un lock activo, las escrituras nuevas se bloquean antes de modificar el archivo principal.
 - El preview no modifica `calendar_manifest.json`, por lo que la UI futura podra mostrar cambios antes de confirmar.
 - El apply protegido evita aplicar una revision obsoleta sobre cambios externos.
+- La migracion formal v1->v2 se ejecuta mediante preview/apply; no degrada ni convierte automaticamente al leer.
 
 ## Pruebas agregadas
 
@@ -41,10 +44,12 @@ Fecha: 2026-09-13
 - `tests/test_calendar_manifest.py::test_failed_manifest_write_keeps_journal_and_releases_lock`
 - `tests/test_calendar_manifest.py::test_preview_replace_entries_v2_returns_diff_without_writing`
 - `tests/test_calendar_manifest.py::test_apply_manifest_preview_rejects_stale_revision`
+- `tests/test_calendar_manifest.py::test_preview_migrate_manifest_v1_to_v2_returns_lane_contract_without_writing`
+- `tests/test_calendar_manifest.py::test_apply_manifest_preview_migrates_v1_payload_to_v2`
 
 ## Pendiente R07
 
-- Migracion formal de v1 a v2 con preview.
 - Snapshots de horarios por carril.
 - Politica Trial y fixtures historicos bajo carriles.
 - Reconciliacion asistida del journal contra SQLite cuando una escritura queda interrumpida.
+- UI/CLI de revision humana para disparar el preview/apply de migracion.

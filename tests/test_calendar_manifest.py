@@ -9,6 +9,7 @@ from calendar_manifest import (
     build_entry_v2,
     load_entries,
     manifest_path,
+    preview_migrate_manifest_v1_to_v2,
     preview_replace_entries_v2,
     publication_target_for_entry,
     remove_entries_for_accounts,
@@ -469,6 +470,53 @@ def test_apply_manifest_preview_rejects_stale_revision(tmp_path):
         apply_manifest_preview(manifest, preview)
 
     assert json.loads(manifest.read_text(encoding="utf-8"))["entries"][0]["id"] == "external-change"
+
+
+def test_preview_migrate_manifest_v1_to_v2_returns_lane_contract_without_writing(tmp_path):
+    manifest = tmp_path / "calendar_manifest.json"
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"x")
+    normal = build_entry("alice", 1, "normal", 1, 1, "T1", str(source), "normal.mp4")
+    trial = build_entry("bob", 2, "trial", 2, 1, "T2", str(source), "trial.mp4")
+    replace_entries(manifest, [normal, trial], {"alice", "bob"}, "normal")
+    before = manifest.read_text(encoding="utf-8")
+
+    preview = preview_migrate_manifest_v1_to_v2(manifest)
+
+    assert preview["operation"] == "migrate_manifest_v1_to_v2"
+    assert preview["base_version"] == 1
+    assert preview["target_version"] == 2
+    assert preview["summary"] == {"migrated": 2, "total": 2}
+    assert [entry["manifest_entry_version"] for entry in preview["merged_entries"]] == [2, 2]
+    assert [entry["lane"] for entry in preview["merged_entries"]] == ["reel", "trial_reel"]
+    assert [entry["display_filename"] for entry in preview["merged_entries"]] == [
+        "normal.mp4",
+        "trial.mp4",
+    ]
+    assert [entry["method"] for entry in preview["merged_entries"]] == [
+        "telegram",
+        "telegram",
+    ]
+    assert preview["merged_entries"][0]["policy_snapshot"]["source_manifest_version"] == 1
+    assert manifest.read_text(encoding="utf-8") == before
+
+
+def test_apply_manifest_preview_migrates_v1_payload_to_v2(tmp_path):
+    manifest = tmp_path / "calendar_manifest.json"
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"x")
+    entry = build_entry("alice", 1, "normal", 1, 1, "T1", str(source), "normal.mp4")
+    replace_entries(manifest, [entry], {"alice"}, "normal")
+    preview = preview_migrate_manifest_v1_to_v2(manifest)
+
+    applied = apply_manifest_preview(manifest, preview)
+
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    assert payload["version"] == 2
+    assert applied == payload["entries"]
+    assert payload["entries"][0]["id"] == entry["id"]
+    assert payload["entries"][0]["lane"] == "reel"
+    assert payload["entries"][0]["publication_target"] == "instagram_reel"
 
 
 def test_default_replace_only_replaces_default_target(tmp_path):

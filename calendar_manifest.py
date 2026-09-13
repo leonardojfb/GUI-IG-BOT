@@ -324,6 +324,69 @@ def publication_target_for_entry(entry: dict) -> str:
     )
 
 
+def _lane_for_legacy_entry(entry: dict) -> str:
+    target = publication_target_for_entry(entry)
+    if target == "instagram_trial_reel":
+        return "trial_reel"
+    if target == "instagram_reel":
+        return "reel"
+    return str(target)
+
+
+def _placement_for_publication_target(publication_target: str) -> str:
+    if publication_target == "instagram_story":
+        return "story"
+    return "feed"
+
+
+def _media_class_for_filename(filename: str) -> str:
+    suffix = Path(str(filename or "")).suffix.lower()
+    if suffix in {".jpg", ".jpeg", ".png", ".webp", ".heic"}:
+        return "image"
+    return "video"
+
+
+def _migrate_entry_v1_to_v2(entry: dict) -> dict:
+    migrated = dict(entry)
+    target = publication_target_for_entry(migrated)
+    display_filename = migrated.get("display_filename") or migrated.get("telegram_filename") or ""
+    migrated["manifest_entry_version"] = 2
+    migrated["publication_target"] = target
+    migrated["lane"] = _lane_for_legacy_entry(migrated)
+    migrated["placement"] = _placement_for_publication_target(target)
+    migrated["media_class"] = _media_class_for_filename(display_filename)
+    migrated["method"] = migrated.get("method") or "telegram"
+    migrated["display_filename"] = str(display_filename)
+    policy_snapshot = dict(migrated.get("policy_snapshot") or {})
+    policy_snapshot.setdefault("source_manifest_version", 1)
+    policy_snapshot.setdefault("migration", "r07_v1_to_v2")
+    policy_snapshot.setdefault("publication_target", target)
+    migrated["policy_snapshot"] = policy_snapshot
+    return migrated
+
+
+def preview_migrate_manifest_v1_to_v2(path: str | os.PathLike) -> dict:
+    manifest = Path(path)
+    payload = _read_payload(manifest)
+    if payload.get("version") != 1:
+        raise ValueError("preview_migrate_manifest_v1_to_v2 requiere calendar_manifest version 1")
+    migrated_entries = [_migrate_entry_v1_to_v2(entry) for entry in payload["entries"]]
+    return {
+        "operation": "migrate_manifest_v1_to_v2",
+        "base_version": 1,
+        "target_version": 2,
+        "base_revision": _manifest_revision(payload),
+        "summary": {
+            "migrated": len(migrated_entries),
+            "total": len(migrated_entries),
+        },
+        "removed_entries": list(payload["entries"]),
+        "added_entries": migrated_entries,
+        "kept_entries": [],
+        "merged_entries": migrated_entries,
+    }
+
+
 def replace_entries(
     path: str | os.PathLike,
     entries: list[dict],
@@ -432,12 +495,14 @@ def preview_replace_entries_v2(
 def apply_manifest_preview(path: str | os.PathLike, preview: dict) -> list[dict]:
     manifest = Path(path)
     payload = _read_payload(manifest)
-    if payload.get("version") != preview.get("version"):
+    base_version = int(preview.get("base_version", preview.get("version")))
+    target_version = int(preview.get("target_version", preview.get("version")))
+    if payload.get("version") != base_version:
         raise RuntimeError("revision del manifest cambio antes de aplicar el preview")
     if _manifest_revision(payload) != preview.get("base_revision"):
         raise RuntimeError("revision del manifest cambio antes de aplicar el preview")
     entries = list(preview.get("merged_entries") or [])
-    _write_payload_version(manifest, entries, int(preview["version"]))
+    _write_payload_version(manifest, entries, target_version)
     return entries
 
 
