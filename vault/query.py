@@ -145,9 +145,11 @@ class VaultQuery:
             locations.append(storage.verify_location(location["id"]))
         from vault.thumbnails import VaultThumbnailer
         from vault.lineage import VaultLineage
+        from vault.reuse import VaultReuseAudit
         from vault.signatures import VaultSignatures
 
         lineage = VaultLineage(self.db)
+        reuse = VaultReuseAudit(self.db)
         signatures = VaultSignatures(self.db)
         thumbnail = VaultThumbnailer(storage, thumbnail_cache).ensure_thumbnail(asset_id)
         return {
@@ -160,6 +162,7 @@ class VaultQuery:
             "children": lineage.children_for_asset(asset_id),
             "usages": lineage.usages_for_asset(asset_id),
             "signatures": signatures.signatures_for_asset(asset_id),
+            "reuse_candidates": reuse.candidates_for_asset(asset_id),
             "thumbnail": thumbnail,
         }
 
