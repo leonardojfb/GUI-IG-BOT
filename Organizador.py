@@ -6,6 +6,7 @@ import string
 import math
 from collections import defaultdict
 from calendar_manifest import build_entry, manifest_path, replace_entries
+from captions.service import CaptionService, MissingCaptionError
 from database import DatabaseManager
 from console_encoding import ensure_stdout_utf8
 
@@ -19,6 +20,27 @@ output_root = os.path.join(base_dir, "CALENDARIO_POSTEO")
 # Parámetros de distribución diaria
 DAILY_GOAL = 46
 FILL_UP_ENABLED = True
+
+
+def caption_snapshot_manifest_payload(db_ref, tanda_name, filename, pool_index=0):
+    try:
+        snapshot = CaptionService(db_ref).resolve_legacy_manifest_caption(
+            tanda_name=tanda_name,
+            filename=filename,
+            mode="general",
+            delivery_kind="normal",
+            pool_index=pool_index,
+        )
+    except (KeyError, MissingCaptionError, FileNotFoundError, ValueError):
+        return {}
+    if not snapshot:
+        return {}
+    manifest_snapshot = snapshot.as_manifest_dict()
+    manifest_snapshot.pop("text", None)
+    return {
+        "caption": snapshot.text,
+        "caption_snapshot": manifest_snapshot,
+    }
 
 
 def build_calendar_video_filename(video_filename, tanda_name, account_id, day, slot, collision_suffix=None):
@@ -959,6 +981,7 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
     manifest_entries = []
     affected_usernames = {acc["username"] for acc in accounts}
     logical_filenames = set()
+    caption_snapshot_indexes = defaultdict(int)
 
     full_tanda_pool = video_items[:]
     random.shuffle(full_tanda_pool)
@@ -969,7 +992,6 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
     # Sembrado desde fingerprint_history para que la regla sobreviva entre corridas
     # separadas de "Distribuir" (re-clicks, reinicios de la app), no solo dentro de
     # una misma llamada.
-    from collections import defaultdict
     account_lifetime_combos = defaultdict(set)  # acc_id -> set of (p1, p2)
     for acc in accounts:
         account_lifetime_combos[acc["id"]] |= get_account_used_combinations_for_tandas(
@@ -1057,6 +1079,15 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
                     if p1 and p2:
                         account_lifetime_combos[acc_id].add((p1, p2))
 
+                    caption_payload = caption_snapshot_manifest_payload(
+                        db,
+                        vid_item["tanda"],
+                        vid_name,
+                        pool_index=caption_snapshot_indexes[vid_item["tanda"]],
+                    )
+                    if caption_payload:
+                        caption_snapshot_indexes[vid_item["tanda"]] += 1
+
                     manifest_entries.append(
                         build_entry(
                             username=acc_name,
@@ -1068,6 +1099,7 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
                             source_path=src,
                             telegram_filename=unique_name,
                             transform_log_id=db.get_video_transform_log_id(src),
+                            **caption_payload,
                         )
                     )
                     db.add_video_to_history(

@@ -203,3 +203,25 @@ def test_gui_caption_manifest_payload_uses_snapshot_contract(tmp_path):
     assert payload["caption_snapshot"]["resolution_mode"] == "individual"
     assert "text" not in payload["caption_snapshot"]
     db.close()
+
+
+def test_organizador_caption_manifest_payload_freezes_tanda_caption(tmp_path):
+    import Organizador
+
+    db = DatabaseManager(str(tmp_path / "organizador.db"))
+    txt = tmp_path / "captions.txt"
+    txt.write_text("Caption one\n#one\n\nCaption two\n#two\n", encoding="utf-8")
+    db.add_tanda("T1", "p1", "p2", str(txt))
+
+    payload = Organizador.caption_snapshot_manifest_payload(
+        db,
+        tanda_name="T1",
+        filename="clip.mp4",
+        pool_index=1,
+    )
+
+    assert payload["caption"] == "Caption two\n#two"
+    assert payload["caption_snapshot"]["caption_version"] == 1
+    assert payload["caption_snapshot"]["resolution_mode"] == "general"
+    assert "text" not in payload["caption_snapshot"]
+    db.close()
