@@ -1,6 +1,9 @@
 from datetime import datetime
 
+import database
 import organizadortg
+from vault.lineage import VaultLineage
+from vault.storage import VaultStorage
 
 
 def _stub_common_telegram_plan(monkeypatch, videos, accounts):
@@ -128,3 +131,48 @@ def test_telegram_plan_submits_one_worker_per_chat_by_default(monkeypatch, tmp_p
     assert len(submitted) == 2
     assert {job["chat_id"] for batch in submitted for job in batch} == {"-1001", "-1002"}
     assert len(sent_videos) == 2
+
+
+def test_telegram_plan_records_vault_usage_after_successful_send(monkeypatch, tmp_path):
+    db = database.DatabaseManager(str(tmp_path / "organizador.db"))
+    try:
+        video = tmp_path / "one.mp4"
+        video.write_bytes(b"fake")
+        asset = VaultStorage(db, tmp_path / "vault").register_external(video)
+        entry_id = "calendar-entry-1"
+        _calls, sent_videos = _stub_common_telegram_plan(
+            monkeypatch,
+            videos=[{
+                "id": entry_id,
+                "path": str(video.resolve()),
+                "source_path": str(video.resolve()),
+                "filename": "one__TANDA_T__ACC1__D1__S1.mp4",
+                "category": "promo",
+                "day": "Dia_1",
+                "username": "alpha",
+                "delivery_kind": "normal",
+            }],
+            accounts=[{
+                "username": "alpha",
+                "account_type": "promo",
+                "assigned_va": "VA1",
+                "tg_group_id": "-1001",
+                "va_timezone": "America/Argentina/Buenos_Aires",
+            }],
+        )
+
+        result = organizadortg.execute_telegram_plan(
+            datetime(2026, 8, 14),
+            selected_accounts=["alpha"],
+            express_mode=True,
+            db_manager=db,
+        )
+
+        assert result.startswith("✨ PROCESO TERMINADO")
+        assert len(sent_videos) == 1
+        usages = VaultLineage(db).usages_for_asset(asset["asset_id"])
+        assert [(row["usage_kind"], row["external_ref"]) for row in usages] == [
+            ("telegram", entry_id)
+        ]
+    finally:
+        db.close()

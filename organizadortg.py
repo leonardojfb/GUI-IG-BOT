@@ -24,6 +24,7 @@ from database import DatabaseManager
 from social_publishing import TELEGRAM_PUBLICATION_TARGETS, is_telegram_publication_target
 from trial_content import source_key_from_filename
 from console_encoding import ensure_stdout_utf8
+from vault.calendar_usage import record_telegram_send_usage
 
 ensure_stdout_utf8()
 
@@ -157,7 +158,9 @@ def _scan_manifest_calendar_structure(manifest_file=None):
             continue
         day_number = int(entry.get("day") or 0)
         rows.append({
+            "id": entry.get("id"),
             "path": entry["source_path"],
+            "source_path": entry["source_path"],
             "filename": entry["telegram_filename"],
             "category": account_type_map.get(entry["username"], entry.get("tanda") or "unknown"),
             "tanda": entry.get("tanda") or "",
@@ -1111,14 +1114,23 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
 
                 jobs_by_chat[chat_id].append({
                     "chat_id": chat_id,
+                    "id": vid.get("id"),
                     "username": username,
+                    "account_id": vid.get("account_id"),
                     "tag": tag,
                     "delivery_kind": delivery_kind,
+                    "publication_target": vid.get("publication_target"),
                     "topic_id": video_topic_id,
                     "caption": cap,
                     "path": vid["path"],
+                    "source_path": vid.get("source_path") or vid["path"],
+                    "filename": vid.get("filename"),
+                    "transform_log_id": vid.get("transform_log_id"),
+                    "slot": vid.get("slot"),
+                    "tanda": vid.get("tanda"),
                     "meta": meta,
                     "hora_et": hora_et,
+                    "day": vid.get("day"),
                     "dia_str": dia_str,
                 })
 
@@ -1177,6 +1189,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     topics_state, job["username"], job["tag"],
                 )
                 if ok:
+                    record_telegram_send_usage(db, job, chat_id=job["chat_id"], topic_id=topic_id)
                     sent += 1
                 with state_lock:
                     save_json(os.path.join(base_dir, STATE_FILE), topics_state)

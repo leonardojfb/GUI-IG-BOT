@@ -53,6 +53,36 @@ def record_calendar_manifest_usages(db, entries: list[dict[str, Any]]) -> dict[s
     return {"recorded": recorded, "skipped": skipped, "rows": rows}
 
 
+def record_telegram_send_usage(db, entry: dict[str, Any], *, chat_id: str, topic_id: int) -> int | None:
+    payload = dict(entry)
+    if not payload.get("source_path") and payload.get("path"):
+        payload["source_path"] = payload["path"]
+    asset_id = _asset_id_for_entry(db, payload)
+    if asset_id is None:
+        return None
+    external_ref = str(payload.get("id") or payload.get("filename") or "").strip()
+    if not external_ref:
+        return None
+    return VaultLineage(db).record_usage_once(
+        asset_id,
+        "telegram",
+        external_ref,
+        {
+            "username": payload.get("username"),
+            "account_id": payload.get("account_id"),
+            "delivery_kind": payload.get("delivery_kind"),
+            "publication_target": payload.get("publication_target"),
+            "day": payload.get("day"),
+            "slot": payload.get("slot"),
+            "tanda": payload.get("tanda"),
+            "telegram_filename": payload.get("filename"),
+            "transform_log_id": payload.get("transform_log_id"),
+            "chat_id": chat_id,
+            "topic_id": topic_id,
+        },
+    )
+
+
 def _asset_id_for_entry(db, entry: dict[str, Any]) -> int | None:
     transform_log_id = entry.get("transform_log_id")
     if transform_log_id is not None:
