@@ -44,7 +44,7 @@ Estimacion por paquetes tocados: `R00-R06 de R00-R20`, pero R04-R06 no estan cer
 | R04. Vault conserva originales | Parcial validado | `vault/storage.py`, `vault/query.py`, `vault/backfill.py`, `vault/migration.py`, `vault/thumbnails.py`, tests Vault y `docs/R04_VAULT_STORAGE_REPORT.md`. | Lista/inspector visibles y operables en GUI, migracion de bytes con progreso real y filtros grandes. |
 | R05. Captions versionados | Parcial alto validado | `captions/`, snapshots en manifest, migracion preview/apply, tests caption/Telegram y `docs/R05_CAPTIONS_VERSIONED_REPORT.md`. | UI de diff/versiones antes de guardar y cierre de fallback individual bajo planificador compartido. |
 | R06. Linaje, firmas y reutilizacion | Parcial validado | `vault/lineage.py`, `vault/signatures.py`, `vault/reuse.py`, `vault/calendar_usage.py`, tests R06 y `docs/R06_LINEAGE_SIGNATURES_REPORT.md`. | Leases/reservas de firmas, UI visible, politica de reutilizacion y restricciones por destino. |
-| R07. Carriles y manifest v2 | Parcial validado | `calendar_manifest.py` lee v1/v2, `build_entry_v2()`, `replace_entries_v2()`, `docs/R07_MANIFEST_LANES_REPORT.md`. | Locks, journal, revision, migracion v1->v2, snapshots de horario y politica Trial. |
+| R07. Carriles y manifest v2 | Parcial validado | `calendar_manifest.py` lee v1/v2, `build_entry_v2()`, `replace_entries_v2()`, lock/journal de escritor y `docs/R07_MANIFEST_LANES_REPORT.md`. | Revision, migracion v1->v2, snapshots de horario, politica Trial y reconciliacion asistida journal/SQLite. |
 | R08. Planificador compartido | Pendiente | Algoritmos legacy Por Tandas/Por Cuentas existen por separado. | Servicio unico, preview inmutable, reservas, modo parcial/estricto y confirmacion por revision. |
 | R09. Ejecuciones duraderas | Pendiente | `video_transform_logs` existe, pero no jobs duraderos. | Recetas versionadas, jobs, dependencias, checkpoints, retry y recuperacion tras cierre. |
 | R10. Productores a jobs | Pendiente / legacy existente | Tandas, Forge y Edicion existen en Legacy. | Adaptarlos al contrato de jobs sin cambiar composicion historica; validar ffprobe/perfiles. |
@@ -88,7 +88,7 @@ Estimacion por paquetes tocados: `R00-R06 de R00-R20`, pero R04-R06 no estan cer
 | LEG-23 | Trial como capacidad | R03/R08 | Legacy existente / parcial | Trials existen; falta elegibilidad final por red/capacidad y politica R07/R08. |
 | LEG-24 | Selector Trial individual | R05/R08/R12 | Legacy existente / parcial | Captions Trial y plan actual existen; selector final compartido pendiente. |
 | LEG-25 | Trial MAX e intercalado | R08 | Legacy existente | Falta politica versionada y fixture historico/carriles. |
-| LEG-26 | Manifest comun | R07 | Parcial validado | Manifest v1/v2, snapshots, `build_entry_v2()` y `replace_entries_v2()`; migracion/locks pendientes. |
+| LEG-26 | Manifest comun | R07 | Parcial validado | Manifest v1/v2, snapshots, `build_entry_v2()`, `replace_entries_v2()` y lock/journal de escritor; migracion/revision pendientes. |
 | LEG-27 | Horarios y zonas | R07 | Legacy existente / parcial | Horarios actuales en Telegram; snapshots por carril pendientes. |
 | LEG-28 | Telegram como metodo | R15 | Legacy existente / parcial | Envio fake validado y uso Vault; ledger/multiformato pendiente. |
 | LEG-29 | Limpieza selectiva | R15/R16 | Legacy existente / parcial | Limpieza por cuentas/manifest existe; limpieza por IDs/carriles pendiente. |
@@ -116,7 +116,7 @@ Estimacion por paquetes tocados: `R00-R06 de R00-R20`, pero R04-R06 no estan cer
 | LEG-51 | Preview 9:16 e intro | R10 / backlog | Legacy parcial | Preview legacy existe en partes; contrato R10 pendiente. |
 | LEG-52 | E2E y diagnostico | R00-R20 | Parcial validado | Smokes y suite local; matriz final/ciclos piloto pendiente. |
 | LEG-53 | Photo Forge | R11 | Pendiente | No implementado. |
-| LEG-54 | Carriles y colisiones | R07/R19 | Parcial bajo | `replace_entries_v2()` conserva otros carriles; politicas de colision y migracion pendientes. |
+| LEG-54 | Carriles y colisiones | R07/R19 | Parcial bajo | `replace_entries_v2()` conserva otros carriles y el writer bloquea pisadas concurrentes; politicas de colision y migracion pendientes. |
 | LEG-55 | Multimetodo e identidades Meta | R17-R19 | Pendiente | No adapter Meta ni identidades completas. |
 | LEG-56 | Forge por destinos e ios-remote | R13/R14 | Pendiente | ios-remote read-only y Forge destinos no implementados. |
 

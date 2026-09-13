@@ -17,10 +17,20 @@ from social_publishing import (
 MANIFEST_VERSION = 1
 SUPPORTED_MANIFEST_VERSIONS = {1, 2}
 MANIFEST_FILENAME = "calendar_manifest.json"
+MANIFEST_LOCK_FILENAME = ".calendar_manifest.lock"
+MANIFEST_JOURNAL_FILENAME = ".calendar_manifest_journal.json"
 
 
 def manifest_path(base_dir: str | os.PathLike) -> Path:
     return Path(base_dir) / MANIFEST_FILENAME
+
+
+def manifest_lock_path(path: str | os.PathLike) -> Path:
+    return Path(path).with_name(MANIFEST_LOCK_FILENAME)
+
+
+def manifest_journal_path(path: str | os.PathLike) -> Path:
+    return Path(path).with_name(MANIFEST_JOURNAL_FILENAME)
 
 
 def _now_utc() -> str:
@@ -176,9 +186,71 @@ def _read_payload(path: Path) -> dict:
     return payload
 
 
-def _write_payload(path: Path, entries: list[dict]) -> None:
+def assert_manifest_ready(path: str | os.PathLike) -> None:
+    manifest = Path(path)
+    if manifest_journal_path(manifest).exists():
+        raise RuntimeError(
+            "calendar manifest journal pendiente; requiere reconciliacion antes de escribir"
+        )
+    if manifest_lock_path(manifest).exists():
+        raise RuntimeError("calendar manifest lock activo; otro escritor esta trabajando")
+
+
+def _acquire_manifest_lock(path: Path, operation: str) -> Path:
+    lock_path = manifest_lock_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"version": MANIFEST_VERSION, "entries": entries}
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError as exc:
+        raise RuntimeError(
+            "calendar manifest lock activo; otro escritor esta trabajando"
+        ) from exc
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "operation": operation,
+                    "manifest_path": str(path),
+                    "created_at": _now_utc(),
+                },
+                handle,
+                ensure_ascii=False,
+                indent=2,
+            )
+            handle.write("\n")
+    except Exception:
+        if lock_path.exists():
+            lock_path.unlink()
+        raise
+    return lock_path
+
+
+def _write_manifest_journal(
+    path: Path,
+    *,
+    operation: str,
+    version: int,
+    entries_count: int,
+) -> Path:
+    journal_path = manifest_journal_path(path)
+    with journal_path.open("w", encoding="utf-8") as handle:
+        json.dump(
+            {
+                "operation": operation,
+                "manifest_path": str(path),
+                "version": int(version),
+                "entries_count": int(entries_count),
+                "created_at": _now_utc(),
+            },
+            handle,
+            ensure_ascii=False,
+            indent=2,
+        )
+        handle.write("\n")
+    return journal_path
+
+
+def _atomic_write_payload(path: Path, payload: dict) -> None:
     fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -188,20 +260,48 @@ def _write_payload(path: Path, entries: list[dict]) -> None:
     finally:
         if os.path.exists(temp_name):
             os.unlink(temp_name)
+
+
+def _write_guarded_payload(
+    path: Path,
+    entries: list[dict],
+    version: int,
+    *,
+    operation: str,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    assert_manifest_ready(path)
+    lock_path = _acquire_manifest_lock(path, operation)
+    journal_path = manifest_journal_path(path)
+    payload = {"version": int(version), "entries": entries}
+    write_completed = False
+    try:
+        _write_manifest_journal(
+            path,
+            operation=operation,
+            version=version,
+            entries_count=len(entries),
+        )
+        _atomic_write_payload(path, payload)
+        write_completed = True
+    finally:
+        if write_completed and journal_path.exists():
+            journal_path.unlink()
+        if lock_path.exists():
+            lock_path.unlink()
+
+
+def _write_payload(path: Path, entries: list[dict]) -> None:
+    _write_guarded_payload(path, entries, MANIFEST_VERSION, operation="write_manifest_v1")
 
 
 def _write_payload_version(path: Path, entries: list[dict], version: int) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"version": int(version), "entries": entries}
-    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
-            handle.write("\n")
-        os.replace(temp_name, path)
-    finally:
-        if os.path.exists(temp_name):
-            os.unlink(temp_name)
+    _write_guarded_payload(
+        path,
+        entries,
+        int(version),
+        operation=f"write_manifest_v{int(version)}",
+    )
 
 
 def load_entries(path: str | os.PathLike, require_source: bool = True) -> list[dict]:

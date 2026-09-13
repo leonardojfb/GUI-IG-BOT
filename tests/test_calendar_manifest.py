@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+import calendar_manifest
 from calendar_manifest import (
     build_entry,
     build_entry_v2,
@@ -12,6 +13,9 @@ from calendar_manifest import (
     replace_entries,
     replace_entries_v2,
 )
+
+MANIFEST_JOURNAL_FILENAME = ".calendar_manifest_journal.json"
+MANIFEST_LOCK_FILENAME = ".calendar_manifest.lock"
 
 
 def test_manifest_path_is_app_root_json(tmp_path):
@@ -265,6 +269,105 @@ def test_replace_entries_v2_replaces_only_target_lane_and_window(tmp_path):
 
     assert [row["id"] for row in rows] == [story["id"], bob_reel["id"], "replacement"]
     assert json.loads(manifest.read_text(encoding="utf-8"))["version"] == 2
+
+
+def test_replace_entries_v2_blocks_when_manifest_lock_exists(tmp_path):
+    manifest = tmp_path / "calendar_manifest.json"
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"x")
+    manifest.write_text(json.dumps({"version": 2, "entries": []}), encoding="utf-8")
+    (tmp_path / MANIFEST_LOCK_FILENAME).write_text(
+        json.dumps({"operation": "replace_entries_v2"}),
+        encoding="utf-8",
+    )
+    entry = build_entry_v2(
+        "alice",
+        1,
+        "normal",
+        1,
+        1,
+        "T",
+        str(source),
+        "reel.mp4",
+        publication_target="instagram_reel",
+        lane="reel",
+        placement="feed",
+        media_class="video",
+        method="telegram",
+        policy_snapshot={"version": 1},
+    )
+
+    with pytest.raises(RuntimeError, match="lock activo"):
+        replace_entries_v2(manifest, [entry], usernames={"alice"}, lane="reel")
+
+    assert json.loads(manifest.read_text(encoding="utf-8"))["entries"] == []
+
+
+def test_replace_entries_v2_writes_journal_and_cleans_after_success(tmp_path):
+    manifest = tmp_path / "calendar_manifest.json"
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"x")
+    manifest.write_text(json.dumps({"version": 2, "entries": []}), encoding="utf-8")
+    entry = build_entry_v2(
+        "alice",
+        1,
+        "normal",
+        1,
+        1,
+        "T",
+        str(source),
+        "reel.mp4",
+        publication_target="instagram_reel",
+        lane="reel",
+        placement="feed",
+        media_class="video",
+        method="telegram",
+        policy_snapshot={"version": 1},
+    )
+
+    replace_entries_v2(manifest, [entry], usernames={"alice"}, lane="reel")
+
+    assert not (tmp_path / MANIFEST_JOURNAL_FILENAME).exists()
+    assert not (tmp_path / MANIFEST_LOCK_FILENAME).exists()
+    assert json.loads(manifest.read_text(encoding="utf-8"))["entries"][0]["id"] == entry["id"]
+
+
+def test_failed_manifest_write_keeps_journal_and_releases_lock(tmp_path, monkeypatch):
+    manifest = tmp_path / "calendar_manifest.json"
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"x")
+    manifest.write_text(json.dumps({"version": 2, "entries": []}), encoding="utf-8")
+    entry = build_entry_v2(
+        "alice",
+        1,
+        "normal",
+        1,
+        1,
+        "T",
+        str(source),
+        "reel.mp4",
+        publication_target="instagram_reel",
+        lane="reel",
+        placement="feed",
+        media_class="video",
+        method="telegram",
+        policy_snapshot={"version": 1},
+    )
+
+    def fail_replace(temp_name, path):
+        raise OSError("simulated interrupted manifest replace")
+
+    monkeypatch.setattr(calendar_manifest.os, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="simulated interrupted"):
+        replace_entries_v2(manifest, [entry], usernames={"alice"}, lane="reel")
+
+    assert (tmp_path / MANIFEST_JOURNAL_FILENAME).exists()
+    assert not (tmp_path / MANIFEST_LOCK_FILENAME).exists()
+    assert json.loads(manifest.read_text(encoding="utf-8"))["entries"] == []
+
+    with pytest.raises(RuntimeError, match="journal pendiente"):
+        replace_entries_v2(manifest, [entry], usernames={"alice"}, lane="reel")
 
 
 def test_default_replace_only_replaces_default_target(tmp_path):
