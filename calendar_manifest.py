@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import uuid
+from hashlib import sha256
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -186,6 +187,11 @@ def _read_payload(path: Path) -> dict:
     return payload
 
 
+def _manifest_revision(payload: dict) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return sha256(encoded.encode("utf-8")).hexdigest()
+
+
 def assert_manifest_ready(path: str | os.PathLike) -> None:
     manifest = Path(path)
     if manifest_journal_path(manifest).exists():
@@ -361,14 +367,35 @@ def replace_entries_v2(
     lane: str,
     window: dict | None = None,
 ) -> list[dict]:
+    preview = preview_replace_entries_v2(path, entries, usernames, lane, window)
+    apply_manifest_preview(path, preview)
+    return list(preview["merged_entries"])
+
+
+def preview_replace_entries_v2(
+    path: str | os.PathLike,
+    entries: list[dict],
+    usernames: set[str],
+    lane: str,
+    window: dict | None = None,
+) -> dict:
     manifest = Path(path)
     payload = _read_payload(manifest)
     if payload.get("version") != 2:
-        raise ValueError("replace_entries_v2 requiere calendar_manifest version 2")
+        raise ValueError("preview_replace_entries_v2 requiere calendar_manifest version 2")
     affected = {str(name) for name in usernames}
     target_lane = _required_label(lane, "lane")
     start_day = int((window or {}).get("start_day", 1))
     end_day = int((window or {}).get("end_day", 999999))
+    removed_entries = [
+        entry
+        for entry in payload["entries"]
+        if (
+            entry.get("username") in affected
+            and entry.get("lane") == target_lane
+            and start_day <= int(entry.get("day") or 0) <= end_day
+        )
+    ]
     kept = [
         entry
         for entry in payload["entries"]
@@ -379,8 +406,39 @@ def replace_entries_v2(
         )
     ]
     merged = kept + list(entries)
-    _write_payload_version(manifest, merged, 2)
-    return merged
+    return {
+        "operation": "replace_entries_v2",
+        "version": 2,
+        "base_revision": _manifest_revision(payload),
+        "selector": {
+            "usernames": sorted(affected),
+            "lane": target_lane,
+            "start_day": start_day,
+            "end_day": end_day,
+        },
+        "summary": {
+            "added": len(entries),
+            "removed": len(removed_entries),
+            "kept": len(kept),
+            "total": len(merged),
+        },
+        "removed_entries": removed_entries,
+        "added_entries": list(entries),
+        "kept_entries": kept,
+        "merged_entries": merged,
+    }
+
+
+def apply_manifest_preview(path: str | os.PathLike, preview: dict) -> list[dict]:
+    manifest = Path(path)
+    payload = _read_payload(manifest)
+    if payload.get("version") != preview.get("version"):
+        raise RuntimeError("revision del manifest cambio antes de aplicar el preview")
+    if _manifest_revision(payload) != preview.get("base_revision"):
+        raise RuntimeError("revision del manifest cambio antes de aplicar el preview")
+    entries = list(preview.get("merged_entries") or [])
+    _write_payload_version(manifest, entries, int(preview["version"]))
+    return entries
 
 
 def remove_entries_for_accounts(

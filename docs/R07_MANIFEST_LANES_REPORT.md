@@ -18,6 +18,8 @@ Fecha: 2026-09-13
 - Los destinos manuales siguen desactivados para `build_entry()` v1; solo `build_entry_v2()` puede construirlos como contrato preparatorio.
 - Toda escritura del manifest pasa por un lock local `.calendar_manifest.lock` para bloquear escritores concurrentes.
 - Toda escritura crea `.calendar_manifest_journal.json` antes del reemplazo atomico; si el reemplazo termina bien se limpia, y si falla queda como evidencia para reconciliacion.
+- `preview_replace_entries_v2()` calcula el diff sin escribir: entradas agregadas, removidas, conservadas, total final, selector y revision base.
+- `apply_manifest_preview()` aplica solo si la revision base sigue vigente; si otro proceso cambio el manifest entre preview y apply, rechaza la escritura.
 
 ## Compatibilidad de actualizacion
 
@@ -26,6 +28,8 @@ Fecha: 2026-09-13
 - Telegram conserva su filtro por `publication_target`; las entradas no Telegram no se envian por accidente.
 - La sustitucion v2 esta separada de `replace_entries()` para evitar cambiar Logistica actual antes de migrarla.
 - Si queda un journal pendiente o un lock activo, las escrituras nuevas se bloquean antes de modificar el archivo principal.
+- El preview no modifica `calendar_manifest.json`, por lo que la UI futura podra mostrar cambios antes de confirmar.
+- El apply protegido evita aplicar una revision obsoleta sobre cambios externos.
 
 ## Pruebas agregadas
 
@@ -35,10 +39,11 @@ Fecha: 2026-09-13
 - `tests/test_calendar_manifest.py::test_replace_entries_v2_blocks_when_manifest_lock_exists`
 - `tests/test_calendar_manifest.py::test_replace_entries_v2_writes_journal_and_cleans_after_success`
 - `tests/test_calendar_manifest.py::test_failed_manifest_write_keeps_journal_and_releases_lock`
+- `tests/test_calendar_manifest.py::test_preview_replace_entries_v2_returns_diff_without_writing`
+- `tests/test_calendar_manifest.py::test_apply_manifest_preview_rejects_stale_revision`
 
 ## Pendiente R07
 
-- Revision/diff de manifest antes de aplicar cambios.
 - Migracion formal de v1 a v2 con preview.
 - Snapshots de horarios por carril.
 - Politica Trial y fixtures historicos bajo carriles.

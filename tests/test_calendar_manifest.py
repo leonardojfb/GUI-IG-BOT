@@ -4,10 +4,12 @@ import pytest
 
 import calendar_manifest
 from calendar_manifest import (
+    apply_manifest_preview,
     build_entry,
     build_entry_v2,
     load_entries,
     manifest_path,
+    preview_replace_entries_v2,
     publication_target_for_entry,
     remove_entries_for_accounts,
     replace_entries,
@@ -368,6 +370,105 @@ def test_failed_manifest_write_keeps_journal_and_releases_lock(tmp_path, monkeyp
 
     with pytest.raises(RuntimeError, match="journal pendiente"):
         replace_entries_v2(manifest, [entry], usernames={"alice"}, lane="reel")
+
+
+def test_preview_replace_entries_v2_returns_diff_without_writing(tmp_path):
+    manifest = tmp_path / "calendar_manifest.json"
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"x")
+    old_reel = build_entry_v2(
+        "alice",
+        1,
+        "normal",
+        1,
+        1,
+        "T",
+        str(source),
+        "old-reel.mp4",
+        publication_target="instagram_reel",
+        lane="reel",
+        placement="feed",
+        media_class="video",
+        method="telegram",
+        policy_snapshot={"version": 1},
+    )
+    kept_story = build_entry_v2(
+        "alice",
+        1,
+        "normal",
+        1,
+        2,
+        "T",
+        str(source),
+        "story.jpg",
+        publication_target="instagram_story",
+        lane="story",
+        placement="story",
+        media_class="image",
+        method="manual",
+        policy_snapshot={"version": 1},
+        story_link_url="https://example.test/story",
+        story_announcement_text="Story",
+    )
+    manifest.write_text(
+        json.dumps({"version": 2, "entries": [old_reel, kept_story]}),
+        encoding="utf-8",
+    )
+    before = manifest.read_text(encoding="utf-8")
+    new_reel = {**old_reel, "id": "new-reel", "display_filename": "new-reel.mp4"}
+
+    preview = preview_replace_entries_v2(
+        manifest,
+        [new_reel],
+        usernames={"alice"},
+        lane="reel",
+        window={"start_day": 1, "end_day": 1},
+    )
+
+    assert preview["version"] == 2
+    assert preview["summary"] == {"added": 1, "removed": 1, "kept": 1, "total": 2}
+    assert [entry["id"] for entry in preview["removed_entries"]] == [old_reel["id"]]
+    assert [entry["id"] for entry in preview["added_entries"]] == ["new-reel"]
+    assert [entry["id"] for entry in preview["kept_entries"]] == [kept_story["id"]]
+    assert manifest.read_text(encoding="utf-8") == before
+
+
+def test_apply_manifest_preview_rejects_stale_revision(tmp_path):
+    manifest = tmp_path / "calendar_manifest.json"
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"x")
+    initial = build_entry_v2(
+        "alice",
+        1,
+        "normal",
+        1,
+        1,
+        "T",
+        str(source),
+        "initial.mp4",
+        publication_target="instagram_reel",
+        lane="reel",
+        placement="feed",
+        media_class="video",
+        method="telegram",
+        policy_snapshot={"version": 1},
+    )
+    manifest.write_text(json.dumps({"version": 2, "entries": [initial]}), encoding="utf-8")
+    preview = preview_replace_entries_v2(
+        manifest,
+        [{**initial, "id": "replacement"}],
+        usernames={"alice"},
+        lane="reel",
+    )
+    manifest.write_text(
+        json.dumps({"version": 2, "entries": [{**initial, "id": "external-change"}]}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="revision del manifest cambio"):
+        apply_manifest_preview(manifest, preview)
+
+    assert json.loads(manifest.read_text(encoding="utf-8"))["entries"][0]["id"] == "external-change"
 
 
 def test_default_replace_only_replaces_default_target(tmp_path):
