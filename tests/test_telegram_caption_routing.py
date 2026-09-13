@@ -104,6 +104,26 @@ def test_normal_manifest_caption_mode_overrides_saved_individual_captions():
     ) == normal_map["SRC01"]
 
 
+def test_manifest_caption_literal_overrides_mutable_caption_sources():
+    vid = {
+        "filename": "clip__SRC01__P2__TANDA_MIXED__ACC1__D1__S1.mp4",
+        "delivery_kind": "normal",
+        "caption": "Frozen snapshot caption",
+        "caption_snapshot": {"caption_id": "caption-1", "caption_version": 1},
+        "caption_mode": "general",
+    }
+    pools = {"MIXED": ["mutable general caption\n#two"]}
+    normal_maps = {"MIXED": {"SRC01": "mutable individual caption\n#one"}}
+
+    assert organizadortg.caption_for_calendar_row(
+        vid,
+        trial_caption_maps={},
+        normal_individual_caption_maps=normal_maps,
+        caption_pools=pools,
+        caption_indexes={},
+    ) == "Frozen snapshot caption"
+
+
 def test_scan_calendar_structure_uses_manifest_when_present(tmp_path, monkeypatch):
     video = tmp_path / "videos_finales" / "T1" / "clip.mp4"
     legacy = tmp_path / "CALENDARIO_POSTEO" / "Dia_1" / "legacy" / "legacy.mp4"

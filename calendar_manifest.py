@@ -42,6 +42,7 @@ def build_entry(
     caption: str = "",
     story_link_url: str = "",
     story_announcement_text: str = "",
+    caption_snapshot: dict | None = None,
     platform_payload: dict | None = None,
     manual_status: str = "planned",
 ) -> dict:
@@ -79,6 +80,8 @@ def build_entry(
     }
     if caption_mode:
         entry["caption_mode"] = str(caption_mode)
+    if caption_snapshot:
+        entry["caption_snapshot"] = dict(caption_snapshot)
     return entry
 
 

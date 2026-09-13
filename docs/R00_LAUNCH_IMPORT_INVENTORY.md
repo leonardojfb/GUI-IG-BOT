@@ -25,6 +25,9 @@ paquete incompleto.
 | `calendar_manifest.py` | Si | Solo define constantes/helpers. | Bajo | Lector/writer compatible; no debe hacer I/O al importar. |
 | `catalog/__init__.py` | Si | Solo declara el paquete. | Bajo | Apto para import. |
 | `catalog/service.py` | Si | Define `CatalogService`; no abre DB ni ejecuta migraciones hasta instanciar/llamar metodos. | Bajo | Servicio R03 sobre `DatabaseManager`; mantiene wrappers legacy hasta migrar consumidores. |
+| `captions/__init__.py` | Si | Solo reexporta modelos/servicios. | Bajo | Apto para import; no abre DB ni archivos. |
+| `captions/importer.py` | Si | Define parser/preview de TXT; no lee archivos hasta `preview_txt()`. | Bajo | Parser unico R05 para captions por parrafos y bloques historicos. |
+| `captions/service.py` | Si | Define `CaptionService`; no abre DB hasta instanciar con `DatabaseManager`. | Bajo/medio | Servicio R05 para pools, versiones, snapshots, bindings y migracion conservadora. |
 | `vault/__init__.py` | Si | Solo declara el paquete. | Bajo | Apto para import. |
 | `vault/backfill.py` | Si | Define backfill de referencias; no escanea DB ni archivos hasta llamada explicita. | Bajo/medio | R04 registra referencias historicas externas sin copiar bytes durante update. |
 | `vault/integration.py` | Si | Define enlace explicito entre transform logs y Vault; no importa archivos hasta llamada explicita. | Bajo/medio | R04 permite registrar outputs gestionados despues de render confirmado. |

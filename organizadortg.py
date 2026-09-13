@@ -19,6 +19,7 @@ from calendar_manifest import (
     publication_target_for_entry,
     remove_entries_for_accounts,
 )
+from captions.importer import parse_caption_text
 from database import DatabaseManager
 from social_publishing import TELEGRAM_PUBLICATION_TARGETS, is_telegram_publication_target
 from trial_content import source_key_from_filename
@@ -168,6 +169,8 @@ def _scan_manifest_calendar_structure(manifest_file=None):
             "account_id": entry.get("account_id"),
             "transform_log_id": entry.get("transform_log_id"),
             "caption_mode": entry.get("caption_mode"),
+            "caption": entry.get("caption"),
+            "caption_snapshot": entry.get("caption_snapshot"),
         })
     rows.sort(key=lambda row: (int(str(row["day"]).split("_")[1]), row.get("slot", 0), row["username"], row["filename"]))
     return rows
@@ -436,24 +439,7 @@ def load_clean_captions(path=None):
     if not path or not os.path.exists(path):
         return []
     content = open(path, 'r', encoding='utf-8', errors='ignore').read()
-    pattern = r'\[\d{1,2}.*?\].*?:\s*(.*?)(?=\s*\[\d{1,2}|$)'
-    blocks = re.findall(pattern, content, flags=re.DOTALL)
-    captions = [b.strip() for b in blocks if b.strip()]
-    if not captions:
-        # Fallback: cada bloque separado por una línea en blanco es parte de un
-        # caption. Un caption puede contener líneas en blanco internas; sus
-        # hashtags suelen marcar el cierre del bloque.
-        paragraphs = [block.strip() for block in re.split(r"\r?\n\s*\r?\n", content) if block.strip()]
-        captions = []
-        pending = []
-        for paragraph in paragraphs:
-            pending.append(paragraph)
-            if re.search(r"#\w+", paragraph):
-                captions.append("\n\n".join(pending))
-                pending = []
-        if pending:
-            captions.append("\n\n".join(pending))
-    return captions
+    return parse_caption_text(content)
 
 def shuffle_hashtags(text):
     hashtags = re.findall(r'#\w+', text)
@@ -545,6 +531,33 @@ def caption_for_normal_calendar_video(filename, caption_mode, normal_map, captio
     if normal_map:
         return caption_for_normal_individual_video(filename, normal_map)
     return caption_for_calendar_video(filename, caption_pools, caption_indexes)
+
+
+def caption_for_calendar_row(
+    vid,
+    trial_caption_maps,
+    normal_individual_caption_maps,
+    caption_pools,
+    caption_indexes,
+):
+    """Resolve a calendar row caption, preferring immutable manifest snapshots."""
+    if vid.get("caption_snapshot") and str(vid.get("caption") or "").strip():
+        return vid.get("caption")
+    if vid.get("delivery_kind", "normal") == "trial":
+        trial_map = trial_caption_maps.get(
+            extract_tanda_tag_from_calendar_filename(vid["filename"]), {}
+        )
+        return caption_for_trial_calendar_video(vid["filename"], trial_map)
+    normal_map = normal_individual_caption_maps.get(
+        extract_tanda_tag_from_calendar_filename(vid["filename"]), {}
+    )
+    return caption_for_normal_calendar_video(
+        vid["filename"],
+        vid.get("caption_mode"),
+        normal_map,
+        caption_pools,
+        caption_indexes,
+    )
 
 history_db = load_json(os.path.join(base_dir, HISTORY_FILE))
 
@@ -1088,22 +1101,13 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     f"Formato: Reel"
                 )
 
-                if delivery_kind == "trial":
-                    trial_map = trial_caption_maps.get(
-                        extract_tanda_tag_from_calendar_filename(vid["filename"]), {}
-                    )
-                    cap = caption_for_trial_calendar_video(vid["filename"], trial_map)
-                else:
-                    normal_map = normal_individual_caption_maps.get(
-                        extract_tanda_tag_from_calendar_filename(vid["filename"]), {}
-                    )
-                    cap = caption_for_normal_calendar_video(
-                        vid["filename"],
-                        vid.get("caption_mode"),
-                        normal_map,
-                        caption_pools,
-                        caption_indexes,
-                    )
+                cap = caption_for_calendar_row(
+                    vid,
+                    trial_caption_maps,
+                    normal_individual_caption_maps,
+                    caption_pools,
+                    caption_indexes,
+                )
 
                 jobs_by_chat[chat_id].append({
                     "chat_id": chat_id,

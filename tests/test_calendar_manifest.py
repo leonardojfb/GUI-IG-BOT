@@ -72,6 +72,37 @@ def test_manifest_defaults_trial_entry_to_explicit_trial_target(tmp_path):
     assert entry["manual_status"] == "planned"
 
 
+def test_manifest_entry_can_store_caption_snapshot_literal(tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"x")
+
+    entry = build_entry(
+        "eve",
+        7,
+        "normal",
+        1,
+        1,
+        "T",
+        str(source),
+        "clip.mp4",
+        caption="Caption frozen",
+        caption_snapshot={
+            "caption_id": "caption-1",
+            "caption_version": 3,
+            "resolution_mode": "general",
+            "resolution_source_id": "pool-1",
+        },
+    )
+
+    assert entry["caption"] == "Caption frozen"
+    assert entry["caption_snapshot"] == {
+        "caption_id": "caption-1",
+        "caption_version": 3,
+        "resolution_mode": "general",
+        "resolution_source_id": "pool-1",
+    }
+
+
 def test_manifest_v1_rejects_new_manual_publication_entries(tmp_path):
     source = tmp_path / "clip.mp4"
     source.write_bytes(b"x")

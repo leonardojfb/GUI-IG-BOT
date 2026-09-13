@@ -150,6 +150,66 @@ CREATE TABLE IF NOT EXISTS normal_source_captions (
     FOREIGN KEY (tanda_name) REFERENCES batch_tandas(tanda_name)
 );
 
+CREATE TABLE IF NOT EXISTS caption_pools (
+    pool_id TEXT PRIMARY KEY,
+    scope_kind TEXT NOT NULL,
+    scope_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(scope_kind, scope_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS caption_items (
+    caption_id TEXT PRIMARY KEY,
+    pool_id TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (pool_id) REFERENCES caption_pools(pool_id),
+    UNIQUE(pool_id, position)
+);
+
+CREATE TABLE IF NOT EXISTS caption_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    caption_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    text_hash TEXT NOT NULL,
+    source_ref TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (caption_id) REFERENCES caption_items(caption_id),
+    UNIQUE(caption_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_caption_versions_caption
+ON caption_versions(caption_id, version);
+
+CREATE TABLE IF NOT EXISTS caption_bindings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_id TEXT NOT NULL,
+    caption_id TEXT NOT NULL,
+    strategy TEXT NOT NULL DEFAULT 'manual',
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (caption_id) REFERENCES caption_items(caption_id),
+    UNIQUE(asset_id, caption_id, strategy)
+);
+
+CREATE INDEX IF NOT EXISTS idx_caption_bindings_asset
+ON caption_bindings(asset_id, active);
+
+CREATE TABLE IF NOT EXISTS caption_migration_map (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    legacy_kind TEXT NOT NULL,
+    tanda_name TEXT NOT NULL,
+    source_key TEXT NOT NULL DEFAULT '',
+    pool_id TEXT NOT NULL,
+    caption_id TEXT,
+    source_ref TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(legacy_kind, tanda_name, source_key)
+);
+
 CREATE TABLE IF NOT EXISTS video_transform_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     process_kind TEXT NOT NULL,
