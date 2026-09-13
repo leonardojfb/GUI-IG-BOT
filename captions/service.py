@@ -5,6 +5,7 @@ import uuid
 from dataclasses import dataclass
 
 from .importer import preview_txt
+from trial_content import source_key_from_filename
 
 
 @dataclass(frozen=True)
@@ -220,6 +221,75 @@ class CaptionService:
         if not row:
             return None
         return self.snapshot(row["caption_id"], mode=mode, source_id=source_id, strategy=strategy)
+
+    def pool_snapshot_at(
+        self,
+        pool_id: str,
+        index: int,
+        mode: str,
+        source_id: str,
+        strategy: str = "manual",
+    ) -> CaptionSnapshot | None:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            SELECT caption_id
+            FROM caption_items
+            WHERE pool_id = ?
+            ORDER BY position ASC
+            """,
+            (pool_id,),
+        )
+        rows = cur.fetchall()
+        if not rows:
+            return None
+        row = rows[int(index) % len(rows)]
+        return self.snapshot(row["caption_id"], mode=mode, source_id=source_id, strategy=strategy)
+
+    def resolve_legacy_manifest_caption(
+        self,
+        tanda_name: str,
+        filename: str,
+        mode: str,
+        delivery_kind: str = "normal",
+        pool_index: int = 0,
+        allow_general_fallback: bool = False,
+    ) -> CaptionSnapshot | None:
+        self.migrate_legacy_captions()
+        normalized_mode = str(mode or "").strip().lower()
+        if normalized_mode == "general":
+            mapping = self._migration_row("general_txt", tanda_name, "")
+            if not mapping:
+                return None
+            return self.pool_snapshot_at(
+                mapping["pool_id"],
+                pool_index,
+                mode="general",
+                source_id=mapping["pool_id"],
+                strategy="round_robin",
+            )
+
+        source_key = source_key_from_filename(filename)
+        legacy_kind = "trial_individual" if delivery_kind == "trial" else "normal_individual"
+        mapping = self._migration_row(legacy_kind, tanda_name, source_key)
+        if mapping and mapping["caption_id"]:
+            return self.snapshot(
+                mapping["caption_id"],
+                mode="individual",
+                source_id=source_key,
+                strategy="manual",
+            )
+        if allow_general_fallback:
+            general = self._migration_row("general_txt", tanda_name, "")
+            if general:
+                return self.pool_snapshot_at(
+                    general["pool_id"],
+                    pool_index,
+                    mode="general_fallback",
+                    source_id=general["pool_id"],
+                    strategy="manual",
+                )
+        raise MissingCaptionError(source_key, fallback_available=allow_general_fallback)
 
     def snapshot(
         self,
@@ -579,16 +649,19 @@ class CaptionService:
         self.conn.commit()
 
     def _migration_exists(self, legacy_kind: str, tanda_name: str, source_key: str) -> bool:
+        return self._migration_row(legacy_kind, tanda_name, source_key) is not None
+
+    def _migration_row(self, legacy_kind: str, tanda_name: str, source_key: str):
         cur = self.conn.cursor()
         cur.execute(
             """
-            SELECT 1
+            SELECT legacy_kind, tanda_name, source_key, pool_id, caption_id, source_ref, status
             FROM caption_migration_map
             WHERE legacy_kind = ? AND tanda_name = ? AND source_key = ?
             """,
             (legacy_kind, tanda_name, source_key),
         )
-        return cur.fetchone() is not None
+        return cur.fetchone()
 
     def _record_migration(
         self,

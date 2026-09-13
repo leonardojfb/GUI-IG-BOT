@@ -20,6 +20,7 @@ Fecha: 2026-09-13
 - La migracion registra mapeo auditable y es idempotente; no asigna captions por orden a assets sin linaje probado.
 - `DatabaseManager.set_normal_source_caption()` y `set_trial_source_caption()` siguen escribiendo sus tablas legacy y ademas crean/actualizan versiones R05 para que las pantallas actuales no mantengan una biblioteca paralela.
 - `calendar_manifest.build_entry()` acepta `caption_snapshot` opcional y conserva el texto literal en `caption`.
+- `gui_premium_v7.py` agrega `_caption_snapshot_manifest_payload()` y lo usa en nuevas calendarizaciones Trial y Por Cuentas.
 - `organizadortg.caption_for_calendar_row()` prefiere `caption_snapshot` + `caption` antes de recalcular desde TXT o tablas mutables.
 - `build_release.ps1`, `updater.DEFAULT_UPDATEABLE_FILES` y el inventario R00 incluyen los nuevos modulos.
 
@@ -34,5 +35,5 @@ Fecha: 2026-09-13
 
 - Hacer que las pantallas muestren IDs/versiones y preview de diferencias antes de guardar.
 - Resolver captions durante preview/confirmacion del planificador compartido cuando R08 exista.
-- Persistir snapshots para todas las rutas nuevas de Logistica, no solo aceptar/leer el contrato.
+- Extender snapshots al path heredado de `Organizador.py`/Por Tandas si se mantiene como productor activo.
 - Agregar UI de preview/reconciliacion de migracion TXT.

@@ -23,6 +23,7 @@ import requests
 import render_performance
 
 from calendar_manifest import build_entry, manifest_path, replace_entries
+from captions.service import CaptionService, MissingCaptionError
 from database import DatabaseManager
 from airtable_sync import (
     AirtableConfig,
@@ -55,6 +56,34 @@ ensure_stdout_utf8()
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _ACCT_HIST_FILE = os.path.join(_BASE_DIR, "dist_accounts_history.json")
+
+
+def _caption_snapshot_manifest_payload(
+    db_ref,
+    tanda_name: str,
+    filename: str,
+    caption_mode: str,
+    delivery_kind: str = "normal",
+    pool_index: int = 0,
+) -> dict:
+    try:
+        snapshot = CaptionService(db_ref).resolve_legacy_manifest_caption(
+            tanda_name=tanda_name,
+            filename=filename,
+            mode=caption_mode,
+            delivery_kind=delivery_kind,
+            pool_index=pool_index,
+        )
+    except (KeyError, MissingCaptionError, FileNotFoundError, ValueError):
+        return {}
+    if not snapshot:
+        return {}
+    manifest_snapshot = snapshot.as_manifest_dict()
+    manifest_snapshot.pop("text", None)
+    return {
+        "caption": snapshot.text,
+        "caption_snapshot": manifest_snapshot,
+    }
 
 
 def _windows_long_path(path):
@@ -2997,6 +3026,13 @@ class InstagramAutoPro(ctk.CTk):
                 for index, name in enumerate(files):
                     day, slot = index // per_day + 1, index % per_day + 1
                     source_path = os.path.abspath(os.path.join(_BASE_DIR, "videos_finales", tanda, name))
+                    caption_payload = _caption_snapshot_manifest_payload(
+                        self.db,
+                        tanda_name=tanda,
+                        filename=name,
+                        caption_mode="individual",
+                        delivery_kind="trial",
+                    )
                     entries.append(
                         build_entry(
                             username=user,
@@ -3008,6 +3044,7 @@ class InstagramAutoPro(ctk.CTk):
                             source_path=source_path,
                             telegram_filename=build_calendar_video_filename(name, tanda, ids.get(user), day, slot),
                             transform_log_id=self.db.get_video_transform_log_id(source_path),
+                            **caption_payload,
                         )
                     )
             if affected:
@@ -3687,6 +3724,7 @@ class InstagramAutoPro(ctk.CTk):
                 entries = []
                 affected = set()
                 logical_names = set()
+                caption_snapshot_indexes = {}
                 total_copiados = 0
                 for acc, day_lists in plan.items():
                     for day_idx, day_vids in enumerate(day_lists):
@@ -3714,6 +3752,19 @@ class InstagramAutoPro(ctk.CTk):
                                 )
                                 dst = os.path.join(day_path, dst_name)
                             logical_names.add(dst_name)
+                            caption_mode = caption_mode_map.get(item_tanda, "general")
+                            caption_payload = _caption_snapshot_manifest_payload(
+                                self.db,
+                                tanda_name=item_tanda,
+                                filename=vid_name,
+                                caption_mode=caption_mode,
+                                delivery_kind="normal",
+                                pool_index=caption_snapshot_indexes.get(item_tanda, 0),
+                            )
+                            if caption_mode == "general" and caption_payload:
+                                caption_snapshot_indexes[item_tanda] = (
+                                    caption_snapshot_indexes.get(item_tanda, 0) + 1
+                                )
                             entries.append(
                                 build_entry(
                                     username=acc,
@@ -3725,7 +3776,8 @@ class InstagramAutoPro(ctk.CTk):
                                     source_path=src,
                                     telegram_filename=dst_name,
                                     transform_log_id=self.db.get_video_transform_log_id(src),
-                                    caption_mode=caption_mode_map.get(item_tanda, "general"),
+                                    caption_mode=caption_mode,
+                                    **caption_payload,
                                 )
                             )
                             affected.add(acc)

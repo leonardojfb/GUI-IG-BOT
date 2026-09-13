@@ -149,3 +149,57 @@ def test_legacy_trial_caption_setter_writes_versioned_caption(tmp_path):
     assert latest.caption_version == 2
     assert latest.text == "Trial A v2"
     db.close()
+
+
+def test_resolve_legacy_manifest_caption_freezes_general_and_individual(tmp_path):
+    db = DatabaseManager(str(tmp_path / "organizador.db"))
+    txt = tmp_path / "captions.txt"
+    txt.write_text("General uno\n#uno\n\nGeneral dos\n#dos\n", encoding="utf-8")
+    db.add_tanda("T1", "p1", "p2", str(txt))
+    db.add_tanda("T2", "p1", "p2", None)
+    db.set_normal_source_caption("T2", "source-a", "Individual A v1")
+
+    service = CaptionService(db)
+    service.migrate_legacy_captions()
+    general = service.resolve_legacy_manifest_caption(
+        tanda_name="T1",
+        filename="any__TANDA_T1__ACC1__D1__S1.mp4",
+        mode="general",
+        pool_index=1,
+    )
+    individual = service.resolve_legacy_manifest_caption(
+        tanda_name="T2",
+        filename="source-a__c01__TANDA_T2__ACC1__D1__S1.mp4",
+        mode="individual",
+    )
+    db.set_normal_source_caption("T2", "source-a", "Individual A v2")
+
+    assert general.text == "General dos\n#dos"
+    assert general.resolution_mode == "general"
+    assert individual.text == "Individual A v1"
+    assert individual.resolution_mode == "individual"
+    assert service.snapshot(individual.caption_id).text == "Individual A v2"
+    db.close()
+
+
+def test_gui_caption_manifest_payload_uses_snapshot_contract(tmp_path):
+    import gui_premium_v7
+
+    db = DatabaseManager(str(tmp_path / "organizador.db"))
+    db.add_tanda("T1", "p1", "p2", None)
+    db.set_normal_source_caption("T1", "source-a", "Caption A")
+
+    payload = gui_premium_v7._caption_snapshot_manifest_payload(
+        db,
+        tanda_name="T1",
+        filename="source-a__c01.mp4",
+        caption_mode="individual",
+        delivery_kind="normal",
+    )
+
+    assert payload["caption"] == "Caption A"
+    assert payload["caption_snapshot"]["caption_id"].startswith("caption-")
+    assert payload["caption_snapshot"]["caption_version"] == 1
+    assert payload["caption_snapshot"]["resolution_mode"] == "individual"
+    assert "text" not in payload["caption_snapshot"]
+    db.close()
