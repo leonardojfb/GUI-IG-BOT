@@ -108,6 +108,53 @@ def test_legacy_caption_migration_is_idempotent_and_records_mapping(tmp_path):
     db.close()
 
 
+def test_legacy_caption_migration_preview_is_read_only_and_classifies_sources(tmp_path):
+    db = DatabaseManager(str(tmp_path / "organizador.db"))
+    ok_txt = tmp_path / "ok.txt"
+    empty_txt = tmp_path / "empty.txt"
+    missing_txt = tmp_path / "missing.txt"
+    ok_txt.write_text("General uno\n#uno\n\nGeneral dos\n#dos\n", encoding="utf-8")
+    empty_txt.write_text("\n\n", encoding="utf-8")
+    db.add_tanda("OK", "p1", "p2", str(ok_txt))
+    db.add_tanda("EMPTY", "p1", "p2", str(empty_txt))
+    db.add_tanda("MISSING", "p1", "p2", str(missing_txt))
+    db.conn.execute(
+        """
+        INSERT INTO normal_source_captions (tanda_name, source_key, caption_text)
+        VALUES ('OK', 'source-a', 'Individual A')
+        """
+    )
+    db.conn.execute(
+        """
+        INSERT INTO normal_source_captions (tanda_name, source_key, caption_text)
+        VALUES ('OK', 'source-empty', '')
+        """
+    )
+    db.conn.commit()
+
+    service = CaptionService(db)
+    preview = service.preview_legacy_migration()
+
+    assert preview["summary"] == {
+        "import": 2,
+        "already_migrated": 0,
+        "missing_file": 1,
+        "empty": 2,
+    }
+    assert {
+        (row["legacy_kind"], row["tanda_name"], row["source_key"], row["action"])
+        for row in preview["rows"]
+    } == {
+        ("general_txt", "OK", "", "import"),
+        ("general_txt", "EMPTY", "", "empty"),
+        ("general_txt", "MISSING", "", "missing_file"),
+        ("normal_individual", "OK", "source-a", "import"),
+        ("normal_individual", "OK", "source-empty", "empty"),
+    }
+    assert service.get_migration_mappings("OK") == []
+    db.close()
+
+
 def test_legacy_normal_caption_setter_writes_versioned_caption(tmp_path):
     db = DatabaseManager(str(tmp_path / "organizador.db"))
     db.add_tanda("T1", "p1", "p2", None)
@@ -225,3 +272,42 @@ def test_organizador_caption_manifest_payload_freezes_tanda_caption(tmp_path):
     assert payload["caption_snapshot"]["resolution_mode"] == "general"
     assert "text" not in payload["caption_snapshot"]
     db.close()
+
+
+def test_gui_caption_migration_preview_text_is_operator_readable():
+    import gui_premium_v7
+
+    text = gui_premium_v7._caption_migration_preview_text(
+        {
+            "summary": {
+                "import": 2,
+                "already_migrated": 1,
+                "missing_file": 1,
+                "empty": 1,
+            },
+            "rows": [
+                {
+                    "legacy_kind": "general_txt",
+                    "tanda_name": "T1",
+                    "source_key": "",
+                    "action": "import",
+                    "caption_count": 2,
+                    "source_ref": "C:/captions.txt",
+                },
+                {
+                    "legacy_kind": "normal_individual",
+                    "tanda_name": "T2",
+                    "source_key": "source-a",
+                    "action": "already_migrated",
+                    "caption_count": 1,
+                    "source_ref": "normal_source_captions:T2:source-a",
+                },
+            ],
+        }
+    )
+
+    assert "Importables: 2" in text
+    assert "Ya migrados: 1" in text
+    assert "Faltan archivos: 1" in text
+    assert "general_txt | T1 | -" in text
+    assert "normal_individual | T2 | source-a" in text

@@ -17,10 +17,12 @@ Fecha: 2026-09-13
   - `batch_tandas.captions_file_path` como pool general por tanda.
   - `normal_source_captions` como captions individuales normales.
   - `trial_source_captions` como captions individuales Trial.
+- `CaptionService.preview_legacy_migration()` muestra importables, ya migrados, TXT faltantes y captions vacios sin escribir DB.
 - La migracion registra mapeo auditable y es idempotente; no asigna captions por orden a assets sin linaje probado.
 - `DatabaseManager.set_normal_source_caption()` y `set_trial_source_caption()` siguen escribiendo sus tablas legacy y ademas crean/actualizan versiones R05 para que las pantallas actuales no mantengan una biblioteca paralela.
 - `calendar_manifest.build_entry()` acepta `caption_snapshot` opcional y conserva el texto literal en `caption`.
 - `gui_premium_v7.py` agrega `_caption_snapshot_manifest_payload()` y lo usa en nuevas calendarizaciones Trial y Por Cuentas.
+- `gui_premium_v7.py` expone "Revisar migración captions" en Logistica para ver preview y aplicar migracion explicitamente.
 - `Organizador.py` agrega `caption_snapshot_manifest_payload()` y lo usa en `distribute_tanda()` para Por Tandas heredado.
 - `organizadortg.caption_for_calendar_row()` prefiere `caption_snapshot` + `caption` antes de recalcular desde TXT o tablas mutables.
 - `build_release.ps1`, `updater.DEFAULT_UPDATEABLE_FILES` y el inventario R00 incluyen los nuevos modulos.
@@ -34,7 +36,7 @@ Fecha: 2026-09-13
 
 ## Pendiente R05
 
-- Hacer que las pantallas muestren IDs/versiones y preview de diferencias antes de guardar.
+- Hacer que las pantallas de edicion muestren IDs/versiones y diferencias antes de guardar.
 - Resolver captions durante preview/confirmacion del planificador compartido cuando R08 exista.
 - Congelar snapshots en otros productores futuros cuando empiecen a escribir manifest v2/jobs.
 - Agregar UI de preview/reconciliacion de migracion TXT.

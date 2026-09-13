@@ -86,6 +86,33 @@ def _caption_snapshot_manifest_payload(
     }
 
 
+def _caption_migration_preview_text(preview: dict) -> str:
+    summary = preview.get("summary", {})
+    lines = [
+        "Migración de captions al Vault versionado",
+        "=" * 48,
+        f"Importables: {int(summary.get('import', 0))}",
+        f"Ya migrados: {int(summary.get('already_migrated', 0))}",
+        f"Faltan archivos: {int(summary.get('missing_file', 0))}",
+        f"Vacíos: {int(summary.get('empty', 0))}",
+        "",
+        "Acción | Tipo | Tanda | Fuente | Cantidad | Origen",
+        "-" * 72,
+    ]
+    for row in preview.get("rows", []):
+        lines.append(
+            "{action} | {legacy_kind} | {tanda_name} | {source_key} | {count} | {source_ref}".format(
+                action=row.get("action") or "-",
+                legacy_kind=row.get("legacy_kind") or "-",
+                tanda_name=row.get("tanda_name") or "-",
+                source_key=row.get("source_key") or "-",
+                count=int(row.get("caption_count") or 0),
+                source_ref=row.get("source_ref") or "-",
+            )
+        )
+    return "\n".join(lines)
+
+
 def _windows_long_path(path):
     path = os.path.abspath(os.fspath(path))
     if os.name != "nt" or path.startswith("\\\\?\\"):
@@ -2756,10 +2783,15 @@ class InstagramAutoPro(ctk.CTk):
             selector_attr="c_tandas", label_attr="tandas_lbl_cap",
             padx=20, pady=(0, 10),
         )
+        GhostButton(
+            parent,
+            text="Revisar migración captions",
+            command=self._show_caption_migration_preview,
+        ).grid(row=5, column=0, columnspan=4, padx=20, pady=(0, 8), sticky="ew")
 
         # Botonera
         btn_box = ctk.CTkFrame(parent, fg_color="transparent")
-        btn_box.grid(row=5, column=0, columnspan=4, pady=20)
+        btn_box.grid(row=6, column=0, columnspan=4, pady=20)
 
         GhostButton(btn_box, text="Resetear todo", height=BTN_H_LG,
                     command=self._tandas_dist_reset).pack(side="left", padx=(0, 20))
@@ -2803,6 +2835,38 @@ class InstagramAutoPro(ctk.CTk):
         label.pack(side="left", padx=10)
         setattr(self, label_attr, label)
         self._refresh_logistica_caption_label(selector_attr, label_attr)
+
+    def _show_caption_migration_preview(self):
+        service = CaptionService(self.db)
+        preview = service.preview_legacy_migration()
+        text = _caption_migration_preview_text(preview)
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Migración captions")
+        self._fit_toplevel(dialog, 860, 620)
+        dialog.configure(fg_color=BG_APP)
+        body = ctk.CTkTextbox(dialog, height=500, font=FONT_MONO, fg_color=BG_CARD2, text_color=TEXT_BODY)
+        body.pack(fill="both", expand=True, padx=16, pady=(16, 8))
+        body.insert("1.0", text)
+        body.configure(state="disabled")
+        actions = ctk.CTkFrame(dialog, fg_color="transparent")
+        actions.pack(fill="x", padx=16, pady=(0, 16))
+
+        def apply_migration():
+            if not messagebox.askyesno(
+                "Migrar captions",
+                "Importar captions legacy al Vault versionado? No se modifican los TXT originales.",
+                parent=dialog,
+            ):
+                return
+            result = service.migrate_legacy_captions()
+            body.configure(state="normal")
+            body.delete("1.0", "end")
+            body.insert("1.0", _caption_migration_preview_text(service.preview_legacy_migration()))
+            body.insert("end", "\n\nResultado aplicado:\n" + json.dumps(result, ensure_ascii=False, indent=2))
+            body.configure(state="disabled")
+
+        PrimaryButton(actions, text="Aplicar migración", command=apply_migration).pack(side="left")
+        GhostButton(actions, text="Cerrar", command=dialog.destroy).pack(side="right")
 
     def _build_dist_trials_tab(self, parent):
         """Trial distribution keeps captions and calendars separate from normal work."""

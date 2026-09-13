@@ -361,6 +361,103 @@ class CaptionService:
         )
         return version
 
+    def preview_legacy_migration(self) -> dict:
+        rows = []
+        summary = {
+            "import": 0,
+            "already_migrated": 0,
+            "missing_file": 0,
+            "empty": 0,
+        }
+
+        def add_row(
+            legacy_kind: str,
+            tanda_name: str,
+            source_key: str,
+            action: str,
+            caption_count: int = 0,
+            source_ref: str = "",
+        ) -> None:
+            summary[action] = summary.get(action, 0) + 1
+            rows.append(
+                {
+                    "legacy_kind": legacy_kind,
+                    "tanda_name": tanda_name,
+                    "source_key": source_key,
+                    "action": action,
+                    "caption_count": int(caption_count),
+                    "source_ref": source_ref,
+                }
+            )
+
+        cur = self.conn.cursor()
+        cur.execute("SELECT tanda_name, captions_file_path FROM batch_tandas ORDER BY tanda_name")
+        for row in cur.fetchall():
+            tanda_name = row["tanda_name"]
+            captions_path = row["captions_file_path"]
+            if not captions_path:
+                continue
+            if self._migration_exists("general_txt", tanda_name, ""):
+                add_row("general_txt", tanda_name, "", "already_migrated", source_ref=captions_path)
+                continue
+            try:
+                preview = preview_txt(captions_path)
+            except FileNotFoundError:
+                add_row("general_txt", tanda_name, "", "missing_file", source_ref=captions_path)
+                continue
+            if not preview.captions:
+                add_row("general_txt", tanda_name, "", "empty", source_ref=preview.source_path)
+                continue
+            add_row(
+                "general_txt",
+                tanda_name,
+                "",
+                "import",
+                caption_count=len(preview.captions),
+                source_ref=preview.source_path,
+            )
+
+        for legacy_kind, table_name in (
+            ("normal_individual", "normal_source_captions"),
+            ("trial_individual", "trial_source_captions"),
+        ):
+            cur.execute(
+                f"""
+                SELECT tanda_name, source_key, caption_text
+                FROM {table_name}
+                ORDER BY tanda_name, source_key
+                """
+            )
+            for row in cur.fetchall():
+                source_ref = f"{table_name}:{row['tanda_name']}:{row['source_key']}"
+                if self._migration_exists(legacy_kind, row["tanda_name"], row["source_key"]):
+                    add_row(
+                        legacy_kind,
+                        row["tanda_name"],
+                        row["source_key"],
+                        "already_migrated",
+                        source_ref=source_ref,
+                    )
+                    continue
+                if not str(row["caption_text"] or "").strip():
+                    add_row(
+                        legacy_kind,
+                        row["tanda_name"],
+                        row["source_key"],
+                        "empty",
+                        source_ref=source_ref,
+                    )
+                    continue
+                add_row(
+                    legacy_kind,
+                    row["tanda_name"],
+                    row["source_key"],
+                    "import",
+                    caption_count=1,
+                    source_ref=source_ref,
+                )
+        return {"summary": summary, "rows": rows}
+
     def migrate_legacy_captions(self) -> dict[str, int]:
         report = {
             "general_imported": 0,

@@ -47,3 +47,12 @@ def test_por_cuentas_has_optional_individual_caption_controls():
     assert "Modo captions T2" in source
     assert "Individual" in source
     assert "_acct_refresh_individual_captions" in source
+
+
+def test_logistica_caption_migration_preview_control_is_available():
+    tandas_tab = _method_source("_build_dist_tandas_tab")
+    preview = _method_source("_show_caption_migration_preview")
+
+    assert "Revisar migración captions" in tandas_tab
+    assert "preview_legacy_migration" in preview
+    assert "migrate_legacy_captions" in preview
