@@ -30,6 +30,8 @@ Fecha: 2026-09-13
 - `manifest_migration_cli.py` permite ejecutar `preview` y `apply` de la migracion v1->v2 desde CLI con salida JSON.
 - La CLI puede exigir confirmacion explicita con `apply --require-confirmation --yes`.
 - `manifest_migration_cli.py` queda incluido en release normal y en `updater.DEFAULT_UPDATEABLE_FILES`, pero no en bootstrap.
+- La pantalla `Actualizaciones` agrega una tarjeta `Manifest v2` con acciones para revisar y aplicar la migracion desde GUI.
+- La accion GUI de aplicar recalcula el preview y exige confirmacion humana antes de llamar a `apply_manifest_preview()`.
 
 ## Compatibilidad de actualizacion
 
@@ -44,6 +46,7 @@ Fecha: 2026-09-13
 - Los snapshots de horario son opt-in en v2 y no cambian la escritura legacy v1.
 - Las reglas Trial/carril se aplican solo al contrato v2; la escritura legacy v1 conserva su comportamiento.
 - La CLI de migracion no convierte al leer y mantiene preview/apply como pasos separados para updates revisables.
+- El flujo GUI muestra el preview antes de aplicar y no toca `calendar_manifest.json` si la revision falla o el usuario cancela.
 
 ## Pruebas agregadas
 
@@ -65,10 +68,12 @@ Fecha: 2026-09-13
 - `tests/test_manifest_migration_cli.py::test_manifest_migration_cli_apply_converts_manifest_to_v2`
 - `tests/test_manifest_migration_cli.py::test_manifest_migration_cli_rejects_apply_without_confirm`
 - `tests/test_release_package_manifest.py::test_release_includes_manifest_migration_cli_but_bootstrap_does_not`
+- `tests/test_manifest_migration_gui.py::test_manifest_migration_preview_text_summarizes_safe_review`
+- `tests/test_manifest_migration_gui.py::test_updates_frame_exposes_manifest_migration_actions`
+- `tests/test_manifest_migration_gui.py::test_manifest_migration_gui_methods_use_preview_before_apply`
 
 ## Pendiente R07
 
 - Reconciliacion asistida del journal contra SQLite cuando una escritura queda interrumpida.
-- Boton/flujo GUI de revision humana para disparar el preview/apply de migracion.
 - Conexion del planificador real para poblar `schedule_snapshot` con hora local/zona cuando exista configuracion.
 - Fixtures historicos completos bajo carriles contra casos reales de Trial MAX/intercalado.

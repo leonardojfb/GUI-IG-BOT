@@ -22,7 +22,13 @@ import shutil
 import requests
 import render_performance
 
-from calendar_manifest import build_entry, manifest_path, replace_entries
+from calendar_manifest import (
+    apply_manifest_preview,
+    build_entry,
+    manifest_path,
+    preview_migrate_manifest_v1_to_v2,
+    replace_entries,
+)
 from captions.service import CaptionService, MissingCaptionError
 from database import DatabaseManager
 from vault.calendar_usage import record_calendar_manifest_usages
@@ -111,6 +117,35 @@ def _caption_migration_preview_text(preview: dict) -> str:
                 source_ref=row.get("source_ref") or "-",
             )
         )
+    return "\n".join(lines)
+
+
+def _manifest_migration_preview_text(preview: dict) -> str:
+    summary = preview.get("summary", {})
+    entries = list(preview.get("merged_entries") or [])
+    lanes = {}
+    accounts = {}
+    for entry in entries:
+        lane = str(entry.get("lane") or "-")
+        username = str(entry.get("username") or "-")
+        lanes[lane] = lanes.get(lane, 0) + 1
+        accounts[username] = accounts.get(username, 0) + 1
+    lines = [
+        "Manifest v1 -> v2",
+        "=" * 32,
+        f"Version origen: {preview.get('base_version', '-')}",
+        f"Version destino: {preview.get('target_version', '-')}",
+        f"Entradas a migrar: {int(summary.get('migrated', 0))}",
+        f"Total final: {int(summary.get('total', len(entries)))}",
+        "",
+        "Carriles",
+        "-" * 16,
+    ]
+    for lane, count in sorted(lanes.items()):
+        lines.append(f"{lane}: {count}")
+    lines.extend(["", "Cuentas", "-" * 16])
+    for username, count in sorted(accounts.items()):
+        lines.append(f"{username}: {count}")
     return "\n".join(lines)
 
 
@@ -1532,6 +1567,31 @@ class InstagramAutoPro(ctk.CTk):
         )
         self.btn_check_update.grid(row=0, column=2, padx=(0, 8))
 
+        migration_card = Card(scroll, title="Manifest v2")
+        migration_card.grid(row=3, column=0, sticky="ew", padx=24, pady=(0, 24))
+        migration_body = migration_card.body
+        migration_body.grid_columnconfigure(0, weight=1)
+        self.lbl_manifest_migration_state = ctk.CTkLabel(
+            migration_body,
+            text="Migracion v1->v2 lista para revisar antes de aplicar.",
+            text_color=TEXT_MUTED,
+            font=ctk.CTkFont(size=11),
+            anchor="w",
+        )
+        self.lbl_manifest_migration_state.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        migration_buttons = ctk.CTkFrame(migration_body, fg_color="transparent")
+        migration_buttons.grid(row=1, column=0, sticky="ew")
+        GhostButton(
+            migration_buttons,
+            text="Revisar manifest v2",
+            command=self._preview_manifest_migration,
+        ).grid(row=0, column=0, padx=(0, 8))
+        PrimaryButton(
+            migration_buttons,
+            text="Aplicar manifest v2",
+            command=self._apply_manifest_migration,
+        ).grid(row=0, column=1, padx=(0, 8))
+
         self._refresh_update_state()
 
     def _refresh_update_state(self, message=None, color=TEXT_MUTED):
@@ -1627,6 +1687,56 @@ class InstagramAutoPro(ctk.CTk):
             self._refresh_update_state(detail, color)
             if color == DANGER:
                 messagebox.showerror("No se pudo actualizar", detail, parent=self)
+
+    def _manifest_migration_path(self):
+        return manifest_path(_BASE_DIR)
+
+    def _preview_manifest_migration(self):
+        try:
+            preview = preview_migrate_manifest_v1_to_v2(self._manifest_migration_path())
+            text = _manifest_migration_preview_text(preview)
+            if hasattr(self, "lbl_manifest_migration_state"):
+                self.lbl_manifest_migration_state.configure(
+                    text=f"Preview listo: {preview['summary']['migrated']} entrada(s)",
+                    text_color=SUCCESS,
+                )
+            messagebox.showinfo("Preview manifest v2", text, parent=self)
+        except Exception as exc:
+            if hasattr(self, "lbl_manifest_migration_state"):
+                self.lbl_manifest_migration_state.configure(text=str(exc), text_color=DANGER)
+            messagebox.showerror("No se pudo revisar manifest", str(exc), parent=self)
+
+    def _apply_manifest_migration(self):
+        try:
+            preview = preview_migrate_manifest_v1_to_v2(self._manifest_migration_path())
+            text = _manifest_migration_preview_text(preview)
+        except Exception as exc:
+            if hasattr(self, "lbl_manifest_migration_state"):
+                self.lbl_manifest_migration_state.configure(text=str(exc), text_color=DANGER)
+            return messagebox.showerror("No se pudo revisar manifest", str(exc), parent=self)
+
+        if not messagebox.askyesno(
+            "Aplicar manifest v2",
+            text + "\n\nAplicar migracion v1->v2 ahora?",
+            parent=self,
+        ):
+            return
+        try:
+            applied = apply_manifest_preview(self._manifest_migration_path(), preview)
+            if hasattr(self, "lbl_manifest_migration_state"):
+                self.lbl_manifest_migration_state.configure(
+                    text=f"Migracion aplicada: {len(applied)} entrada(s)",
+                    text_color=SUCCESS,
+                )
+            messagebox.showinfo(
+                "Manifest v2 aplicado",
+                f"Migracion aplicada: {len(applied)} entrada(s).",
+                parent=self,
+            )
+        except Exception as exc:
+            if hasattr(self, "lbl_manifest_migration_state"):
+                self.lbl_manifest_migration_state.configure(text=str(exc), text_color=DANGER)
+            messagebox.showerror("No se pudo aplicar manifest", str(exc), parent=self)
 
     def _update_clock(self):
         self.lbl_clock.configure(
