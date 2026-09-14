@@ -68,3 +68,46 @@ def test_manifest_migration_cli_rejects_apply_without_confirm(tmp_path):
     assert result.returncode == 2
     assert "requiere --yes" in result.stderr
     assert json.loads(manifest.read_text(encoding="utf-8"))["version"] == 1
+
+
+def test_manifest_migration_cli_journal_inspect_reports_pending(tmp_path):
+    manifest = tmp_path / "calendar_manifest.json"
+    manifest.write_text(json.dumps({"version": 2, "entries": []}), encoding="utf-8")
+    (tmp_path / ".calendar_manifest_journal.json").write_text(
+        json.dumps({"operation": "write_manifest_v2"}),
+        encoding="utf-8",
+    )
+
+    result = _run_cli("journal-inspect", str(manifest))
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "pending"
+    assert payload["journal"]["operation"] == "write_manifest_v2"
+
+
+def test_manifest_migration_cli_journal_clear_requires_yes(tmp_path):
+    manifest = tmp_path / "calendar_manifest.json"
+    journal = tmp_path / ".calendar_manifest_journal.json"
+    manifest.write_text(json.dumps({"version": 2, "entries": []}), encoding="utf-8")
+    journal.write_text(json.dumps({"operation": "write_manifest_v2"}), encoding="utf-8")
+
+    result = _run_cli("journal-clear", str(manifest))
+
+    assert result.returncode == 2
+    assert "requiere --yes" in result.stderr
+    assert journal.exists()
+
+
+def test_manifest_migration_cli_journal_clear_removes_pending_journal(tmp_path):
+    manifest = tmp_path / "calendar_manifest.json"
+    journal = tmp_path / ".calendar_manifest_journal.json"
+    manifest.write_text(json.dumps({"version": 2, "entries": []}), encoding="utf-8")
+    journal.write_text(json.dumps({"operation": "write_manifest_v2"}), encoding="utf-8")
+
+    result = _run_cli("journal-clear", str(manifest), "--yes")
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["cleared"] is True
+    assert not journal.exists()

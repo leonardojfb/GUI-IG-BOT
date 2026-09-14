@@ -5,7 +5,12 @@ import json
 import sys
 from pathlib import Path
 
-from calendar_manifest import apply_manifest_preview, preview_migrate_manifest_v1_to_v2
+from calendar_manifest import (
+    apply_manifest_preview,
+    clear_manifest_journal,
+    inspect_manifest_journal,
+    preview_migrate_manifest_v1_to_v2,
+)
 
 
 def _json_dump(payload: dict) -> str:
@@ -37,6 +42,23 @@ def _apply(manifest_path: Path, *, require_confirmation: bool, yes: bool) -> int
     return 0
 
 
+def _journal_inspect(manifest_path: Path, *, db_path: Path | None = None) -> int:
+    report = inspect_manifest_journal(manifest_path, db_path=db_path)
+    print(_json_dump(report))
+    return 0
+
+
+def _journal_clear(
+    manifest_path: Path, *, db_path: Path | None = None, yes: bool = False
+) -> int:
+    if not yes:
+        print("La limpieza del journal requiere --yes.", file=sys.stderr)
+        return 2
+    result = clear_manifest_journal(manifest_path, db_path=db_path, confirm=True)
+    print(_json_dump(result))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Preview/apply calendar_manifest v1 to v2 migration."
@@ -54,6 +76,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Require --yes before writing.",
     )
     apply.add_argument("--yes", action="store_true", help="Confirm write operation.")
+
+    journal_inspect = subparsers.add_parser(
+        "journal-inspect", help="Inspect pending manifest journal JSON."
+    )
+    journal_inspect.add_argument("manifest_path", type=Path)
+    journal_inspect.add_argument("--db-path", type=Path, default=None)
+
+    journal_clear = subparsers.add_parser(
+        "journal-clear", help="Clear a reconciled manifest journal."
+    )
+    journal_clear.add_argument("manifest_path", type=Path)
+    journal_clear.add_argument("--db-path", type=Path, default=None)
+    journal_clear.add_argument(
+        "--yes", action="store_true", help="Confirm journal cleanup."
+    )
     return parser
 
 
@@ -67,6 +104,14 @@ def main(argv: list[str] | None = None) -> int:
             return _apply(
                 args.manifest_path,
                 require_confirmation=args.require_confirmation,
+                yes=args.yes,
+            )
+        if args.command == "journal-inspect":
+            return _journal_inspect(args.manifest_path, db_path=args.db_path)
+        if args.command == "journal-clear":
+            return _journal_clear(
+                args.manifest_path,
+                db_path=args.db_path,
                 yes=args.yes,
             )
     except Exception as exc:

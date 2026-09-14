@@ -29,6 +29,9 @@ Fecha: 2026-09-13
 - `policy_snapshot` agrega `trial_policy`, `publication_target` y `lane` para dejar evidencia auditable de la politica aplicada.
 - `manifest_migration_cli.py` permite ejecutar `preview` y `apply` de la migracion v1->v2 desde CLI con salida JSON.
 - La CLI puede exigir confirmacion explicita con `apply --require-confirmation --yes`.
+- `inspect_manifest_journal()` inspecciona si hay journal pendiente, verifica que el manifest siga legible y puede sumar un `PRAGMA integrity_check` read-only contra SQLite.
+- `clear_manifest_journal()` limpia un journal pendiente solo con confirmacion explicita, manifest legible y SQLite integro cuando se provee `db_path`.
+- `manifest_migration_cli.py` agrega `journal-inspect` y `journal-clear --yes` para diagnostico y limpieza operativa sin mutar `calendar_manifest.json` ni SQLite.
 - `manifest_migration_cli.py` queda incluido en release normal y en `updater.DEFAULT_UPDATEABLE_FILES`, pero no en bootstrap.
 - La pantalla `Actualizaciones` agrega una tarjeta `Manifest v2` con acciones para revisar y aplicar la migracion desde GUI.
 - La accion GUI de aplicar recalcula el preview y exige confirmacion humana antes de llamar a `apply_manifest_preview()`.
@@ -47,6 +50,8 @@ Fecha: 2026-09-13
 - Las reglas Trial/carril se aplican solo al contrato v2; la escritura legacy v1 conserva su comportamiento.
 - La CLI de migracion no convierte al leer y mantiene preview/apply como pasos separados para updates revisables.
 - El flujo GUI muestra el preview antes de aplicar y no toca `calendar_manifest.json` si la revision falla o el usuario cancela.
+- La inspeccion/limpieza de journal no modifica el manifest ni la base SQLite; solo elimina `.calendar_manifest_journal.json` cuando el operador confirma y los checks basicos pasan.
+- `journal-clear --db-path organizador.db --yes` rechaza la limpieza si SQLite no abre o `PRAGMA integrity_check` falla.
 
 ## Pruebas agregadas
 
@@ -64,9 +69,15 @@ Fecha: 2026-09-13
 - `tests/test_calendar_manifest.py::test_build_entry_v2_requires_trial_lane_for_trial_delivery`
 - `tests/test_calendar_manifest.py::test_build_entry_v2_rejects_normal_delivery_in_trial_lane`
 - `tests/test_calendar_manifest.py::test_preview_replace_entries_v2_rejects_entries_outside_target_lane`
+- `tests/test_calendar_manifest.py::test_inspect_manifest_journal_reports_pending_manifest_and_sqlite`
+- `tests/test_calendar_manifest.py::test_clear_manifest_journal_requires_confirmation_and_healthy_state`
+- `tests/test_calendar_manifest.py::test_clear_manifest_journal_refuses_when_manifest_is_unreadable`
 - `tests/test_manifest_migration_cli.py::test_manifest_migration_cli_preview_prints_json_without_writing`
 - `tests/test_manifest_migration_cli.py::test_manifest_migration_cli_apply_converts_manifest_to_v2`
 - `tests/test_manifest_migration_cli.py::test_manifest_migration_cli_rejects_apply_without_confirm`
+- `tests/test_manifest_migration_cli.py::test_manifest_migration_cli_journal_inspect_reports_pending`
+- `tests/test_manifest_migration_cli.py::test_manifest_migration_cli_journal_clear_requires_yes`
+- `tests/test_manifest_migration_cli.py::test_manifest_migration_cli_journal_clear_removes_pending_journal`
 - `tests/test_release_package_manifest.py::test_release_includes_manifest_migration_cli_but_bootstrap_does_not`
 - `tests/test_manifest_migration_gui.py::test_manifest_migration_preview_text_summarizes_safe_review`
 - `tests/test_manifest_migration_gui.py::test_updates_frame_exposes_manifest_migration_actions`
@@ -74,6 +85,7 @@ Fecha: 2026-09-13
 
 ## Pendiente R07
 
-- Reconciliacion asistida del journal contra SQLite cuando una escritura queda interrumpida.
+- UI para inspeccionar/limpiar journal desde `Actualizaciones` sin abrir consola.
+- Reconstruccion automatica avanzada desde journal/SQLite cuando no baste con limpiar evidencia pendiente.
 - Conexion del planificador real para poblar `schedule_snapshot` con hora local/zona cuando exista configuracion.
 - Fixtures historicos completos bajo carriles contra casos reales de Trial MAX/intercalado.

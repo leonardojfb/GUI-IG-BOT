@@ -7,6 +7,8 @@ from calendar_manifest import (
     apply_manifest_preview,
     build_entry,
     build_entry_v2,
+    clear_manifest_journal,
+    inspect_manifest_journal,
     load_entries,
     manifest_path,
     preview_migrate_manifest_v1_to_v2,
@@ -460,6 +462,65 @@ def test_failed_manifest_write_keeps_journal_and_releases_lock(tmp_path, monkeyp
 
     with pytest.raises(RuntimeError, match="journal pendiente"):
         replace_entries_v2(manifest, [entry], usernames={"alice"}, lane="reel")
+
+
+def test_inspect_manifest_journal_reports_pending_manifest_and_sqlite(tmp_path):
+    manifest = tmp_path / "calendar_manifest.json"
+    db_path = tmp_path / "organizador.db"
+    manifest.write_text(json.dumps({"version": 2, "entries": []}), encoding="utf-8")
+    (tmp_path / MANIFEST_JOURNAL_FILENAME).write_text(
+        json.dumps({"operation": "write_manifest_v2", "entries_count": 3}),
+        encoding="utf-8",
+    )
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE sample(id INTEGER PRIMARY KEY)")
+    conn.commit()
+    conn.close()
+
+    report = inspect_manifest_journal(manifest, db_path=db_path)
+
+    assert report["status"] == "pending"
+    assert report["journal"]["operation"] == "write_manifest_v2"
+    assert report["manifest"]["readable"] is True
+    assert report["manifest"]["version"] == 2
+    assert report["sqlite"]["exists"] is True
+    assert report["sqlite"]["integrity_ok"] is True
+
+
+def test_clear_manifest_journal_requires_confirmation_and_healthy_state(tmp_path):
+    manifest = tmp_path / "calendar_manifest.json"
+    db_path = tmp_path / "organizador.db"
+    journal = tmp_path / MANIFEST_JOURNAL_FILENAME
+    manifest.write_text(json.dumps({"version": 2, "entries": []}), encoding="utf-8")
+    journal.write_text(json.dumps({"operation": "write_manifest_v2"}), encoding="utf-8")
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE sample(id INTEGER PRIMARY KEY)")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(RuntimeError, match="confirmacion"):
+        clear_manifest_journal(manifest, db_path=db_path)
+
+    result = clear_manifest_journal(manifest, db_path=db_path, confirm=True)
+
+    assert result["cleared"] is True
+    assert not journal.exists()
+
+
+def test_clear_manifest_journal_refuses_when_manifest_is_unreadable(tmp_path):
+    manifest = tmp_path / "calendar_manifest.json"
+    (tmp_path / MANIFEST_JOURNAL_FILENAME).write_text(
+        json.dumps({"operation": "write_manifest_v2"}),
+        encoding="utf-8",
+    )
+    manifest.write_text("{not-json", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="manifest no legible"):
+        clear_manifest_journal(manifest, confirm=True)
 
 
 def test_preview_replace_entries_v2_returns_diff_without_writing(tmp_path):

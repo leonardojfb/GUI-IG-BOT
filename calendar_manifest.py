@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import tempfile
 import uuid
 from hashlib import sha256
@@ -270,6 +271,104 @@ def assert_manifest_ready(path: str | os.PathLike) -> None:
         )
     if manifest_lock_path(manifest).exists():
         raise RuntimeError("calendar manifest lock activo; otro escritor esta trabajando")
+
+
+def _inspect_manifest_file(path: Path) -> dict:
+    try:
+        payload = _read_payload(path)
+    except Exception as exc:
+        return {
+            "path": str(path),
+            "exists": path.exists(),
+            "readable": False,
+            "error": str(exc),
+        }
+    return {
+        "path": str(path),
+        "exists": path.exists(),
+        "readable": True,
+        "version": payload.get("version"),
+        "entries_count": len(payload.get("entries") or []),
+        "revision": _manifest_revision(payload),
+    }
+
+
+def _inspect_sqlite_file(db_path: str | os.PathLike | None) -> dict:
+    if db_path is None:
+        return {"checked": False}
+    path = Path(db_path)
+    report = {
+        "checked": True,
+        "path": str(path),
+        "exists": path.exists(),
+        "integrity_ok": False,
+    }
+    if not path.exists():
+        report["error"] = "organizador.db no existe"
+        return report
+    try:
+        uri = f"file:{path.as_posix()}?mode=ro"
+        conn = sqlite3.connect(uri, uri=True)
+        try:
+            row = conn.execute("PRAGMA integrity_check").fetchone()
+            report["integrity_check"] = row[0] if row else ""
+            report["integrity_ok"] = report["integrity_check"] == "ok"
+        finally:
+            conn.close()
+    except Exception as exc:
+        report["error"] = str(exc)
+    return report
+
+
+def inspect_manifest_journal(
+    path: str | os.PathLike,
+    *,
+    db_path: str | os.PathLike | None = None,
+) -> dict:
+    manifest = Path(path)
+    journal_path = manifest_journal_path(manifest)
+    journal = None
+    journal_readable = False
+    journal_error = ""
+    if journal_path.exists():
+        try:
+            journal = json.loads(journal_path.read_text(encoding="utf-8"))
+            journal_readable = isinstance(journal, dict)
+            if not journal_readable:
+                journal_error = "journal debe ser un objeto JSON"
+        except Exception as exc:
+            journal_error = str(exc)
+    return {
+        "status": "pending" if journal_path.exists() else "clean",
+        "journal_path": str(journal_path),
+        "journal_exists": journal_path.exists(),
+        "journal_readable": journal_readable,
+        "journal_error": journal_error,
+        "journal": journal if isinstance(journal, dict) else {},
+        "manifest": _inspect_manifest_file(manifest),
+        "sqlite": _inspect_sqlite_file(db_path),
+    }
+
+
+def clear_manifest_journal(
+    path: str | os.PathLike,
+    *,
+    db_path: str | os.PathLike | None = None,
+    confirm: bool = False,
+) -> dict:
+    if not confirm:
+        raise RuntimeError("clear_manifest_journal requiere confirmacion explicita")
+    report = inspect_manifest_journal(path, db_path=db_path)
+    if not report["journal_exists"]:
+        return {"cleared": False, "status": "clean", "report": report}
+    if not report["manifest"].get("readable"):
+        raise RuntimeError("manifest no legible; no se puede limpiar journal")
+    sqlite_report = report.get("sqlite") or {}
+    if sqlite_report.get("checked") and not sqlite_report.get("integrity_ok"):
+        raise RuntimeError("SQLite no paso integrity_check; no se puede limpiar journal")
+    manifest_journal_path(path).unlink()
+    report_after = inspect_manifest_journal(path, db_path=db_path)
+    return {"cleared": True, "status": report_after["status"], "report": report_after}
 
 
 def _acquire_manifest_lock(path: Path, operation: str) -> Path:
