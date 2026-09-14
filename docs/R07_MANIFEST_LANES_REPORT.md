@@ -27,6 +27,9 @@ Fecha: 2026-09-13
 - La politica Trial queda fijada en v2: `delivery_kind=trial` solo puede usar `publication_target=instagram_trial_reel` y `lane=trial_reel`.
 - Las entradas no Trial no pueden escribirse dentro de `lane=trial_reel`, y los previews por carril rechazan batches que no pertenecen al carril objetivo.
 - `policy_snapshot` agrega `trial_policy`, `publication_target` y `lane` para dejar evidencia auditable de la politica aplicada.
+- `manifest_migration_cli.py` permite ejecutar `preview` y `apply` de la migracion v1->v2 desde CLI con salida JSON.
+- La CLI puede exigir confirmacion explicita con `apply --require-confirmation --yes`.
+- `manifest_migration_cli.py` queda incluido en release normal y en `updater.DEFAULT_UPDATEABLE_FILES`, pero no en bootstrap.
 
 ## Compatibilidad de actualizacion
 
@@ -40,6 +43,7 @@ Fecha: 2026-09-13
 - La migracion formal v1->v2 se ejecuta mediante preview/apply; no degrada ni convierte automaticamente al leer.
 - Los snapshots de horario son opt-in en v2 y no cambian la escritura legacy v1.
 - Las reglas Trial/carril se aplican solo al contrato v2; la escritura legacy v1 conserva su comportamiento.
+- La CLI de migracion no convierte al leer y mantiene preview/apply como pasos separados para updates revisables.
 
 ## Pruebas agregadas
 
@@ -57,10 +61,14 @@ Fecha: 2026-09-13
 - `tests/test_calendar_manifest.py::test_build_entry_v2_requires_trial_lane_for_trial_delivery`
 - `tests/test_calendar_manifest.py::test_build_entry_v2_rejects_normal_delivery_in_trial_lane`
 - `tests/test_calendar_manifest.py::test_preview_replace_entries_v2_rejects_entries_outside_target_lane`
+- `tests/test_manifest_migration_cli.py::test_manifest_migration_cli_preview_prints_json_without_writing`
+- `tests/test_manifest_migration_cli.py::test_manifest_migration_cli_apply_converts_manifest_to_v2`
+- `tests/test_manifest_migration_cli.py::test_manifest_migration_cli_rejects_apply_without_confirm`
+- `tests/test_release_package_manifest.py::test_release_includes_manifest_migration_cli_but_bootstrap_does_not`
 
 ## Pendiente R07
 
 - Reconciliacion asistida del journal contra SQLite cuando una escritura queda interrumpida.
-- UI/CLI de revision humana para disparar el preview/apply de migracion.
+- Boton/flujo GUI de revision humana para disparar el preview/apply de migracion.
 - Conexion del planificador real para poblar `schedule_snapshot` con hora local/zona cuando exista configuracion.
 - Fixtures historicos completos bajo carriles contra casos reales de Trial MAX/intercalado.

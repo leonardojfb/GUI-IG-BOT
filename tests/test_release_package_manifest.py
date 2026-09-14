@@ -148,6 +148,12 @@ def test_normal_release_and_updater_forbid_operational_data():
     assert "$IncludeClientHistory" not in script
 
 
+def test_release_includes_manifest_migration_cli_but_bootstrap_does_not():
+    assert "manifest_migration_cli.py" in _release_files_from_build_script()
+    assert "manifest_migration_cli.py" in updater.DEFAULT_UPDATEABLE_FILES
+    assert "manifest_migration_cli.py" not in _bootstrap_release_files_from_build_script()
+
+
 def test_legacy_updater_python_files_do_not_require_new_console_encoding_names():
     release_files = _release_files_from_build_script()
     legacy_python = [
