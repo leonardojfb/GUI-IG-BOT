@@ -197,7 +197,12 @@ def test_build_entry_v2_stores_lane_dimensions_and_manual_target(tmp_path):
     assert entry["placement"] == "story"
     assert entry["media_class"] == "image"
     assert entry["method"] == "manual"
-    assert entry["policy_snapshot"] == {"reuse_policy": "same_lane_block"}
+    assert entry["policy_snapshot"] == {
+        "reuse_policy": "same_lane_block",
+        "trial_policy": "standard_reel",
+        "publication_target": "instagram_story",
+        "lane": "story",
+    }
     assert entry["schedule_snapshot"] == {
         "day": 3,
         "slot": 4,
@@ -232,6 +237,52 @@ def test_build_entry_v2_rejects_schedule_snapshot_for_wrong_lane(tmp_path):
             method="telegram",
             policy_snapshot={"version": 1},
             schedule_snapshot={"lane": "story"},
+        )
+
+
+def test_build_entry_v2_requires_trial_lane_for_trial_delivery(tmp_path):
+    source = tmp_path / "trial.mp4"
+    source.write_bytes(b"x")
+
+    with pytest.raises(ValueError, match="Trial deben usar carril trial_reel"):
+        build_entry_v2(
+            "alice",
+            1,
+            "trial",
+            1,
+            1,
+            "T",
+            str(source),
+            "trial.mp4",
+            publication_target="instagram_trial_reel",
+            lane="reel",
+            placement="feed",
+            media_class="video",
+            method="telegram",
+            policy_snapshot={"version": 1},
+        )
+
+
+def test_build_entry_v2_rejects_normal_delivery_in_trial_lane(tmp_path):
+    source = tmp_path / "normal.mp4"
+    source.write_bytes(b"x")
+
+    with pytest.raises(ValueError, match="solo acepta publicaciones Trial"):
+        build_entry_v2(
+            "alice",
+            1,
+            "normal",
+            1,
+            1,
+            "T",
+            str(source),
+            "normal.mp4",
+            publication_target="instagram_reel",
+            lane="trial_reel",
+            placement="feed",
+            media_class="video",
+            method="telegram",
+            policy_snapshot={"version": 1},
         )
 
 
@@ -472,6 +523,37 @@ def test_preview_replace_entries_v2_returns_diff_without_writing(tmp_path):
     assert manifest.read_text(encoding="utf-8") == before
 
 
+def test_preview_replace_entries_v2_rejects_entries_outside_target_lane(tmp_path):
+    manifest = tmp_path / "calendar_manifest.json"
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"x")
+    manifest.write_text(json.dumps({"version": 2, "entries": []}), encoding="utf-8")
+    trial = build_entry_v2(
+        "alice",
+        1,
+        "trial",
+        1,
+        1,
+        "T",
+        str(source),
+        "trial.mp4",
+        publication_target="instagram_trial_reel",
+        lane="trial_reel",
+        placement="feed",
+        media_class="video",
+        method="telegram",
+        policy_snapshot={"version": 1},
+    )
+
+    with pytest.raises(ValueError, match="no coincide con el carril objetivo"):
+        preview_replace_entries_v2(
+            manifest,
+            [trial],
+            usernames={"alice"},
+            lane="reel",
+        )
+
+
 def test_apply_manifest_preview_rejects_stale_revision(tmp_path):
     manifest = tmp_path / "calendar_manifest.json"
     source = tmp_path / "clip.mp4"
@@ -527,6 +609,10 @@ def test_preview_migrate_manifest_v1_to_v2_returns_lane_contract_without_writing
     assert preview["summary"] == {"migrated": 2, "total": 2}
     assert [entry["manifest_entry_version"] for entry in preview["merged_entries"]] == [2, 2]
     assert [entry["lane"] for entry in preview["merged_entries"]] == ["reel", "trial_reel"]
+    assert [entry["policy_snapshot"]["trial_policy"] for entry in preview["merged_entries"]] == [
+        "standard_reel",
+        "trial_reel_only",
+    ]
     assert [entry["display_filename"] for entry in preview["merged_entries"]] == [
         "normal.mp4",
         "trial.mp4",

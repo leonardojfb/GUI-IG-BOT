@@ -24,6 +24,9 @@ Fecha: 2026-09-13
 - La migracion v1->v2 preserva `id`, captions, filenames y campos existentes; agrega `manifest_entry_version`, `lane`, `placement`, `media_class`, `method`, `display_filename` y `policy_snapshot`.
 - `build_entry_v2()` guarda `schedule_snapshot` normalizado con `day`, `slot`, `lane` y `placement`; rechaza snapshots cuyo carril/placement/dia/slot no coinciden con la entrada.
 - La migracion v1->v2 agrega `schedule_snapshot` minimo por entrada para conservar dia, slot y carril aunque el manifest legacy no tenga hora exacta.
+- La politica Trial queda fijada en v2: `delivery_kind=trial` solo puede usar `publication_target=instagram_trial_reel` y `lane=trial_reel`.
+- Las entradas no Trial no pueden escribirse dentro de `lane=trial_reel`, y los previews por carril rechazan batches que no pertenecen al carril objetivo.
+- `policy_snapshot` agrega `trial_policy`, `publication_target` y `lane` para dejar evidencia auditable de la politica aplicada.
 
 ## Compatibilidad de actualizacion
 
@@ -36,6 +39,7 @@ Fecha: 2026-09-13
 - El apply protegido evita aplicar una revision obsoleta sobre cambios externos.
 - La migracion formal v1->v2 se ejecuta mediante preview/apply; no degrada ni convierte automaticamente al leer.
 - Los snapshots de horario son opt-in en v2 y no cambian la escritura legacy v1.
+- Las reglas Trial/carril se aplican solo al contrato v2; la escritura legacy v1 conserva su comportamiento.
 
 ## Pruebas agregadas
 
@@ -50,10 +54,13 @@ Fecha: 2026-09-13
 - `tests/test_calendar_manifest.py::test_preview_migrate_manifest_v1_to_v2_returns_lane_contract_without_writing`
 - `tests/test_calendar_manifest.py::test_apply_manifest_preview_migrates_v1_payload_to_v2`
 - `tests/test_calendar_manifest.py::test_build_entry_v2_rejects_schedule_snapshot_for_wrong_lane`
+- `tests/test_calendar_manifest.py::test_build_entry_v2_requires_trial_lane_for_trial_delivery`
+- `tests/test_calendar_manifest.py::test_build_entry_v2_rejects_normal_delivery_in_trial_lane`
+- `tests/test_calendar_manifest.py::test_preview_replace_entries_v2_rejects_entries_outside_target_lane`
 
 ## Pendiente R07
 
-- Politica Trial y fixtures historicos bajo carriles.
 - Reconciliacion asistida del journal contra SQLite cuando una escritura queda interrumpida.
 - UI/CLI de revision humana para disparar el preview/apply de migracion.
 - Conexion del planificador real para poblar `schedule_snapshot` con hora local/zona cuando exista configuracion.
+- Fixtures historicos completos bajo carriles contra casos reales de Trial MAX/intercalado.

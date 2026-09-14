@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from social_publishing import (
+    INSTAGRAM_TRIAL_REEL,
     PUBLICATION_TARGETS,
     TELEGRAM_PUBLICATION_TARGETS,
     default_publication_target,
@@ -127,6 +128,9 @@ def build_entry_v2(
 ) -> dict:
     if publication_target not in PUBLICATION_TARGETS:
         raise ValueError(f"publication_target no soportado: {publication_target}")
+    lane_label = _required_label(lane, "lane")
+    placement_label = _required_label(placement, "placement")
+    _validate_trial_lane_policy(str(delivery_kind), publication_target, lane_label)
     metadata = validate_publication_metadata(
         publication_target,
         str(delivery_kind),
@@ -150,11 +154,16 @@ def build_entry_v2(
         "transform_log_id": transform_log_id,
         "created_at": created_at or _now_utc(),
         "publication_target": publication_target,
-        "lane": _required_label(lane, "lane"),
-        "placement": _required_label(placement, "placement"),
+        "lane": lane_label,
+        "placement": placement_label,
         "media_class": _required_label(media_class, "media_class"),
         "method": _required_label(method, "method"),
-        "policy_snapshot": dict(policy_snapshot or {}),
+        "policy_snapshot": _normalize_policy_snapshot(
+            policy_snapshot,
+            delivery_kind=str(delivery_kind),
+            publication_target=publication_target,
+            lane=lane_label,
+        ),
         "caption": metadata["caption"],
         "story_link_url": metadata["story_link_url"],
         "story_announcement_text": metadata["story_announcement_text"],
@@ -204,6 +213,34 @@ def _normalize_schedule_snapshot(
         normalized[key] = expected
     normalized["lane"] = lane
     normalized["placement"] = placement
+    return normalized
+
+
+def _validate_trial_lane_policy(delivery_kind: str, publication_target: str, lane: str) -> None:
+    if delivery_kind == "trial":
+        if publication_target != INSTAGRAM_TRIAL_REEL or lane != "trial_reel":
+            raise ValueError("Las publicaciones Trial deben usar carril trial_reel.")
+        return
+    if lane == "trial_reel" or publication_target == INSTAGRAM_TRIAL_REEL:
+        raise ValueError("El carril trial_reel solo acepta publicaciones Trial.")
+
+
+def _trial_policy_label(delivery_kind: str) -> str:
+    return "trial_reel_only" if delivery_kind == "trial" else "standard_reel"
+
+
+def _normalize_policy_snapshot(
+    snapshot: dict | None,
+    *,
+    delivery_kind: str,
+    publication_target: str,
+    lane: str,
+) -> dict:
+    _validate_trial_lane_policy(delivery_kind, publication_target, lane)
+    normalized = dict(snapshot or {})
+    normalized.setdefault("trial_policy", _trial_policy_label(delivery_kind))
+    normalized.setdefault("publication_target", publication_target)
+    normalized.setdefault("lane", lane)
     return normalized
 
 
@@ -401,8 +438,12 @@ def _migrate_entry_v1_to_v2(entry: dict) -> dict:
     policy_snapshot = dict(migrated.get("policy_snapshot") or {})
     policy_snapshot.setdefault("source_manifest_version", 1)
     policy_snapshot.setdefault("migration", "r07_v1_to_v2")
-    policy_snapshot.setdefault("publication_target", target)
-    migrated["policy_snapshot"] = policy_snapshot
+    migrated["policy_snapshot"] = _normalize_policy_snapshot(
+        policy_snapshot,
+        delivery_kind=str(migrated.get("delivery_kind") or "normal"),
+        publication_target=target,
+        lane=migrated["lane"],
+    )
     return migrated
 
 
@@ -489,6 +530,8 @@ def preview_replace_entries_v2(
         raise ValueError("preview_replace_entries_v2 requiere calendar_manifest version 2")
     affected = {str(name) for name in usernames}
     target_lane = _required_label(lane, "lane")
+    for entry in entries:
+        _validate_manifest_v2_entry_for_lane(entry, target_lane)
     start_day = int((window or {}).get("start_day", 1))
     end_day = int((window or {}).get("end_day", 999999))
     removed_entries = [
@@ -531,6 +574,17 @@ def preview_replace_entries_v2(
         "kept_entries": kept,
         "merged_entries": merged,
     }
+
+
+def _validate_manifest_v2_entry_for_lane(entry: dict, target_lane: str) -> None:
+    entry_lane = _required_label(entry.get("lane"), "lane")
+    if entry_lane != target_lane:
+        raise ValueError("La entrada no coincide con el carril objetivo.")
+    _validate_trial_lane_policy(
+        str(entry.get("delivery_kind") or "normal"),
+        publication_target_for_entry(entry),
+        entry_lane,
+    )
 
 
 def apply_manifest_preview(path: str | os.PathLike, preview: dict) -> list[dict]:
