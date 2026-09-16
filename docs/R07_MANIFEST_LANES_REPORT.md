@@ -35,6 +35,8 @@ Fecha: 2026-09-13
 - `manifest_migration_cli.py` queda incluido en release normal y en `updater.DEFAULT_UPDATEABLE_FILES`, pero no en bootstrap.
 - La pantalla `Actualizaciones` agrega una tarjeta `Manifest v2` con acciones para revisar y aplicar la migracion desde GUI.
 - La accion GUI de aplicar recalcula el preview y exige confirmacion humana antes de llamar a `apply_manifest_preview()`.
+- La tarjeta `Manifest v2` tambien permite inspeccionar el journal y muestra estado del manifest, cantidad de entradas, operacion pendiente e integridad SQLite.
+- La limpieza del journal desde GUI vuelve a inspeccionar antes de actuar, exige confirmacion y usa el mismo guard conservador de `clear_manifest_journal()`.
 
 ## Compatibilidad de actualizacion
 
@@ -52,6 +54,7 @@ Fecha: 2026-09-13
 - El flujo GUI muestra el preview antes de aplicar y no toca `calendar_manifest.json` si la revision falla o el usuario cancela.
 - La inspeccion/limpieza de journal no modifica el manifest ni la base SQLite; solo elimina `.calendar_manifest_journal.json` cuando el operador confirma y los checks basicos pasan.
 - `journal-clear --db-path organizador.db --yes` rechaza la limpieza si SQLite no abre o `PRAGMA integrity_check` falla.
+- La GUI no ofrece limpieza silenciosa: si no hay journal solo informa estado; si existe, presenta el reporte y solicita confirmacion antes de eliminarlo.
 
 ## Pruebas agregadas
 
@@ -82,10 +85,12 @@ Fecha: 2026-09-13
 - `tests/test_manifest_migration_gui.py::test_manifest_migration_preview_text_summarizes_safe_review`
 - `tests/test_manifest_migration_gui.py::test_updates_frame_exposes_manifest_migration_actions`
 - `tests/test_manifest_migration_gui.py::test_manifest_migration_gui_methods_use_preview_before_apply`
+- `tests/test_manifest_migration_gui.py::test_manifest_journal_report_text_summarizes_recovery_state`
+- `tests/test_manifest_migration_gui.py::test_updates_frame_exposes_manifest_journal_recovery_actions`
+- `tests/test_manifest_migration_gui.py::test_manifest_journal_clear_gui_uses_database_integrity_guard`
 
 ## Pendiente R07
 
-- UI para inspeccionar/limpiar journal desde `Actualizaciones` sin abrir consola.
 - Reconstruccion automatica avanzada desde journal/SQLite cuando no baste con limpiar evidencia pendiente.
 - Conexion del planificador real para poblar `schedule_snapshot` con hora local/zona cuando exista configuracion.
 - Fixtures historicos completos bajo carriles contra casos reales de Trial MAX/intercalado.

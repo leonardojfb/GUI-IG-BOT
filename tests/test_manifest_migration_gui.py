@@ -59,3 +59,47 @@ def test_manifest_migration_gui_methods_use_preview_before_apply():
     assert "preview_migrate_manifest_v1_to_v2" in apply_segment
     assert "apply_manifest_preview" in apply_segment
     assert "messagebox.askyesno" in apply_segment
+
+
+def test_manifest_journal_report_text_summarizes_recovery_state():
+    text = gui_premium_v7._manifest_journal_report_text(
+        {
+            "status": "pending",
+            "journal_exists": True,
+            "journal_readable": True,
+            "journal": {"operation": "replace_entries_v2", "entry_count": 4},
+            "manifest": {"readable": True, "version": 2, "entries_count": 12},
+            "sqlite": {"checked": True, "integrity_ok": True, "integrity_check": "ok"},
+        }
+    )
+
+    assert "Journal: pendiente" in text
+    assert "Operacion: replace_entries_v2" in text
+    assert "Entradas journal: 4" in text
+    assert "Manifest: legible, v2, 12 entrada(s)" in text
+    assert "SQLite: integrity_check ok" in text
+
+
+def test_updates_frame_exposes_manifest_journal_recovery_actions():
+    source = GUI.read_text(encoding="utf-8")
+    frame_segment = ast.get_source_segment(source, _method("_build_updates_frame"))
+    inspect_segment = ast.get_source_segment(source, _method("_inspect_manifest_journal"))
+    clear_segment = ast.get_source_segment(source, _method("_clear_manifest_journal"))
+
+    assert "Revisar journal" in frame_segment
+    assert "Limpiar journal" in frame_segment
+    assert "_inspect_manifest_journal" in frame_segment
+    assert "_clear_manifest_journal" in frame_segment
+    assert "inspect_manifest_journal" in inspect_segment
+    assert "clear_manifest_journal" in clear_segment
+    assert "messagebox.askyesno" in clear_segment
+
+
+def test_manifest_journal_clear_gui_uses_database_integrity_guard():
+    source = GUI.read_text(encoding="utf-8")
+    clear_segment = ast.get_source_segment(source, _method("_clear_manifest_journal"))
+    db_segment = ast.get_source_segment(source, _method("_manifest_migration_db_path"))
+
+    assert "db_path" in clear_segment
+    assert "organizador.db" in db_segment
+    assert "confirm=True" in clear_segment

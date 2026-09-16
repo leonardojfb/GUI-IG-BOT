@@ -25,6 +25,8 @@ import render_performance
 from calendar_manifest import (
     apply_manifest_preview,
     build_entry,
+    clear_manifest_journal,
+    inspect_manifest_journal,
     manifest_path,
     preview_migrate_manifest_v1_to_v2,
     replace_entries,
@@ -146,6 +148,38 @@ def _manifest_migration_preview_text(preview: dict) -> str:
     lines.extend(["", "Cuentas", "-" * 16])
     for username, count in sorted(accounts.items()):
         lines.append(f"{username}: {count}")
+    return "\n".join(lines)
+
+
+def _manifest_journal_report_text(report: dict) -> str:
+    manifest = report.get("manifest") or {}
+    journal = report.get("journal") or {}
+    sqlite = report.get("sqlite") or {}
+    status = "pendiente" if report.get("status") == "pending" else "limpio"
+    if manifest.get("readable"):
+        manifest_text = (
+            f"legible, v{manifest.get('version', '-')}, "
+            f"{int(manifest.get('entries_count', 0))} entrada(s)"
+        )
+    else:
+        manifest_text = f"ilegible: {manifest.get('error') or 'error desconocido'}"
+    if sqlite.get("checked"):
+        sqlite_text = (
+            f"integrity_check {sqlite.get('integrity_check') or 'fallo'}"
+            if sqlite.get("integrity_ok")
+            else f"no integro: {sqlite.get('error') or 'integrity_check fallo'}"
+        )
+    else:
+        sqlite_text = "no revisado"
+    lines = [
+        f"Journal: {status}",
+        f"Operacion: {journal.get('operation') or '-'}",
+        f"Entradas journal: {int(journal.get('entry_count') or 0)}",
+        f"Manifest: {manifest_text}",
+        f"SQLite: {sqlite_text}",
+    ]
+    if report.get("journal_error"):
+        lines.append(f"Error journal: {report['journal_error']}")
     return "\n".join(lines)
 
 
@@ -1591,6 +1625,16 @@ class InstagramAutoPro(ctk.CTk):
             text="Aplicar manifest v2",
             command=self._apply_manifest_migration,
         ).grid(row=0, column=1, padx=(0, 8))
+        GhostButton(
+            migration_buttons,
+            text="Revisar journal",
+            command=self._inspect_manifest_journal,
+        ).grid(row=0, column=2, padx=(0, 8))
+        DangerButton(
+            migration_buttons,
+            text="Limpiar journal",
+            command=self._clear_manifest_journal,
+        ).grid(row=0, column=3)
 
         self._refresh_update_state()
 
@@ -1737,6 +1781,62 @@ class InstagramAutoPro(ctk.CTk):
             if hasattr(self, "lbl_manifest_migration_state"):
                 self.lbl_manifest_migration_state.configure(text=str(exc), text_color=DANGER)
             messagebox.showerror("No se pudo aplicar manifest", str(exc), parent=self)
+
+    def _manifest_migration_db_path(self):
+        return getattr(self.db, "db_path", os.path.join(_BASE_DIR, "organizador.db"))
+
+    def _inspect_manifest_journal(self):
+        try:
+            report = inspect_manifest_journal(
+                self._manifest_migration_path(),
+                db_path=self._manifest_migration_db_path(),
+            )
+            text = _manifest_journal_report_text(report)
+            if hasattr(self, "lbl_manifest_migration_state"):
+                color = WARNING if report["status"] == "pending" else SUCCESS
+                self.lbl_manifest_migration_state.configure(
+                    text=f"Journal {report['status']}", text_color=color
+                )
+            messagebox.showinfo("Estado del journal", text, parent=self)
+        except Exception as exc:
+            if hasattr(self, "lbl_manifest_migration_state"):
+                self.lbl_manifest_migration_state.configure(text=str(exc), text_color=DANGER)
+            messagebox.showerror("No se pudo revisar journal", str(exc), parent=self)
+
+    def _clear_manifest_journal(self):
+        try:
+            report = inspect_manifest_journal(
+                self._manifest_migration_path(),
+                db_path=self._manifest_migration_db_path(),
+            )
+            if not report["journal_exists"]:
+                messagebox.showinfo("Journal limpio", "No hay journal pendiente.", parent=self)
+                return
+            if not messagebox.askyesno(
+                "Limpiar journal",
+                _manifest_journal_report_text(report)
+                + "\n\nEliminar la evidencia pendiente? Esta accion no modifica el manifest ni SQLite.",
+                parent=self,
+            ):
+                return
+            result = clear_manifest_journal(
+                self._manifest_migration_path(),
+                db_path=self._manifest_migration_db_path(),
+                confirm=True,
+            )
+            if hasattr(self, "lbl_manifest_migration_state"):
+                self.lbl_manifest_migration_state.configure(
+                    text="Journal limpiado", text_color=SUCCESS
+                )
+            messagebox.showinfo(
+                "Journal limpiado",
+                _manifest_journal_report_text(result["report"]),
+                parent=self,
+            )
+        except Exception as exc:
+            if hasattr(self, "lbl_manifest_migration_state"):
+                self.lbl_manifest_migration_state.configure(text=str(exc), text_color=DANGER)
+            messagebox.showerror("No se pudo limpiar journal", str(exc), parent=self)
 
     def _update_clock(self):
         self.lbl_clock.configure(
