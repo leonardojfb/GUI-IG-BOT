@@ -338,12 +338,24 @@ def inspect_manifest_journal(
                 journal_error = "journal debe ser un objeto JSON"
         except Exception as exc:
             journal_error = str(exc)
+    base_payload = journal.get("base_payload") if isinstance(journal, dict) else None
+    next_payload = journal.get("next_payload") if isinstance(journal, dict) else None
+    recovery_available = (
+        journal_readable
+        and isinstance(base_payload, dict)
+        and isinstance(next_payload, dict)
+        and isinstance(base_payload.get("entries"), list)
+        and isinstance(next_payload.get("entries"), list)
+        and base_payload.get("version") in SUPPORTED_MANIFEST_VERSIONS
+        and next_payload.get("version") in SUPPORTED_MANIFEST_VERSIONS
+    )
     return {
         "status": "pending" if journal_path.exists() else "clean",
         "journal_path": str(journal_path),
         "journal_exists": journal_path.exists(),
         "journal_readable": journal_readable,
         "journal_error": journal_error,
+        "recovery_available": recovery_available,
         "journal": journal if isinstance(journal, dict) else {},
         "manifest": _inspect_manifest_file(manifest),
         "sqlite": _inspect_sqlite_file(db_path),
@@ -406,6 +418,8 @@ def _write_manifest_journal(
     operation: str,
     version: int,
     entries_count: int,
+    base_payload: dict | None = None,
+    next_payload: dict | None = None,
 ) -> Path:
     journal_path = manifest_journal_path(path)
     with journal_path.open("w", encoding="utf-8") as handle:
@@ -416,6 +430,8 @@ def _write_manifest_journal(
                 "version": int(version),
                 "entries_count": int(entries_count),
                 "created_at": _now_utc(),
+                "base_payload": base_payload,
+                "next_payload": next_payload,
             },
             handle,
             ensure_ascii=False,
@@ -449,6 +465,7 @@ def _write_guarded_payload(
     lock_path = _acquire_manifest_lock(path, operation)
     journal_path = manifest_journal_path(path)
     payload = {"version": int(version), "entries": entries}
+    base_payload = _read_payload(path)
     write_completed = False
     try:
         _write_manifest_journal(
@@ -456,6 +473,8 @@ def _write_guarded_payload(
             operation=operation,
             version=version,
             entries_count=len(entries),
+            base_payload=base_payload,
+            next_payload=payload,
         )
         _atomic_write_payload(path, payload)
         write_completed = True

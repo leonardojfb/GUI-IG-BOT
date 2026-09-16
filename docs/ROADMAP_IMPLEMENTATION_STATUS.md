@@ -44,7 +44,7 @@ Estimacion por paquetes tocados: `R00-R06 de R00-R20`, pero R04-R06 no estan cer
 | R04. Vault conserva originales | Parcial validado | `vault/storage.py`, `vault/query.py`, `vault/backfill.py`, `vault/migration.py`, `vault/thumbnails.py`, tests Vault y `docs/R04_VAULT_STORAGE_REPORT.md`. | Lista/inspector visibles y operables en GUI, migracion de bytes con progreso real y filtros grandes. |
 | R05. Captions versionados | Parcial alto validado | `captions/`, snapshots en manifest, migracion preview/apply, tests caption/Telegram y `docs/R05_CAPTIONS_VERSIONED_REPORT.md`. | UI de diff/versiones antes de guardar y cierre de fallback individual bajo planificador compartido. |
 | R06. Linaje, firmas y reutilizacion | Parcial validado | `vault/lineage.py`, `vault/signatures.py`, `vault/reuse.py`, `vault/calendar_usage.py`, tests R06 y `docs/R06_LINEAGE_SIGNATURES_REPORT.md`. | Leases/reservas de firmas, UI visible, politica de reutilizacion y restricciones por destino. |
-| R07. Carriles y manifest v2 | Parcial validado | `calendar_manifest.py` lee v1/v2, `build_entry_v2()`, `replace_entries_v2()`, `preview_replace_entries_v2()`, `preview_migrate_manifest_v1_to_v2()`, `apply_manifest_preview()`, `schedule_snapshot`, politica Trial/carril, lock/journal, `inspect_manifest_journal()`, `clear_manifest_journal()`, `manifest_migration_cli.py`, comandos `journal-inspect`/`journal-clear`, tarjeta GUI `Manifest v2` con migracion e inspeccion/limpieza de journal, y `docs/R07_MANIFEST_LANES_REPORT.md`. | Reconstruccion automatica avanzada desde journal/SQLite, conexion del planificador real a horarios exactos y fixtures historicos Trial MAX/intercalado. |
+| R07. Carriles y manifest v2 | Parcial validado | `calendar_manifest.py` lee v1/v2, `build_entry_v2()`, `replace_entries_v2()`, `preview_replace_entries_v2()`, `preview_migrate_manifest_v1_to_v2()`, `apply_manifest_preview()`, `schedule_snapshot`, politica Trial/carril, lock/journal con snapshots base/destino, `inspect_manifest_journal()` con `recovery_available`, `clear_manifest_journal()`, `manifest_migration_cli.py`, comandos `journal-inspect`/`journal-clear`, tarjeta GUI `Manifest v2` con migracion e inspeccion/limpieza de journal, y `docs/R07_MANIFEST_LANES_REPORT.md`. | Aplicacion controlada de snapshots recuperables, conexion del planificador real a horarios exactos y fixtures historicos Trial MAX/intercalado. |
 | R08. Planificador compartido | Pendiente | Algoritmos legacy Por Tandas/Por Cuentas existen por separado. | Servicio unico, preview inmutable, reservas, modo parcial/estricto y confirmacion por revision. |
 | R09. Ejecuciones duraderas | Pendiente | `video_transform_logs` existe, pero no jobs duraderos. | Recetas versionadas, jobs, dependencias, checkpoints, retry y recuperacion tras cierre. |
 | R10. Productores a jobs | Pendiente / legacy existente | Tandas, Forge y Edicion existen en Legacy. | Adaptarlos al contrato de jobs sin cambiar composicion historica; validar ffprobe/perfiles. |
@@ -88,7 +88,7 @@ Estimacion por paquetes tocados: `R00-R06 de R00-R20`, pero R04-R06 no estan cer
 | LEG-23 | Trial como capacidad | R03/R08 | Parcial validado bajo | Trial queda separado en contrato manifest v2 por `instagram_trial_reel` + `lane=trial_reel`; falta elegibilidad final por red/capacidad y planificador R08. |
 | LEG-24 | Selector Trial individual | R05/R08/R12 | Legacy existente / parcial | Captions Trial y plan actual existen; selector final compartido pendiente. |
 | LEG-25 | Trial MAX e intercalado | R08 | Legacy existente / parcial | Politica v2 separa carril Trial; faltan fixture historico completo, MAX/intercalado y planificador unico R08. |
-| LEG-26 | Manifest comun | R07 | Parcial validado | Manifest v1/v2, snapshots, `build_entry_v2()`, `replace_entries_v2()`, preview/apply con revision, migracion v1->v2 por CLI/GUI, lock/journal de escritor e inspeccion/limpieza de journal por API/CLI/GUI; reconstruccion automatica avanzada pendiente. |
+| LEG-26 | Manifest comun | R07 | Parcial validado | Manifest v1/v2, snapshots, `build_entry_v2()`, `replace_entries_v2()`, preview/apply con revision, migracion v1->v2 por CLI/GUI, lock/journal de escritor con snapshots base/destino e inspeccion/limpieza por API/CLI/GUI; aplicacion de reconstruccion controlada pendiente. |
 | LEG-27 | Horarios y zonas | R07 | Parcial validado bajo | `schedule_snapshot` v2 captura dia/slot/carril y puede guardar hora/zona; falta conectarlo al planificador real. |
 | LEG-28 | Telegram como metodo | R15 | Legacy existente / parcial | Envio fake validado y uso Vault; ledger/multiformato pendiente. |
 | LEG-29 | Limpieza selectiva | R15/R16 | Legacy existente / parcial | Limpieza por cuentas/manifest existe; limpieza por IDs/carriles pendiente. |
@@ -125,7 +125,7 @@ Estimacion por paquetes tocados: `R00-R06 de R00-R20`, pero R04-R06 no estan cer
 Ultima suite completa observada en este branch:
 
 ```text
-435 passed, 2 skipped, 7 subtests passed in 217.68s
+435 passed, 2 skipped, 7 subtests passed in 177.86s (0:02:57)
 ```
 
 Smokes controlados de runtime/launcher/UI:

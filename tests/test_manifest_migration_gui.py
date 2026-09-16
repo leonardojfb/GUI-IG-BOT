@@ -67,6 +67,7 @@ def test_manifest_journal_report_text_summarizes_recovery_state():
             "status": "pending",
             "journal_exists": True,
             "journal_readable": True,
+            "recovery_available": True,
             "journal": {"operation": "replace_entries_v2", "entry_count": 4},
             "manifest": {"readable": True, "version": 2, "entries_count": 12},
             "sqlite": {"checked": True, "integrity_ok": True, "integrity_check": "ok"},
@@ -78,6 +79,7 @@ def test_manifest_journal_report_text_summarizes_recovery_state():
     assert "Entradas journal: 4" in text
     assert "Manifest: legible, v2, 12 entrada(s)" in text
     assert "SQLite: integrity_check ok" in text
+    assert "Reconstruccion: disponible" in text
 
 
 def test_updates_frame_exposes_manifest_journal_recovery_actions():

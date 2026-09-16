@@ -177,6 +177,7 @@ def _manifest_journal_report_text(report: dict) -> str:
         f"Entradas journal: {int(journal.get('entry_count') or 0)}",
         f"Manifest: {manifest_text}",
         f"SQLite: {sqlite_text}",
+        f"Reconstruccion: {'disponible' if report.get('recovery_available') else 'no disponible'}",
     ]
     if report.get("journal_error"):
         lines.append(f"Error journal: {report['journal_error']}")

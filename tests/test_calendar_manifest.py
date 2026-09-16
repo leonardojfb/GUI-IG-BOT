@@ -459,6 +459,11 @@ def test_failed_manifest_write_keeps_journal_and_releases_lock(tmp_path, monkeyp
     assert (tmp_path / MANIFEST_JOURNAL_FILENAME).exists()
     assert not (tmp_path / MANIFEST_LOCK_FILENAME).exists()
     assert json.loads(manifest.read_text(encoding="utf-8"))["entries"] == []
+    journal_payload = json.loads(
+        (tmp_path / MANIFEST_JOURNAL_FILENAME).read_text(encoding="utf-8")
+    )
+    assert journal_payload["base_payload"] == {"version": 2, "entries": []}
+    assert journal_payload["next_payload"]["entries"][0]["id"] == entry["id"]
 
     with pytest.raises(RuntimeError, match="journal pendiente"):
         replace_entries_v2(manifest, [entry], usernames={"alice"}, lane="reel")
@@ -487,6 +492,7 @@ def test_inspect_manifest_journal_reports_pending_manifest_and_sqlite(tmp_path):
     assert report["manifest"]["version"] == 2
     assert report["sqlite"]["exists"] is True
     assert report["sqlite"]["integrity_ok"] is True
+    assert report["recovery_available"] is False
 
 
 def test_clear_manifest_journal_requires_confirmation_and_healthy_state(tmp_path):

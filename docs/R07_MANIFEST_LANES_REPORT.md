@@ -18,6 +18,7 @@ Fecha: 2026-09-13
 - Los destinos manuales siguen desactivados para `build_entry()` v1; solo `build_entry_v2()` puede construirlos como contrato preparatorio.
 - Toda escritura del manifest pasa por un lock local `.calendar_manifest.lock` para bloquear escritores concurrentes.
 - Toda escritura crea `.calendar_manifest_journal.json` antes del reemplazo atomico; si el reemplazo termina bien se limpia, y si falla queda como evidencia para reconciliacion.
+- El journal de nuevas escrituras conserva snapshots `base_payload` y `next_payload`, ademas de revisiones implicitas, para permitir reconstruccion posterior basada en evidencia.
 - `preview_replace_entries_v2()` calcula el diff sin escribir: entradas agregadas, removidas, conservadas, total final, selector y revision base.
 - `apply_manifest_preview()` aplica solo si la revision base sigue vigente; si otro proceso cambio el manifest entre preview y apply, rechaza la escritura.
 - `preview_migrate_manifest_v1_to_v2()` convierte entradas legacy v1 a contrato v2 sin escribir.
@@ -30,12 +31,14 @@ Fecha: 2026-09-13
 - `manifest_migration_cli.py` permite ejecutar `preview` y `apply` de la migracion v1->v2 desde CLI con salida JSON.
 - La CLI puede exigir confirmacion explicita con `apply --require-confirmation --yes`.
 - `inspect_manifest_journal()` inspecciona si hay journal pendiente, verifica que el manifest siga legible y puede sumar un `PRAGMA integrity_check` read-only contra SQLite.
+- `inspect_manifest_journal()` marca `recovery_available` solo cuando el journal contiene ambos snapshots validos y versiones soportadas.
 - `clear_manifest_journal()` limpia un journal pendiente solo con confirmacion explicita, manifest legible y SQLite integro cuando se provee `db_path`.
 - `manifest_migration_cli.py` agrega `journal-inspect` y `journal-clear --yes` para diagnostico y limpieza operativa sin mutar `calendar_manifest.json` ni SQLite.
 - `manifest_migration_cli.py` queda incluido en release normal y en `updater.DEFAULT_UPDATEABLE_FILES`, pero no en bootstrap.
 - La pantalla `Actualizaciones` agrega una tarjeta `Manifest v2` con acciones para revisar y aplicar la migracion desde GUI.
 - La accion GUI de aplicar recalcula el preview y exige confirmacion humana antes de llamar a `apply_manifest_preview()`.
 - La tarjeta `Manifest v2` tambien permite inspeccionar el journal y muestra estado del manifest, cantidad de entradas, operacion pendiente e integridad SQLite.
+- La inspeccion GUI tambien informa si existe material suficiente para una futura reconstruccion; aun no aplica snapshots automaticamente.
 - La limpieza del journal desde GUI vuelve a inspeccionar antes de actuar, exige confirmacion y usa el mismo guard conservador de `clear_manifest_journal()`.
 
 ## Compatibilidad de actualizacion
@@ -55,6 +58,7 @@ Fecha: 2026-09-13
 - La inspeccion/limpieza de journal no modifica el manifest ni la base SQLite; solo elimina `.calendar_manifest_journal.json` cuando el operador confirma y los checks basicos pasan.
 - `journal-clear --db-path organizador.db --yes` rechaza la limpieza si SQLite no abre o `PRAGMA integrity_check` falla.
 - La GUI no ofrece limpieza silenciosa: si no hay journal solo informa estado; si existe, presenta el reporte y solicita confirmacion antes de eliminarlo.
+- Los journals generados por esta version incluyen snapshots de base y destino; los journals antiguos siguen siendo inspeccionables, pero se marcan sin reconstruccion disponible.
 
 ## Pruebas agregadas
 
@@ -92,5 +96,6 @@ Fecha: 2026-09-13
 ## Pendiente R07
 
 - Reconstruccion automatica avanzada desde journal/SQLite cuando no baste con limpiar evidencia pendiente.
+- Aplicacion controlada de snapshots recuperables con preview, revision de base y confirmacion.
 - Conexion del planificador real para poblar `schedule_snapshot` con hora local/zona cuando exista configuracion.
 - Fixtures historicos completos bajo carriles contra casos reales de Trial MAX/intercalado.
