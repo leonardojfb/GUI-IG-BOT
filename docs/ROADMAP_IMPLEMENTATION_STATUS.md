@@ -45,7 +45,7 @@ Estimacion por paquetes tocados: `R00-R06 de R00-R20`, pero R04-R06 no estan cer
 | R05. Captions versionados | Parcial alto validado | `captions/`, snapshots en manifest, migracion preview/apply, tests caption/Telegram y `docs/R05_CAPTIONS_VERSIONED_REPORT.md`. | UI de diff/versiones antes de guardar y cierre de fallback individual bajo planificador compartido. |
 | R06. Linaje, firmas y reutilizacion | Parcial validado | `vault/lineage.py`, `vault/signatures.py`, `vault/reuse.py`, `vault/calendar_usage.py`, tests R06 y `docs/R06_LINEAGE_SIGNATURES_REPORT.md`. | Leases/reservas de firmas, UI visible, politica de reutilizacion y restricciones por destino. |
 | R07. Carriles y manifest v2 | Parcial validado | `calendar_manifest.py` lee v1/v2, `build_entry_v2()`, `replace_entries_v2()`, `preview_replace_entries_v2()`, `preview_migrate_manifest_v1_to_v2()`, `apply_manifest_preview()`, `schedule_snapshot`, politica Trial/carril, lock/journal con snapshots base/destino, `inspect_manifest_journal()` con `recovery_available`, `clear_manifest_journal()`, `manifest_migration_cli.py`, comandos `journal-inspect`/`journal-clear`, tarjeta GUI `Manifest v2` con migracion e inspeccion/limpieza de journal, y `docs/R07_MANIFEST_LANES_REPORT.md`. | Aplicacion controlada de snapshots recuperables, conexion del planificador real a horarios exactos y fixtures historicos Trial MAX/intercalado. |
-| R08. Planificador compartido | Pendiente | Algoritmos legacy Por Tandas/Por Cuentas existen por separado. | Servicio unico, preview inmutable, reservas, modo parcial/estricto y confirmacion por revision. |
+| R08. Planificador compartido | Parcial validado | `shared_planner.py`, `preview_shared_schedule()`, seed determinista, preservacion de fuentes/tandas, modos `partial`/`strict`, faltantes por cuenta/dia/slot, `docs/R08_SHARED_PLANNER_REPORT.md` y tests focales. | Adaptadores Vault/catalogo, elegibilidad/carriles/usos, integracion gradual de Por Tandas/Por Cuentas, preview GUI, reservas y apply protegido a manifest v2. |
 | R09. Ejecuciones duraderas | Pendiente | `video_transform_logs` existe, pero no jobs duraderos. | Recetas versionadas, jobs, dependencias, checkpoints, retry y recuperacion tras cierre. |
 | R10. Productores a jobs | Pendiente / legacy existente | Tandas, Forge y Edicion existen en Legacy. | Adaptarlos al contrato de jobs sin cambiar composicion historica; validar ffprobe/perfiles. |
 | R11. Photo Forge | Pendiente | No hay productor Photo Forge nuevo en este branch. | Operaciones Pillow versionadas, preview compartido, outputs imagen trazables y tests de corrupcion/espacio. |
@@ -78,8 +78,8 @@ Estimacion por paquetes tocados: `R00-R06 de R00-R20`, pero R04-R06 no estan cer
 | LEG-13 | Rendimiento global | R10 | Legacy existente | `render_performance.py`; falta perfiles versionados CPU/GPU y validacion final. |
 | LEG-14 | CPU/GPU y vertical | R10 | Legacy existente | Falta fallback/perfil auditable en jobs. |
 | LEG-15 | Limpieza metadata final | R10 | Legacy existente | Falta validacion ffprobe/Pillow integrada al cierre de jobs. |
-| LEG-16 | Por Tandas y anticolision | R08 | Legacy existente / parcial | `Organizador.py`; falta planificador unico/reservas. |
-| LEG-17 | Por Cuentas | R08 | Legacy existente / parcial | `gui_premium_v7.py`; falta servicio compartido y preview inmutable. |
+| LEG-16 | Por Tandas y anticolision | R08 | Legacy existente / parcial | `Organizador.py`; `shared_planner.py` ya ofrece preview puro, pero falta adaptar entradas reales y reservas. |
+| LEG-17 | Por Cuentas | R08 | Legacy existente / parcial | `gui_premium_v7.py`; contrato compartido determinista listo, integracion UI y aplicacion protegida pendientes. |
 | LEG-18 | MAX equilibrado normal | R08 | Legacy existente | Falta contrato R08 con reservas y modo estricto/parcial. |
 | LEG-19 | Mezclar dos tandas | R08 | Legacy existente | Falta planificador unico y politica versionada. |
 | LEG-20 | Biblioteca captions y pools | R05 | Parcial alto validado | `captions/service.py`, `captions/importer.py`; UI final pendiente. |
@@ -125,7 +125,7 @@ Estimacion por paquetes tocados: `R00-R06 de R00-R20`, pero R04-R06 no estan cer
 Ultima suite completa observada en este branch:
 
 ```text
-435 passed, 2 skipped, 7 subtests passed in 177.86s (0:02:57)
+444 passed, 1 skipped, 7 subtests passed in 213.86s (0:03:33)
 ```
 
 Smokes controlados de runtime/launcher/UI:
@@ -139,7 +139,7 @@ tests\smoke_clean_runtime.py tests\smoke_ui_visual.py tests\smoke_execute_plan.p
 
 1. Completar R07 backend: reconstruccion avanzada, horarios exactos y fixtures Trial MAX/intercalado.
 2. Cerrar R06 visible: panel de inspeccion Vault/linaje/usos/candidatos en GUI.
-3. R08 planificador compartido con preview y reservas.
+3. Completar R08: adaptadores reales, preview GUI, reservas y apply protegido.
 4. R09 jobs duraderos, porque R10-R14 dependen de ese contrato.
 5. Solo despues, productores nuevos/Photo Forge/web/ios-remote/Telegram ledger.
 

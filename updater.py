@@ -55,6 +55,7 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "trial_content.py",
         "calendar_manifest.py",
         "manifest_migration_cli.py",
+        "shared_planner.py",
         "social_publishing.py",
         "telegram_core.py",
         "cleaner.py",

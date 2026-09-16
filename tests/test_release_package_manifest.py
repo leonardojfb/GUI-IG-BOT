@@ -154,6 +154,12 @@ def test_release_includes_manifest_migration_cli_but_bootstrap_does_not():
     assert "manifest_migration_cli.py" not in _bootstrap_release_files_from_build_script()
 
 
+def test_release_includes_shared_planner_but_bootstrap_does_not():
+    assert "shared_planner.py" in _release_files_from_build_script()
+    assert "shared_planner.py" in updater.DEFAULT_UPDATEABLE_FILES
+    assert "shared_planner.py" not in _bootstrap_release_files_from_build_script()
+
+
 def test_legacy_updater_python_files_do_not_require_new_console_encoding_names():
     release_files = _release_files_from_build_script()
     legacy_python = [

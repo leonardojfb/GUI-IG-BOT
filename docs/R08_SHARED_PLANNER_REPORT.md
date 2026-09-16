@@ -1,0 +1,40 @@
+# R08 contrato inicial del planificador compartido
+
+Fecha: 2026-09-16
+
+## Alcance implementado
+
+- `shared_planner.py` define `preview_shared_schedule()` como funcion pura y sin efectos laterales.
+- El preview recibe cuentas e inventario de candidatos concretos; exige usernames unicos y `source_id` unicos.
+- Cada asignacion conserva `source_id`, `source_path`, `tanda` y cualquier metadata del candidato, y agrega cuenta, dia, slot, carril, placement y metodo.
+- `MAX` calcula la menor cantidad de dias necesaria para exponer todos los candidatos; los dias fijos respetan `days * accounts * daily_quota`.
+- `seed` produce un orden repetible para mezclar una o varias tandas sin perder la identidad de origen.
+- `partial` devuelve las asignaciones posibles y un faltante explicito por cuenta, dia, slot y motivo.
+- `strict` devuelve `blocked` y no expone asignaciones aplicables cuando el inventario no alcanza.
+- La funcion no abre SQLite, no lee/escribe carpetas, no modifica `calendar_manifest.json` y no envia a Telegram/Meta.
+- El modulo queda incluido en release normal y updater, pero fuera del paquete bootstrap para preservar el puente de instalaciones antiguas.
+
+## Compatibilidad de actualizacion
+
+- No se cambia el comportamiento legacy de `Organizador.py` ni de los metodos actuales Por Tandas/Por Cuentas.
+- El modulo puede llegar mediante una release normal sin migrar datos ni reordenar calendarios existentes.
+- La GUI actual no importa el modulo todavia; por eso esta version no altera el arranque de usuarios existentes.
+- Los siguientes consumidores deberan convertir el preview a `build_entry_v2()` solo despues de una confirmacion y una revision de base.
+
+## Pruebas
+
+- `tests/test_shared_planner.py::test_preview_shared_schedule_is_deterministic_and_preserves_sources`
+- `tests/test_shared_planner.py::test_preview_shared_schedule_reports_partial_inventory_by_account_and_source`
+- `tests/test_shared_planner.py::test_preview_shared_schedule_strict_mode_blocks_partial_plan_without_side_effects`
+- `tests/test_shared_planner.py::test_preview_shared_schedule_rejects_invalid_scope`
+- `tests/test_release_package_manifest.py::test_release_includes_shared_planner_but_bootstrap_does_not`
+- Validacion focal: `20 passed` en planner, release e inventario.
+
+## Pendiente R08
+
+- Adaptador de candidatos desde Vault/archivos y cuentas desde catalogo/SQLite.
+- Politicas de elegibilidad, usos previos, Trial/carriles y disponibilidad real.
+- Integracion separada de Por Tandas y Por Cuentas sin cambiar sus algoritmos legacy.
+- Preview visible en GUI con diff antes de escribir.
+- Reservas de contenido/carril y revision de concurrencia.
+- Aplicacion protegida a manifest v2 y pruebas historicas MAX/intercalado.
