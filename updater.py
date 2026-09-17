@@ -64,6 +64,7 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "producer_jobs.py",
         "photo_forge.py",
         "local_web.py",
+        "ios_remote_read.py",
         "social_publishing.py",
         "telegram_core.py",
         "cleaner.py",
