@@ -266,6 +266,13 @@ def test_release_includes_r20_certification_but_bootstrap_does_not():
     assert "release_certification.py" not in _bootstrap_release_files_from_build_script()
 
 
+def test_release_builder_runs_artifact_verifier_after_writing_manifest():
+    script = (REPO_ROOT / "build_release.ps1").read_text(encoding="utf-8")
+
+    assert "verify_release_artifact" in script
+    assert script.index("verify_release_artifact") > script.index("WriteAllText($ManifestPath")
+
+
 def test_legacy_updater_python_files_do_not_require_new_console_encoding_names():
     release_files = _release_files_from_build_script()
     legacy_python = [

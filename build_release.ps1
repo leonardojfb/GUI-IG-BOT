@@ -189,6 +189,12 @@ try {
     [System.IO.File]::WriteAllText($ManifestPath, $ManifestJson, $Utf8NoBom)
     [System.IO.File]::WriteAllText($RepositoryManifestPath, $ManifestJson, $Utf8NoBom)
 
+    # Re-check the exact ZIP and manifest before exposing the artifact path.
+    & python -c "from release_certification import verify_release_artifact; import sys; verify_release_artifact(sys.argv[1], sys.argv[2])" $ManifestPath $ZipPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "El verificador rechazo el artefacto de release."
+    }
+
     Write-Host "Release creada: $ZipPath"
     Write-Host "SHA-256: $Hash"
     Write-Host "Manifiesto: $ManifestPath"
