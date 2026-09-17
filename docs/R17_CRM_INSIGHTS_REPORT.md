@@ -10,10 +10,13 @@ Fecha: 2026-09-17
   tasa reproducible sin inventar datos ausentes.
 - `export_metrics_csv()` escribe de forma atomica y excluye claves de cookies,
   sesiones, tokens, passwords y secretos.
+- `score_virality()` aplica umbrales explícitos a la tasa calculada y
+  `build_infrastructure_event()` guarda referencias hash de dispositivo/red,
+  nunca los valores crudos.
 - El modulo es local y read-only; no llama APIs ni modifica cuentas.
 
 ## Limites
 
-Faltan conectores de metricas reales, historial tipado de dispositivo/red y
-reglas de viralidad con evidencia temporal. Esas entradas deben llegar saneadas
-y con account/org context antes de habilitar acciones.
+Faltan conectores de métricas reales con account/org context y persistencia
+temporal del historial. Las entradas deben llegar saneadas antes de habilitar
+acciones.

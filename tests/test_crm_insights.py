@@ -1,6 +1,6 @@
 import csv
 
-from crm_insights import build_identity, export_metrics_csv, summarize_metrics
+from crm_insights import build_identity, build_infrastructure_event, export_metrics_csv, score_virality, summarize_metrics
 
 
 def test_identity_is_typed_and_metrics_are_deterministic():
@@ -10,6 +10,10 @@ def test_identity_is_typed_and_metrics_are_deterministic():
     assert summary["posts"] == 4
     assert summary["engagement"] == 27
     assert summary["engagement_rate"] == 6.75
+    assert score_virality(summary)["label"] == "medium"
+    event = build_infrastructure_event("acc-1", device_id="device-secret", network_id="10.0.0.1", observed_at="2026-09-17T00:00:00Z")
+    assert event["device_ref"].startswith("device:")
+    assert "device-secret" not in str(event)
 
 
 def test_metrics_csv_is_atomic_and_does_not_include_credentials(tmp_path):

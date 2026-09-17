@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import os
 import tempfile
+from hashlib import sha256
 from pathlib import Path
 
 
@@ -24,6 +25,23 @@ def summarize_metrics(rows):
     totals["engagement"] = totals["likes"] + totals["comments"] + totals["shares"]
     totals["engagement_rate"] = round(totals["engagement"] / totals["posts"], 4) if totals["posts"] else 0.0
     return totals
+
+
+def score_virality(metrics, *, thresholds=None):
+    values = dict(metrics or {})
+    thresholds = dict(thresholds or {"high": 10.0, "medium": 4.0})
+    rate = float(values.get("engagement_rate", 0.0) or 0.0)
+    if rate >= float(thresholds["high"]):
+        label = "high"
+    elif rate >= float(thresholds["medium"]):
+        label = "medium"
+    else:
+        label = "low"
+    return {"label": label, "engagement_rate": rate, "thresholds": thresholds}
+
+
+def build_infrastructure_event(account_id, *, device_id="", network_id="", observed_at=""):
+    return {"account_id": _required(account_id, "account_id"), "device_ref": _pseudonym(device_id, "device"), "network_ref": _pseudonym(network_id, "network"), "observed_at": str(observed_at or "")}
 
 
 def export_metrics_csv(path, rows):
@@ -54,6 +72,13 @@ def _number(value):
 
 def _sensitive_key(key):
     return any(part in str(key).lower() for part in ("cookie", "token", "password", "secret", "session"))
+
+
+def _pseudonym(value, prefix):
+    normalized = str(value or "").strip()
+    if not normalized:
+        return ""
+    return f"{prefix}:{sha256(normalized.encode('utf-8')).hexdigest()[:16]}"
 
 
 def _required(value, field):
