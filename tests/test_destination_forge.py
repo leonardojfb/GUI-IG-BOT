@@ -2,11 +2,26 @@ import database
 
 from destination_forge import (
     build_destination_forge_job_spec,
+    parse_destination_specs,
     preview_destination_forge,
     reconcile_destination_reservation,
     reserve_destination_preview,
     submit_destination_forge_job,
 )
+
+
+def test_destination_specs_parse_explicit_manual_fallback():
+    specs = parse_destination_specs("alice|reel|instagram_reel|2\n bob | story | instagram_story | 1")
+    assert specs == [
+        {"username": "alice", "container": "reel", "profile": "instagram_reel", "copies": 2},
+        {"username": "bob", "container": "story", "profile": "instagram_story", "copies": 1},
+    ]
+    try:
+        parse_destination_specs("alice|reel|instagram_reel")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("incomplete destination rows must be rejected")
 from planner_reservations import reservation_covers_preview
 
 

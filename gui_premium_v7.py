@@ -35,6 +35,7 @@ from calendar_manifest import (
 from shared_planner_apply import preview_shared_manifest_apply
 from shared_planner_sources import preview_schedule_by_account_from_sources
 from planner_reservations import reserve_shared_preview, release_reservation, reservation_covers_preview
+from destination_forge import parse_destination_specs, preview_destination_forge, reserve_destination_preview
 from captions.service import CaptionService, MissingCaptionError
 from database import DatabaseManager
 from vault.calendar_usage import record_calendar_manifest_usages
@@ -6122,9 +6123,76 @@ class InstagramAutoPro(ctk.CTk):
         self.photo_forge_preview_lbl = ctk.CTkLabel(photo_body, text="", text_color=TEXT_MUTED)
         self.photo_forge_preview_lbl.grid(row=2, column=0, sticky="w", pady=(8, 0))
 
+        destination_card = Card(scroll, title="Forge por destinos")
+        destination_card.grid(row=6, column=0, sticky="ew", padx=24, pady=(0, 20))
+        destination_body = destination_card.body
+        destination_body.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            destination_body,
+            text="Fallback manual: una línea por destino. No inicia renders ni usa cookies.",
+            text_color=TEXT_MUTED, font=ctk.CTkFont(size=11), anchor="w",
+        ).grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        self.destination_specs_text = ctk.CTkTextbox(
+            destination_body, height=76, fg_color=BG_INPUT, border_color=BORDER,
+            border_width=1, font=FONT_BODY,
+        )
+        self.destination_specs_text.insert("1.0", "# cuenta|contenedor|perfil|copias\n")
+        self.destination_specs_text.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        destination_actions = ctk.CTkFrame(destination_body, fg_color="transparent")
+        destination_actions.grid(row=2, column=0, sticky="ew")
+        GhostButton(destination_actions, text="Preview destinos", command=self.destination_forge_preview).pack(side="left", padx=(0, 8))
+        self.destination_reserve_btn = PrimaryButton(
+            destination_actions, text="Reservar preview", command=self.destination_forge_reserve, state="disabled",
+        )
+        self.destination_reserve_btn.pack(side="left")
+        self.destination_forge_status = ctk.CTkLabel(destination_body, text="", text_color=TEXT_MUTED, anchor="w")
+        self.destination_forge_status.grid(row=3, column=0, sticky="ew", pady=(8, 0))
+
         # Estado inicial "Default": ocultar toggles manuales y slider de Custom.
         self._forge_on_efectos_change("Default")
         self._forge_on_fuerza_change("Default")
+
+    def destination_forge_preview(self):
+        """Preview destination assignments without creating jobs or files."""
+        try:
+            raw = self.destination_specs_text.get("1.0", "end")
+            specs = parse_destination_specs("\n".join(line for line in raw.splitlines() if not line.lstrip().startswith("#")))
+            preview = preview_destination_forge(self.forge_video_paths, specs)
+        except Exception as exc:
+            self._r14_preview = None
+            self.destination_reserve_btn.configure(state="disabled")
+            self.destination_forge_status.configure(text=f"Error: {exc}")
+            return
+        self._r14_preview = preview
+        self.destination_reserve_btn.configure(state="normal")
+        rows = [
+            f"{item['source_path']} → @{item['username']} / {item['container']} / {item['profile']} / copia {item['copy_number']}"
+            for item in preview["assignments"][:12]
+        ]
+        suffix = " …" if len(preview["assignments"]) > 12 else ""
+        self.destination_forge_status.configure(text=f"{len(preview['assignments'])} asignaciones listas{suffix}\n" + "\n".join(rows))
+
+    def destination_forge_reserve(self):
+        if not getattr(self, "_r14_preview", None):
+            return self.destination_forge_preview()
+        if not messagebox.askyesno(
+            "Reservar destinos",
+            f"Se reservarán {len(self._r14_preview['assignments'])} asignaciones. ¿Continuar?",
+            parent=self,
+        ):
+            return
+        try:
+            self._r14_reservation = reserve_destination_preview(
+                self.db.conn, self._r14_preview, owner=f"gui-r14-{os.getpid()}", now=int(time.time()),
+            )
+            if self._r14_reservation.get("status") != "reserved":
+                raise ValueError(self._r14_reservation.get("reason", "reserva en conflicto"))
+            self.destination_forge_status.configure(
+                text=f"Preview reservado: {self._r14_reservation['reservation_id']}"
+            )
+            self.destination_reserve_btn.configure(state="disabled")
+        except Exception as exc:
+            self.destination_forge_status.configure(text=f"No se pudo reservar: {exc}")
 
     def _forge_on_efectos_change(self, level: str) -> None:
         self.forge_efectos_var.set(level)

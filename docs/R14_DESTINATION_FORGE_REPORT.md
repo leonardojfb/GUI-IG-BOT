@@ -16,8 +16,13 @@ Fecha: 2026-09-17
   cuenta/contenedor/perfil.
 - `reconcile_destination_reservation()` comprueba cobertura exacta y libera la
   reserva despues de que el consumidor procese el job.
+- La GUI Forge expone un bloque opt-in con filas
+  `cuenta|contenedor|perfil|copias`, muestra las asignaciones y permite
+  reservar el preview con confirmacion; el preview no crea jobs ni archivos.
 - Release/updater incluyen el contrato sin modificar bootstrap.
 
 ## Limites
 
-La pantalla de destinos y la confirmacion visual post-render quedan pendientes.
+La consulta real de perfiles ios-remote, la validacion de snapshots y la
+confirmacion visual post-render quedan pendientes. Las filas manuales son un
+fallback explicito y no prueban un dispositivo fisico.

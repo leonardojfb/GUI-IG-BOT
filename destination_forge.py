@@ -10,6 +10,29 @@ SUPPORTED_CONTAINERS = {"feed", "story", "reel"}
 SUPPORTED_PROFILES = {"instagram_reel", "instagram_story"}
 
 
+def parse_destination_specs(text):
+    """Parse explicit GUI fallback rows: username|container|profile|copies."""
+    result = []
+    for line_number, raw_line in enumerate(str(text or "").splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = [part.strip() for part in line.split("|")]
+        if len(parts) != 4:
+            raise ValueError(f"destino invalido en linea {line_number}: usa cuenta|contenedor|perfil|copias")
+        username, container, profile, copies = parts
+        try:
+            copies = int(copies)
+        except ValueError as exc:
+            raise ValueError(f"copias invalidas en linea {line_number}") from exc
+        if not username or container not in SUPPORTED_CONTAINERS or profile not in SUPPORTED_PROFILES or copies < 1:
+            raise ValueError(f"destino invalido en linea {line_number}")
+        result.append({"username": username, "container": container, "profile": profile, "copies": copies})
+    if not result:
+        raise ValueError("debe existir al menos un destino")
+    return result
+
+
 def preview_destination_forge(video_paths, destinations):
     paths = [str(Path(path).resolve()) for path in video_paths]
     if not paths or any(not Path(path).is_file() for path in paths):
