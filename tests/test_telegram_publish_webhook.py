@@ -76,6 +76,34 @@ def test_already_published_callback_only_answers(monkeypatch):
     ]
 
 
+def test_versioned_confirmation_is_persisted_and_deduplicated(monkeypatch):
+    import sqlite3
+
+    calls = []
+    monkeypatch.setattr(
+        webhook,
+        "post_telegram_method",
+        lambda token, method, payload: calls.append((method, payload)) or {"ok": True},
+    )
+    connection = sqlite3.connect(":memory:")
+    update = {
+        "callback_query": {
+            "id": "cb-v1",
+            "data": "v1|confirm|asset-42",
+            "from": {"id": 99},
+            "message": {"message_id": 77, "chat": {"id": -100123}, "caption": "caption"},
+        }
+    }
+
+    first = webhook.handle_update(update, "token-123", confirmation_connection=connection)
+    second = webhook.handle_update(update, "token-123", confirmation_connection=connection)
+
+    assert first == {"ok": True, "handled": True}
+    assert second == {"ok": True, "handled": True, "duplicate": True}
+    assert connection.execute("SELECT action, entity_id FROM confirmation_inbox").fetchone() == ("confirm", "asset-42")
+    assert [method for method, _payload in calls].count("editMessageCaption") == 1
+
+
 def test_secret_header_rejects_wrong_token():
     assert webhook.is_authorized({"X-Telegram-Bot-Api-Secret-Token": "bad"}, "good") is False
     assert webhook.is_authorized({"X-Telegram-Bot-Api-Secret-Token": "good"}, "good") is True

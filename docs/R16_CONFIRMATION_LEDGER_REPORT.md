@@ -14,9 +14,13 @@ Fecha: 2026-09-17
   como `undone`; una segunda llamada no vuelve a ejecutar la acción.
 - El ledger conserva usuario, payload, entidad, estado y timestamps.
 - Release/updater incluyen el módulo sin tocar el bootstrap.
+- El webhook acepta callbacks versionados cuando recibe una conexión SQLite
+  opt-in, persiste el evento antes de editar el mensaje y responde como
+  duplicado sin repetir la mutación.
+- El despliegue HTTP activa esa persistencia sólo con `CONFIRMATION_DB_PATH`;
+  sin la variable conserva el callback legacy `pub`.
 
 ## Limites
 
-La integración con botones/callbacks Telegram reales y la política de permisos
-por cuenta se mantienen pendientes hasta conectar el transporte R15 y los IDs
-canónicos de limpieza.
+Falta desplegarlo en Railway, autorizar usuarios con una política real y
+conectar acciones de limpieza por IDs/carriles.

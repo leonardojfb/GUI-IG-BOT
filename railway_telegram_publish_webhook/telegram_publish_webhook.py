@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import sys
 import urllib.error
 import urllib.parse
@@ -47,12 +48,13 @@ def _published_markup() -> dict:
     }
 
 
-def _remove_publish_buttons(reply_markup: dict | None) -> dict | None:
+def _remove_publish_buttons(reply_markup: dict | None, extra_callbacks=()) -> dict | None:
+    callbacks = {PENDING_CALLBACK, PUBLISHED_CALLBACK, *extra_callbacks}
     keyboard = []
     for row in (reply_markup or {}).get("inline_keyboard") or []:
         kept = [
             button for button in row
-            if button.get("callback_data") not in {PENDING_CALLBACK, PUBLISHED_CALLBACK}
+            if button.get("callback_data") not in callbacks
         ]
         if kept:
             keyboard.append(kept)
@@ -71,13 +73,41 @@ def _mark_caption_published(caption: str) -> str:
     return marker
 
 
-def handle_update(update: dict, token: str) -> dict:
+def handle_update(update: dict, token: str, *, confirmation_connection=None, authorize_fn=None) -> dict:
     callback = update.get("callback_query")
     if not callback:
         return {"ok": True, "handled": False}
 
     callback_id = callback.get("id")
     data = callback.get("data")
+    versioned = None
+    if str(data or "").startswith("v1|"):
+        from confirmation_ledger import ingest_callback
+        try:
+            versioned = ingest_callback(
+                confirmation_connection,
+                data,
+                external_id=str(callback_id or ""),
+                user_id=str((callback.get("from") or {}).get("id") or "telegram"),
+                payload={"chat_id": (callback.get("message") or {}).get("chat", {}).get("id")},
+                authorize_fn=authorize_fn,
+            ) if confirmation_connection is not None else None
+        except (ValueError, TypeError):
+            versioned = {"status": "invalid"}
+        if versioned and versioned.get("status") == "unauthorized":
+            if callback_id:
+                post_telegram_method(token, "answerCallbackQuery", {"callback_query_id": callback_id, "text": "No autorizado."})
+            return {"ok": True, "handled": True, "unauthorized": True}
+        if versioned and versioned.get("status") == "duplicate":
+            if callback_id:
+                post_telegram_method(token, "answerCallbackQuery", {"callback_query_id": callback_id, "text": "Ya estaba marcado."})
+            return {"ok": True, "handled": True, "duplicate": True}
+        if not versioned or versioned.get("status") == "invalid":
+            if callback_id:
+                post_telegram_method(token, "answerCallbackQuery", {"callback_query_id": callback_id})
+            return {"ok": True, "handled": False}
+        data = PENDING_CALLBACK
+
     if data == PUBLISHED_CALLBACK:
         if callback_id:
             post_telegram_method(
@@ -102,7 +132,7 @@ def handle_update(update: dict, token: str) -> dict:
     if chat_id is None or message_id is None:
         return {"ok": True, "handled": False}
 
-    remaining_markup = _remove_publish_buttons(message.get("reply_markup"))
+    remaining_markup = _remove_publish_buttons(message.get("reply_markup"), {data} if versioned else ())
     caption = message.get("caption")
     if caption is not None:
         payload = {
@@ -180,7 +210,15 @@ class TelegramCallbackHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
             payload = self.rfile.read(length).decode("utf-8")
             update = json.loads(payload or "{}")
-            result = handle_update(update, token)
+            confirmation_path = os.environ.get("CONFIRMATION_DB_PATH", "").strip()
+            confirmation_connection = None
+            if confirmation_path:
+                confirmation_connection = sqlite3.connect(confirmation_path)
+            try:
+                result = handle_update(update, token, confirmation_connection=confirmation_connection)
+            finally:
+                if confirmation_connection is not None:
+                    confirmation_connection.close()
         except Exception as exc:
             print(f"webhook error: {exc}", file=sys.stderr, flush=True)
             self._send_json(500, {"ok": False, "error": "internal_error"})
