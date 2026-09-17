@@ -136,6 +136,7 @@ def render_photo_variant(input_path, output_path, operations, *, profile="source
         if temp_name and os.path.exists(temp_name):
             os.unlink(temp_name)
     output_info = validate_image(target, profile=profile)
+    output_info["perceptual_signature"] = perceptual_signature(target)
     return {"output_path": str(target), "path": str(target), "source_info": source_info, "output_info": output_info, "operations": normalized}
 
 
@@ -143,6 +144,36 @@ def render_photo_preview(input_path, output_path, operations, *, max_size=(640, 
     preview_ops = dict(operations or {})
     preview_ops["resize"] = {"width": int(max_size[0]), "height": int(max_size[1])}
     return render_photo_variant(input_path, output_path, preview_ops, profile="source")
+
+
+def perceptual_signature(path: str | os.PathLike, *, hash_size: int = 8) -> str:
+    """Return a deterministic average-hash signature for visual reuse checks."""
+    if int(hash_size) < 2 or int(hash_size) > 32:
+        raise ValueError("hash_size fuera de rango")
+    try:
+        from PIL import Image
+
+        with Image.open(path) as opened:
+            image = opened.convert("L").resize((int(hash_size), int(hash_size)), Image.Resampling.LANCZOS)
+            flattened = getattr(image, "get_flattened_data", None)
+            pixels = list(flattened()) if flattened is not None else list(image.getdata())
+    except Exception as exc:
+        raise ValueError(f"no se pudo calcular firma perceptual: {path}") from exc
+    average = sum(pixels) / len(pixels)
+    bits = "".join("1" if pixel >= average else "0" for pixel in pixels)
+    width = int(hash_size) * int(hash_size)
+    return f"{int(bits, 2):0{(width + 3) // 4}x}"
+
+
+def perceptual_distance(first: str, second: str) -> int:
+    """Return Hamming distance for equal-size hexadecimal perceptual hashes."""
+    left, right = str(first or "").strip().lower(), str(second or "").strip().lower()
+    if not left or not right or len(left) != len(right):
+        raise ValueError("firmas perceptuales incompatibles")
+    try:
+        return (int(left, 16) ^ int(right, 16)).bit_count()
+    except ValueError as exc:
+        raise ValueError("firma perceptual invalida") from exc
 
 
 def make_photo_forge_handler(db=None, *, vault_storage=None):

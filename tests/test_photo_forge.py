@@ -4,6 +4,8 @@ import pytest
 from photo_forge import (
     build_photo_forge_job_spec,
     make_photo_forge_handler,
+    perceptual_distance,
+    perceptual_signature,
     render_photo_preview,
     render_photo_variant,
     validate_image,
@@ -60,6 +62,23 @@ def test_variant_and_preview_never_mutate_source(tmp_path):
     assert preview["path"].endswith("preview.jpg")
     assert source.read_bytes() == before
     assert validate_image(output)["width"] > 0
+
+
+def test_perceptual_signature_is_deterministic_and_distance_is_bounded(tmp_path):
+    source = tmp_path / "source.png"
+    similar = tmp_path / "similar.png"
+    different = tmp_path / "different.png"
+    from PIL import Image, ImageDraw
+
+    for path, color in ((source, "white"), (similar, "white"), (different, "black")):
+        image = Image.new("RGB", (64, 64), color)
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((8, 8, 28, 28), fill="red" if color == "white" else "blue")
+        image.save(path)
+    first = perceptual_signature(source)
+    assert first == perceptual_signature(source)
+    assert perceptual_distance(first, perceptual_signature(similar)) == 0
+    assert 0 <= perceptual_distance(first, perceptual_signature(different)) <= 64
 
 
 def test_photo_handler_resumes_and_records_vault_lineage(tmp_path):

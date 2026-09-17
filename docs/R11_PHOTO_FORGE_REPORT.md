@@ -20,6 +20,9 @@ Fecha: 2026-09-17
 - Con `VaultStorage` inyectado, el output se importa como asset gestionado y se
   enlaza con el asset fuente mediante `vault.integration` y `VaultLineage`.
 - `submit_photo_forge_job()` persiste el trabajo con idempotencia opcional.
+- `perceptual_signature()` calcula un average-hash determinista y
+  `perceptual_distance()` compara variantes por distancia Hamming; la firma se
+  incluye en `output_info` y en el log de transformación.
 - `gui_premium_v7.py` expone dentro de Forge una tarjeta Photo Forge con
   selección de imágenes, preview y generación explícita en `fotos_forge/`.
 
@@ -40,6 +43,6 @@ Fecha: 2026-09-17
 ## Limites
 
 Las pruebas usan imágenes sintéticas y no certifican todavía un lote de fotos
-de producción ni una política de publicación externa. La firma perceptual y la
-reserva anti-repetición entre cuentas quedan para R14/R17, cuando existan las
-reglas de destinos y reutilización.
+de producción ni una política de publicación externa. La reserva
+anti-repetición entre cuentas y su política integrada con Vault quedan para
+R14/R17.
