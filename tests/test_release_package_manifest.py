@@ -182,6 +182,13 @@ def test_release_includes_r09_durable_job_modules_but_bootstrap_does_not():
         assert name not in _bootstrap_release_files_from_build_script()
 
 
+def test_release_includes_r10_producer_adapter_but_bootstrap_does_not():
+    release_files = _release_files_from_build_script()
+    assert "producer_jobs.py" in release_files
+    assert "producer_jobs.py" in updater.DEFAULT_UPDATEABLE_FILES
+    assert "producer_jobs.py" not in _bootstrap_release_files_from_build_script()
+
+
 def test_legacy_updater_python_files_do_not_require_new_console_encoding_names():
     release_files = _release_files_from_build_script()
     legacy_python = [
