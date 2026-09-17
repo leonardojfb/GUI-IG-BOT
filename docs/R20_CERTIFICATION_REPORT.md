@@ -10,7 +10,9 @@ Fecha: 2026-09-17
   producción.
 - El reporte declara de forma obligatoria que media de producción y publicación
   real no fueron ejecutadas.
-- Suite global ejecutada desde el worktree aislado: `515 passed, 1 skipped,
+- `make_gate_evidence()` permite registrar comando, cantidad de pruebas y
+  skips; los booleanos previos siguen aceptándose solo como evidencia legacy.
+- Suite global ejecutada desde el worktree aislado: `518 passed, 1 skipped,
   7 subtests passed`.
 - Release/updater incluyen el gate de forma aditiva y bootstrap permanece
   estable.

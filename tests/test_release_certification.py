@@ -1,6 +1,6 @@
 import pytest
 
-from release_certification import certify_checkpoints
+from release_certification import certify_checkpoints, make_gate_evidence
 
 
 def test_certification_requires_all_local_gates():
@@ -12,3 +12,10 @@ def test_certification_requires_all_local_gates():
 def test_certification_rejects_missing_gate():
     with pytest.raises(ValueError, match="gates pendientes"):
         certify_checkpoints({"R11": True})
+
+
+def test_certification_accepts_reproducible_gate_evidence():
+    gates = {name: make_gate_evidence("py -m pytest", passed=2) for name in [f"R{number:02d}" for number in range(11, 20)]}
+    gates["full_suite"] = make_gate_evidence("py -m pytest .\\tests", passed=518, skipped=1)
+    report = certify_checkpoints(gates)
+    assert report["evidence"]["full_suite"]["passed"] == 518
