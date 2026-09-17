@@ -5,14 +5,23 @@ from __future__ import annotations
 PHASES = ("prepare", "deliver", "schedule", "publish", "verify")
 
 
+def build_platform_policy(*, targets, media_classes, max_upload_bytes, rate_limit_per_minute):
+    targets = frozenset(str(item) for item in (targets or []))
+    media_classes = frozenset(str(item) for item in (media_classes or []))
+    if not targets or not media_classes or int(max_upload_bytes) < 1 or int(rate_limit_per_minute) < 1:
+        raise ValueError("politica de plataforma invalida")
+    return {"targets": targets, "media_classes": media_classes, "max_upload_bytes": int(max_upload_bytes), "rate_limit_per_minute": int(rate_limit_per_minute)}
+
+
 class PlatformAdapter:
-    def __init__(self, platform: str, capabilities, *, handlers=None):
+    def __init__(self, platform: str, capabilities, *, handlers=None, policy=None):
         self.platform = _required(platform, "platform")
         self.capabilities = frozenset(str(item) for item in (capabilities or []))
         unknown = self.capabilities - set(PHASES)
         if unknown:
             raise ValueError(f"capacidades desconocidas: {sorted(unknown)}")
         self.handlers = dict(handlers or {})
+        self.policy = dict(policy or {})
 
 
 def execute_platform_action(adapter: PlatformAdapter, phase: str, request: dict):
@@ -21,6 +30,8 @@ def execute_platform_action(adapter: PlatformAdapter, phase: str, request: dict)
         raise ValueError(f"fase no soportada: {phase}")
     if phase not in adapter.capabilities:
         raise ValueError(f"{adapter.platform} no soporta {phase}")
+    if adapter.policy:
+        _validate_policy_request(adapter.policy, request)
     handler = adapter.handlers.get(phase)
     if handler is None:
         raise RuntimeError(f"adapter {adapter.platform} no tiene handler para {phase}")
@@ -70,3 +81,22 @@ def _required(value, field):
     if not normalized:
         raise ValueError(f"{field} no puede estar vacio")
     return normalized
+
+
+def _validate_policy_request(policy, request):
+    request = request or {}
+    if not _required(request.get("destination_id"), "destination_id"):
+        raise ValueError("destination_id requerido")
+    if request.get("publication_target") not in policy.get("targets", set()):
+        raise ValueError("publication_target no permitido")
+    if request.get("media_class") not in policy.get("media_classes", set()):
+        raise ValueError("media_class no permitido")
+    context = request.get("account_context") or {}
+    if not context.get("account_id") or not context.get("org_id"):
+        raise ValueError("account_context requiere account_id y org_id")
+    try:
+        media_size = int(request.get("media_size", 0))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("media_size invalido") from exc
+    if media_size < 0 or media_size > int(policy["max_upload_bytes"]):
+        raise ValueError("media_size excede el limite")

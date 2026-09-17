@@ -15,6 +15,11 @@ Fecha: 2026-09-17
   hermano.
 - `detect_downstream_duplicates()` bloquea la combinación repetida de raíz,
   destino y carril, permitiendo usos en carriles distintos.
+- `build_platform_policy()` permite declarar targets, clases de media, tamaño
+  máximo y rate limit; un adapter con policy valida además `destination_id`,
+  `account_context.account_id` y `account_context.org_id` antes del handler.
+- La policy es opt-in para mantener compatibilidad con handlers legacy; los
+  adapters externos deben configurarla antes de habilitar acciones reales.
 - No hay llamadas Meta ni uso de cookies/sesiones en este contrato.
 
 ## Limites

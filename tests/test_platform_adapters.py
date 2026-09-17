@@ -1,6 +1,6 @@
 import pytest
 
-from platform_adapters import PlatformAdapter, detect_downstream_duplicates, execute_platform_action, execute_publication_group
+from platform_adapters import PlatformAdapter, build_platform_policy, detect_downstream_duplicates, execute_platform_action, execute_publication_group
 
 
 def test_adapter_requires_declared_capability_and_tracks_phases():
@@ -46,3 +46,18 @@ def test_downstream_duplicate_is_blocked_only_for_same_lane_and_destination():
     ]
     duplicates = detect_downstream_duplicates(rows)
     assert duplicates == [{"indexes": [0, 1], "root_id": "root-1", "destination_id": "page-1", "lane": "reel"}]
+
+
+def test_strict_adapter_validates_platform_policy_before_handler():
+    calls = []
+    policy = build_platform_policy(
+        targets={"instagram_reel"}, media_classes={"image", "video"}, max_upload_bytes=1000, rate_limit_per_minute=10,
+    )
+    adapter = PlatformAdapter("meta", {"publish"}, policy=policy, handlers={"publish": lambda request: calls.append(request) or {"status": "confirmed"}})
+    request = {"destination_id": "ig-1", "publication_target": "instagram_reel", "media_class": "image", "media_size": 50, "account_context": {"account_id": "a1", "org_id": "o1"}}
+    assert execute_platform_action(adapter, "publish", request)["status"] == "confirmed"
+    assert calls == [request]
+    with pytest.raises(ValueError, match="account_context"):
+        execute_platform_action(adapter, "publish", {**request, "account_context": {}})
+    with pytest.raises(ValueError, match="media_class"):
+        execute_platform_action(adapter, "publish", {**request, "media_class": "pdf"})
