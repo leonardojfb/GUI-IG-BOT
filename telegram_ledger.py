@@ -72,6 +72,29 @@ def record_confirmed_delivery(connection, *, asset_ref, path, chat_id, topic_id,
     return {"status": "recorded", "method": resolved_method, "message_id": str(message_id)}
 
 
+def migrate_legacy_history(connection, rows, *, bot_id):
+    """Import confirmed legacy rows without contacting Telegram or resending media."""
+    summary = {"imported": 0, "already_present": 0, "skipped": 0}
+    for row in rows or []:
+        if not isinstance(row, dict) or any(not row.get(key) for key in ("asset_ref", "path", "chat_id", "idempotency_key", "message_id")):
+            summary["skipped"] += 1
+            continue
+        existing = find_delivery(
+            connection, asset_ref=row["asset_ref"], chat_id=row["chat_id"], topic_id=row.get("topic_id"),
+            bot_id=bot_id, idempotency_key=row["idempotency_key"],
+        )
+        if existing:
+            summary["already_present"] += 1
+            continue
+        result = record_confirmed_delivery(
+            connection, asset_ref=row["asset_ref"], path=row["path"], chat_id=row["chat_id"],
+            topic_id=row.get("topic_id"), bot_id=bot_id, caption=row.get("caption", ""),
+            idempotency_key=row["idempotency_key"], message_id=row["message_id"], method=row.get("method"),
+        )
+        summary["imported" if result["status"] == "recorded" else "already_present"] += 1
+    return summary
+
+
 def build_telegram_bot_api_sender(token: str, *, request_fn=None, timeout: int = 30):
     """Build a real Bot API sender without storing the token in the ledger."""
     token = _required(token, "token")

@@ -1,7 +1,7 @@
 import sqlite3
 from types import SimpleNamespace
 
-from telegram_ledger import build_telegram_bot_api_sender, deliver_media, ensure_telegram_ledger_schema, find_delivery, media_method, record_confirmed_delivery
+from telegram_ledger import build_telegram_bot_api_sender, deliver_media, ensure_telegram_ledger_schema, find_delivery, media_method, migrate_legacy_history, record_confirmed_delivery
 
 
 def test_media_method_uses_native_telegram_formats():
@@ -67,6 +67,24 @@ def test_confirmed_delivery_record_is_idempotent_for_legacy_worker(tmp_path):
     assert first["status"] == "recorded"
     assert second["status"] == "already_sent"
     assert find_delivery(connection, asset_ref="asset", chat_id="-1", topic_id=4, bot_id="legacy-bot", idempotency_key="day1")["message_id"] == "12"
+
+
+def test_legacy_history_migration_records_only_confirmed_rows_without_network(tmp_path):
+    connection = sqlite3.connect(":memory:")
+    media = tmp_path / "clip.mp4"
+    media.write_bytes(b"video")
+    rows = [
+        {"asset_ref": "a1", "path": str(media), "chat_id": "-1", "topic_id": 4, "idempotency_key": "old-1", "message_id": 12, "method": "sendVideo"},
+        {"asset_ref": "a1", "path": str(media), "chat_id": "-1", "topic_id": 4, "idempotency_key": "old-1", "message_id": 99, "method": "sendVideo"},
+        {"asset_ref": "a2", "path": str(media), "chat_id": "-1", "topic_id": 4, "idempotency_key": "old-2"},
+    ]
+
+    first = migrate_legacy_history(connection, rows, bot_id="legacy-bot")
+    second = migrate_legacy_history(connection, rows, bot_id="legacy-bot")
+
+    assert first == {"imported": 1, "already_present": 1, "skipped": 1}
+    assert second == {"imported": 0, "already_present": 2, "skipped": 1}
+    assert connection.execute("SELECT message_id FROM telegram_delivery_ledger").fetchone()[0] == "12"
 
 
 def test_legacy_worker_sends_photo_with_native_field_and_ledger(monkeypatch, tmp_path):

@@ -24,10 +24,14 @@ Fecha: 2026-09-17
 - `organizadortg._send_media_to_topic()` conecta esos archivos al worker
   existente con el mismo topic, caption, botón y ledger; los videos mantienen
   su ruta de compresión específica.
+- `migrate_legacy_history()` importa filas históricas ya confirmadas sólo si
+  contienen `message_id`, sin abrir red ni reenviar medios; omite filas
+  incompletas y es idempotente por la identidad del ledger.
 
 ## Limites
 
-Topics canónicos y migración de historiales todavía requieren un gate
-operativo. Falta un smoke contra un bot/grupo controlado; los tests no
-demuestran publicación externa. No se reutilizan cookies ni sesiones de
-Instagram.
+Topics canónicos todavía requieren un gate operativo. La migración local de
+historial quedó validada, pero falta ejecutar el importador contra un archivo
+histórico real previamente revisado. Falta un smoke contra un bot/grupo
+controlado; los tests no demuestran publicación externa. No se reutilizan
+cookies ni sesiones de Instagram.
