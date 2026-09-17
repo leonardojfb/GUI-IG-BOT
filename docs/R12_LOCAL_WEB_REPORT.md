@@ -17,6 +17,8 @@ Fecha: 2026-09-17
   compatible con instalaciones antiguas.
 - La raíz sirve una shell navegable que carga las cuatro vistas por API con el
   token introducido en memoria del navegador; no persiste el token.
+- `gui_premium_v7.py` expone `Abrir panel local` en Actualizaciones, inicia el
+  servicio bajo demanda, copia el token temporal y lo detiene en cierre.
 
 ## Verificacion
 

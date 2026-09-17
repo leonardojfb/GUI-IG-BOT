@@ -54,3 +54,10 @@ def test_local_web_read_endpoints_are_json_and_read_only(tmp_path):
     finally:
         service.stop()
         db.close()
+
+
+def test_legacy_gui_exposes_opt_in_local_panel_without_replacing_entrypoints():
+    source = open("gui_premium_v7.py", encoding="utf-8").read()
+    assert 'text="Abrir panel local"' in source
+    assert "def _open_local_web" in source
+    assert 'self.show_frame("Forge")' not in source[source.index("def _open_local_web"):source.index("def _on_close")]

@@ -14,6 +14,7 @@ import math
 import random
 import time
 import threading
+import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
@@ -1159,6 +1160,7 @@ class InstagramAutoPro(ctk.CTk):
     # ── Init ──────────────────────────────────────────────────────────────
     def __init__(self):
         super().__init__()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.title("⚡ Instagram Automation Pro  —  V7")
         self._apply_responsive_window()
         self.configure(fg_color=BG_APP)
@@ -1168,6 +1170,7 @@ class InstagramAutoPro(ctk.CTk):
         self._render_worker_controls = []
         self._render_worker_syncing = False
         self._editor_render_active = False
+        self._local_web_service = None
 
         # Estado de rutas (Tandas)
         self.p1_dir = ""
@@ -1604,6 +1607,9 @@ class InstagramAutoPro(ctk.CTk):
             buttons, text="Buscar actualizaciones", command=self._check_updates_from_gui
         )
         self.btn_check_update.grid(row=0, column=2, padx=(0, 8))
+        GhostButton(
+            buttons, text="Abrir panel local", command=self._open_local_web
+        ).grid(row=0, column=3)
 
         migration_card = Card(scroll, title="Manifest v2")
         migration_card.grid(row=3, column=0, sticky="ew", padx=24, pady=(0, 24))
@@ -1641,6 +1647,33 @@ class InstagramAutoPro(ctk.CTk):
         ).grid(row=0, column=3)
 
         self._refresh_update_state()
+
+    def _open_local_web(self):
+        """Start the read-only loopback panel once and open its browser shell."""
+        from local_web import LocalWebService
+
+        if self._local_web_service is None:
+            manifest = os.path.join(UPDATE_APP_DIR, "calendar_manifest.json")
+            token = os.environ.get("METODO_IG_LOCAL_WEB_TOKEN") or None
+            self._local_web_service = LocalWebService(
+                self.db,
+                token=token,
+                manifest_path=manifest if os.path.isfile(manifest) else "",
+            ).start()
+            self.clipboard_clear()
+            self.clipboard_append(self._local_web_service.token)
+            messagebox.showinfo(
+                "Panel local",
+                f"Token temporal copiado al portapapeles.\n\n{self._local_web_service.token}",
+            )
+        webbrowser.open(self._local_web_service.base_url)
+
+    def _on_close(self):
+        service = self._local_web_service
+        self._local_web_service = None
+        if service is not None:
+            service.stop()
+        self.destroy()
 
     def _refresh_update_state(self, message=None, color=TEXT_MUTED):
         try:
