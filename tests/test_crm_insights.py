@@ -1,6 +1,7 @@
 import csv
+import sqlite3
 
-from crm_insights import build_identity, build_infrastructure_event, export_metrics_csv, score_virality, summarize_metrics
+from crm_insights import build_identity, build_infrastructure_event, export_metrics_csv, list_metric_snapshots, record_metric_snapshot, score_virality, summarize_metrics
 
 
 def test_identity_is_typed_and_metrics_are_deterministic():
@@ -24,3 +25,16 @@ def test_metrics_csv_is_atomic_and_does_not_include_credentials(tmp_path):
     assert rows[0]["account_id"] == "a"
     assert "cookie" not in rows[0]
     assert "secret" not in target.read_text(encoding="utf-8")
+
+
+def test_metric_snapshots_are_persistent_deduplicated_and_sanitized():
+    connection = sqlite3.connect(":memory:")
+    row = {"posts": 2, "likes": 10, "comments": 1, "shares": 0, "token": "must-not-persist"}
+
+    first = record_metric_snapshot(connection, "acc-1", row, observed_at="2026-09-17T10:00:00Z")
+    duplicate = record_metric_snapshot(connection, "acc-1", row, observed_at="2026-09-17T10:00:00Z")
+    snapshots = list_metric_snapshots(connection, "acc-1")
+
+    assert first["status"] == "recorded"
+    assert duplicate["status"] == "duplicate"
+    assert snapshots == [{"account_id": "acc-1", "observed_at": "2026-09-17T10:00:00Z", "metrics": {"comments": 1, "likes": 10, "posts": 2, "shares": 0}}]

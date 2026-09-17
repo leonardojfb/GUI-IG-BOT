@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import csv
+import json
+import sqlite3
 import os
 import tempfile
 from hashlib import sha256
@@ -61,6 +63,42 @@ def export_metrics_csv(path, rows):
         if temp_name and os.path.exists(temp_name):
             os.unlink(temp_name)
     return {"path": str(target), "rows": len(safe_rows), "fields": fields}
+
+
+def ensure_metric_schema(connection):
+    connection.execute("""CREATE TABLE IF NOT EXISTS crm_metric_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id TEXT NOT NULL,
+        observed_at TEXT NOT NULL,
+        metrics_json TEXT NOT NULL,
+        UNIQUE(account_id, observed_at)
+    )""")
+    connection.commit()
+
+
+def record_metric_snapshot(connection, account_id, metrics, *, observed_at):
+    ensure_metric_schema(connection)
+    account = _required(account_id, "account_id")
+    timestamp = _required(observed_at, "observed_at")
+    safe_metrics = {str(key): value for key, value in (metrics or {}).items() if not _sensitive_key(key)}
+    try:
+        connection.execute(
+            "INSERT INTO crm_metric_snapshots (account_id, observed_at, metrics_json) VALUES (?, ?, ?)",
+            (account, timestamp, json.dumps(safe_metrics, sort_keys=True, ensure_ascii=False)),
+        )
+        connection.commit()
+    except sqlite3.IntegrityError:
+        return {"status": "duplicate", "account_id": account, "observed_at": timestamp}
+    return {"status": "recorded", "account_id": account, "observed_at": timestamp}
+
+
+def list_metric_snapshots(connection, account_id):
+    ensure_metric_schema(connection)
+    rows = connection.execute(
+        "SELECT account_id, observed_at, metrics_json FROM crm_metric_snapshots WHERE account_id=? ORDER BY observed_at",
+        (_required(account_id, "account_id"),),
+    ).fetchall()
+    return [{"account_id": row[0], "observed_at": row[1], "metrics": json.loads(row[2])} for row in rows]
 
 
 def _number(value):
