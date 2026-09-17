@@ -7,6 +7,7 @@ import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 
 class LocalWebService:
@@ -54,10 +55,12 @@ class LocalWebService:
             self._thread = None
 
     def _handle(self, request):
-        if request.path == "/":
+        parsed = urlsplit(request.path)
+        route = parsed.path
+        if route == "/":
             self._respond_html(request, 200, _INDEX_HTML)
             return
-        if request.path == "/health":
+        if route == "/health":
             self._respond(request, 200, {"status": "ok", "service": "local_web", "read_only": True})
             return
         if not self._authorized(request):
@@ -69,7 +72,9 @@ class LocalWebService:
             "/api/calendar": self._calendar,
             "/api/history": self._history,
         }
-        producer = routes.get(request.path)
+        producer = routes.get(route)
+        if route == "/api/crm/metrics":
+            producer = lambda: self._crm_metrics(parsed.query)
         if producer is None:
             self._respond(request, 404, {"error": "not_found"})
             return
@@ -134,6 +139,14 @@ class LocalWebService:
     def _history(self) -> list[dict[str, Any]]:
         return self._content()
 
+    def _crm_metrics(self, query: str) -> list[dict[str, Any]]:
+        account_id = (parse_qs(query).get("account_id") or [""])[0].strip()
+        if not account_id:
+            return []
+        from crm_insights import list_metric_snapshots
+
+        return list_metric_snapshots(self.db.conn, account_id)
+
     @staticmethod
     def _respond(request, status: int, payload: dict[str, Any]):
         data = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
@@ -160,7 +173,7 @@ _INDEX_HTML = """<!doctype html>
 <title>Metodo IG local</title><style>body{font:15px system-ui;margin:2rem;max-width:70rem}button{margin:.25rem;padding:.45rem}.status{min-height:1.5rem}table{border-collapse:collapse;margin-top:1rem}td,th{border:1px solid #ccc;padding:.35rem;text-align:left}</style>
 <h1>Metodo IG</h1><label>Token local <input id=\"token\" type=\"password\" autocomplete=\"off\"></label>
 <button onclick=\"loadView('accounts')\">Cuentas</button><button onclick=\"loadView('content')\">Contenido</button>
-<button onclick=\"loadView('calendar')\">Calendario</button><button onclick=\"loadView('history')\">Historial</button>
+<button onclick=\"loadView('calendar')\">Calendario</button><button onclick=\"loadView('history')\">Historial</button><button onclick=\"loadView('crm/metrics?account_id='+encodeURIComponent(prompt('Account ID')||''))\">CRM</button>
 <div class=\"status\" id=\"status\"></div><div id=\"result\"></div>
 <script>
 async function loadView(name){const status=document.getElementById('status');status.textContent='';try{const r=await fetch('/api/'+name,{headers:{Authorization:'Bearer '+document.getElementById('token').value}});const data=await r.json();if(!r.ok)throw Error(data.error||'request failed');render(data.items||[])}catch(e){status.textContent=e.message}}

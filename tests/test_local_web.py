@@ -69,6 +69,23 @@ def test_local_web_read_endpoints_are_json_and_read_only(tmp_path):
         db.close()
 
 
+def test_local_web_exposes_authenticated_crm_metric_series(tmp_path):
+    from crm_insights import record_metric_snapshot
+
+    db = database.DatabaseManager(str(tmp_path / "db.sqlite"))
+    record_metric_snapshot(db.conn, "acc-1", {"posts": 2, "likes": 8, "token": "secret"}, observed_at="2026-09-17T10:00:00Z")
+    service = LocalWebService(db, token="crm-token").start()
+    try:
+        status, payload = _request(f"{service.base_url}/api/crm/metrics?account_id=acc-1", "crm-token")
+        assert status == 200
+        assert payload["items"] == [
+            {"account_id": "acc-1", "observed_at": "2026-09-17T10:00:00Z", "metrics": {"likes": 8, "posts": 2}}
+        ]
+    finally:
+        service.stop()
+        db.close()
+
+
 def test_legacy_gui_exposes_opt_in_local_panel_without_replacing_entrypoints():
     source = open("gui_premium_v7.py", encoding="utf-8").read()
     assert 'text="Abrir panel local"' in source

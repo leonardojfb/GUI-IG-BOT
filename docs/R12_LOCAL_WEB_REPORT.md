@@ -23,6 +23,8 @@ Fecha: 2026-09-17
   `/api/calendar/import-preview` y `/api/calendar/import`: ambos exigen Bearer,
   el primero no escribe, y el segundo exige `confirm=true`, limita el destino a
   la raíz configurada y delega en la importación atómica R18.
+- `/api/crm/metrics?account_id=...` expone snapshots CRM autenticados en orden
+  temporal; la shell local incluye un acceso CRM y no persiste el token.
 
 ## Verificacion
 

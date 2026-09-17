@@ -17,8 +17,11 @@ Fecha: 2026-09-17
   rechaza duplicados del mismo instante y filtra claves sensibles antes de
   escribir JSON.
 - El modulo es local y read-only; no llama APIs ni modifica cuentas.
+- `LocalWebService` expone la serie temporal por `account_id` en
+  `/api/crm/metrics`, protegida por Bearer y sin registrar credenciales.
 
 ## Limites
 
-Faltan conectores de métricas reales con account/org context y una UI de serie
-temporal. Las entradas deben llegar saneadas antes de habilitar acciones.
+Faltan conectores de métricas reales con account/org context y una visualización
+gráfica más rica. Las entradas deben llegar saneadas antes de habilitar
+acciones.
