@@ -40,11 +40,13 @@ def parse_callback(callback: str) -> dict:
     return {"version": 1, "action": parts[1], "entity_id": parts[2]}
 
 
-def ingest_callback(connection, callback: str, *, external_id: str, user_id: str, payload: dict | None = None) -> dict:
+def ingest_callback(connection, callback: str, *, external_id: str, user_id: str, payload: dict | None = None, authorize_fn=None) -> dict:
     ensure_confirmation_schema(connection)
     parsed = parse_callback(callback)
     external = _required(external_id, "external_id")
     user = _required(user_id, "user_id")
+    if authorize_fn is not None and not authorize_fn(parsed, user, payload or {}):
+        return {"status": "unauthorized", **parsed}
     existing = connection.execute("SELECT event_id, status FROM confirmation_inbox WHERE external_id=?", (external,)).fetchone()
     if existing:
         return {"status": "duplicate", "event_id": existing[0], "state": existing[1]}

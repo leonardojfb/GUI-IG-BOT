@@ -27,3 +27,11 @@ def test_external_callback_inbox_deduplicates_and_supports_undo():
     assert undone["status"] == "undone"
     assert repeated["status"] == "already_undone"
     assert sent == ["message-42"]
+
+
+def test_unauthorized_callback_is_not_persisted():
+    connection = sqlite3.connect(":memory:")
+    result = ingest_callback(connection, build_callback("confirm", "message-99"), external_id="callback-99", user_id="intruder", authorize_fn=lambda *_: False)
+    assert result["status"] == "unauthorized"
+    assert connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='confirmation_inbox'").fetchone() is not None
+    assert connection.execute("SELECT COUNT(*) FROM confirmation_inbox").fetchone()[0] == 0
