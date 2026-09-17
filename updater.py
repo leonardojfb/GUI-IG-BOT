@@ -69,6 +69,8 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "telegram_ledger.py",
         "confirmation_ledger.py",
         "crm_insights.py",
+        "manual_calendar_export.py",
+        "platform_adapters.py",
         "social_publishing.py",
         "telegram_core.py",
         "cleaner.py",

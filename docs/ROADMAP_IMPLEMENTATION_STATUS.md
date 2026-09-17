@@ -55,8 +55,8 @@ Estimacion por paquetes tocados: `R00-R06 de R00-R20`, pero R04-R06 no estan cer
 | R15. Telegram multiformato | Parcial validado | `telegram_ledger.py` enruta imagen/video/documento a métodos nativos, registra bot/chat/topic/message_id y aplica idempotencia; tests y packaging. | Integrar dispatcher con el envío Telegram actual, topic canónico por cuenta y migración de historiales existentes sin reenviar. |
 | R16. Confirmacion persistente | Parcial validado | `confirmation_ledger.py` implementa callbacks v1, inbox externo SQLite, deduplicacion por external ID y undo one-shot; tests y packaging. | Conectar callbacks Telegram reales, acciones de limpieza por IDs y auditoria de permisos. |
 | R17. CRM ampliado | Parcial validado | `crm_insights.py` define identidades tipadas, resumen de engagement y export CSV atomico saneado; tests y packaging. | Conectar fuentes de metricas reales, reglas de viralidad y el historial de dispositivo/red Meta sin secretos. |
-| R18. Calendario manual/export | Pendiente | Contrato manual bloqueado en manifest v1. | Capacidades manuales comprobadas, paquete portable, checksums y remapeo. |
-| R19. Meta adapters/crosspost | Pendiente / pospuesto por evidencia | No hay adapter Meta habilitado. | Matriz API real, permisos, rate limits, prepare/deliver/schedule/publish/verify. |
+| R18. Calendario manual/export | Parcial validado | `manual_calendar_export.py` genera ZIP schema v1 con remapeo `media/`, checksums SHA-256 y verificacion sin publicar; tests y packaging. | Conectar import/export con manifest v2, capacidades por plataforma y UI de remapeo/confirmacion. |
+| R19. Meta adapters/crosspost | Parcial validado | `platform_adapters.py` define fases y capabilities explícitas, rechaza acciones no soportadas y exige resultado confirmado; tests y packaging. | Implementar adapters Meta reales solo tras matriz de permisos, rate limits, account/org context y pruebas externas. |
 | R20. Certificacion final | Pendiente | Hay tests locales acumulados. | Recorrer 56 LEG, saltos por cohorte, ciclos piloto, QA, changelog y paquete inmutable. |
 
 ## Estado por funciones LEG-01 a LEG-56

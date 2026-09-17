@@ -238,6 +238,20 @@ def test_release_includes_r17_crm_insights_but_bootstrap_does_not():
     assert "crm_insights.py" not in _bootstrap_release_files_from_build_script()
 
 
+def test_release_includes_r18_manual_calendar_export_but_bootstrap_does_not():
+    release_files = _release_files_from_build_script()
+    assert "manual_calendar_export.py" in release_files
+    assert "manual_calendar_export.py" in updater.DEFAULT_UPDATEABLE_FILES
+    assert "manual_calendar_export.py" not in _bootstrap_release_files_from_build_script()
+
+
+def test_release_includes_r19_platform_adapters_but_bootstrap_does_not():
+    release_files = _release_files_from_build_script()
+    assert "platform_adapters.py" in release_files
+    assert "platform_adapters.py" in updater.DEFAULT_UPDATEABLE_FILES
+    assert "platform_adapters.py" not in _bootstrap_release_files_from_build_script()
+
+
 def test_legacy_updater_python_files_do_not_require_new_console_encoding_names():
     release_files = _release_files_from_build_script()
     legacy_python = [
