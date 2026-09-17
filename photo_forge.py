@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -174,6 +175,71 @@ def perceptual_distance(first: str, second: str) -> int:
         return (int(left, 16) ^ int(right, 16)).bit_count()
     except ValueError as exc:
         raise ValueError("firma perceptual invalida") from exc
+
+
+def audit_photo_forge_reuse(db, assignments, *, max_distance: int = 4) -> dict[str, Any]:
+    """Evaluate Vault reuse for a Photo Forge preview without mutating state."""
+    if int(max_distance) < 0:
+        raise ValueError("max_distance no puede ser negativo")
+    from vault.lineage import VaultLineage
+    from vault.reuse import VaultReuseAudit
+    from vault.signatures import VaultSignatures
+
+    lineage = VaultLineage(db)
+    signatures = VaultSignatures(db)
+    exact_reuse = VaultReuseAudit(db)
+    normalized = []
+    conflicts = []
+    for assignment in assignments or []:
+        if not isinstance(assignment, dict):
+            raise ValueError("cada assignment Photo Forge debe ser un objeto")
+        try:
+            asset_id = int(assignment["asset_id"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("cada assignment requiere asset_id") from exc
+        username = str(assignment.get("username") or "").strip().casefold()
+        lane = str(assignment.get("lane") or "").strip().casefold()
+        if not username or not lane:
+            raise ValueError("cada assignment requiere username y lane")
+        normalized.append({**assignment, "asset_id": asset_id, "username": username, "lane": lane})
+
+        candidate_ids = {asset_id}
+        candidate_ids.update(int(row["asset_id"]) for row in exact_reuse.candidates_for_asset(asset_id, require_usage=False))
+        try:
+            candidate_ids.update(int(row["asset_id"]) for row in signatures.find_assets_by_perceptual_similarity(asset_id, max_distance=max_distance))
+        except ValueError:
+            pass
+        for matched_asset_id in sorted(candidate_ids):
+            for usage in lineage.usages_for_asset(matched_asset_id):
+                details = _usage_details(usage.get("details_json"))
+                used_username = str(details.get("username") or "").strip().casefold()
+                used_lane = str(details.get("lane") or details.get("publication_target") or "").strip().casefold()
+                if matched_asset_id == asset_id and used_username == username and used_lane == lane:
+                    reason = "same_account_lane"
+                elif used_username and used_username != username:
+                    reason = "cross_account_reuse"
+                else:
+                    continue
+                conflicts.append({
+                    "asset_id": asset_id,
+                    "matched_asset_id": matched_asset_id,
+                    "username": username,
+                    "lane": lane,
+                    "reason": reason,
+                    "usage": usage,
+                })
+    status = "blocked" if any(row["reason"] == "same_account_lane" for row in conflicts) else ("warning" if conflicts else "ready")
+    return {"status": status, "assignments": normalized, "conflicts": conflicts, "max_distance": int(max_distance)}
+
+
+def _usage_details(value):
+    if isinstance(value, dict):
+        return value
+    try:
+        parsed = json.loads(value or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def make_photo_forge_handler(db=None, *, vault_storage=None):

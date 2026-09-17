@@ -39,10 +39,14 @@ Fecha: 2026-09-17
 - Se agrega prueba de release/updater e inventario de importación.
 - La tarjeta GUI usa el mismo motor Pillow y refresca el panel de logs después
   de generar; los botones de video Forge no cambian.
+- `audit_photo_forge_reuse()` cruza usos Vault con firmas exactas y
+  perceptuales por cuenta/carril, devolviendo `blocked` para repetición en el
+  mismo alcance y `warning` para reutilización cruzada; el preview no muta la
+  base.
 
 ## Limites
 
 Las pruebas usan imágenes sintéticas y no certifican todavía un lote de fotos
-de producción ni una política de publicación externa. La reserva
-anti-repetición entre cuentas y su política integrada con Vault quedan para
-R14/R17.
+de producción ni una política de publicación externa. La reserva transaccional
+de assignments sigue delegada al planificador R08/R14; falta conectar este
+evaluador a un lote real.

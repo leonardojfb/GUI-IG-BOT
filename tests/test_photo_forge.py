@@ -3,6 +3,7 @@ import pytest
 
 from photo_forge import (
     build_photo_forge_job_spec,
+    audit_photo_forge_reuse,
     make_photo_forge_handler,
     perceptual_distance,
     perceptual_signature,
@@ -105,6 +106,35 @@ def test_photo_handler_resumes_and_records_vault_lineage(tmp_path):
     output_asset = storage.import_managed(output)
     parents = VaultLineage(db).parents_for_asset(output_asset["asset_id"])
     assert source_asset["asset_id"] in [row["parent_asset_id"] for row in parents]
+    db.close()
+
+
+def test_photo_reuse_policy_blocks_same_account_and_flags_cross_account(tmp_path):
+    import database
+    from vault.lineage import VaultLineage
+    from vault.signatures import VaultSignatures
+    from vault.storage import VaultStorage
+
+    db = database.DatabaseManager(str(tmp_path / "db.sqlite"))
+    storage = VaultStorage(db, tmp_path / "vault")
+    source = tmp_path / "source.jpg"
+    other = tmp_path / "other.jpg"
+    _image(source, size=(640, 480))
+    _image(other, size=(640, 480))
+    first = storage.import_managed(source)["asset_id"]
+    second = storage.import_managed(other)["asset_id"]
+    signatures = VaultSignatures(db)
+    signatures.record_signature(first, "visual_bucket", "scene-1", algorithm="manual")
+    signatures.record_signature(second, "visual_bucket", "scene-1", algorithm="manual")
+    VaultLineage(db).record_usage(first, "calendar", "entry-1", {"username": "alice", "lane": "feed"})
+
+    same_account = audit_photo_forge_reuse(db, [{"asset_id": second, "username": "ALICE", "lane": "feed"}])
+    cross_account = audit_photo_forge_reuse(db, [{"asset_id": second, "username": "bob", "lane": "feed"}])
+
+    assert same_account["status"] == "blocked"
+    assert same_account["conflicts"][0]["reason"] == "same_account_lane"
+    assert cross_account["status"] == "warning"
+    assert cross_account["conflicts"][0]["reason"] == "cross_account_reuse"
     db.close()
 
 

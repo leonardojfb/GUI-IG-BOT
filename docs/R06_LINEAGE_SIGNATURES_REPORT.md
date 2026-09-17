@@ -82,3 +82,6 @@ Fecha: 2026-09-13
   mostrar advertencias en la UI antes de bloquear o sugerir reutilización.
 - Exponer linaje, firmas, usos y candidatos en la UI del Vault con estados claros antes de bloquear o sugerir reutilizacion.
 - Definir reglas de reutilizacion por cuenta/categoria cuando haya suficiente evidencia de linaje y uso.
+- `photo_forge.audit_photo_forge_reuse()` aplica una primera regla explícita
+  por cuenta/carril y separa bloqueo local de advertencia cruzada sin mutar
+  Vault.
