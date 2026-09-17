@@ -14,7 +14,7 @@ Fecha: 2026-09-17
   skips; los booleanos previos siguen aceptándose solo como evidencia legacy.
 - La evidencia estructurada exige al menos una prueba pasada y un número de
   skips no negativo; `passed=0` ya no puede certificar un gate.
-- Suite global ejecutada desde el worktree aislado: `534 passed, 2 skipped,
+- Suite global ejecutada desde el worktree aislado: `537 passed, 1 skipped,
   7 subtests passed`.
 - Release/updater incluyen el gate de forma aditiva y bootstrap permanece
   estable.
