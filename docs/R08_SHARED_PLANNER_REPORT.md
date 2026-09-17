@@ -5,6 +5,8 @@ Fecha: 2026-09-16
 ## Alcance implementado
 
 - `shared_planner.py` define `preview_shared_schedule()` como funcion pura y sin efectos laterales.
+- `shared_planner_sources.py` define `load_planner_accounts()` y `collect_tanda_candidates()` como lectores read-only para alimentar el preview con datos concretos.
+- `preview_schedule_from_sources()` compone ambos lectores y conserva un reporte de tandas inexistentes, vacias y archivos ignorados.
 - El preview recibe cuentas e inventario de candidatos concretos; exige usernames unicos y `source_id` unicos.
 - Cada asignacion conserva `source_id`, `source_path`, `tanda` y cualquier metadata del candidato, y agrega cuenta, dia, slot, carril, placement y metodo.
 - `MAX` calcula la menor cantidad de dias necesaria para exponer todos los candidatos; los dias fijos respetan `days * accounts * daily_quota`.
@@ -13,6 +15,7 @@ Fecha: 2026-09-16
 - `strict` devuelve `blocked` y no expone asignaciones aplicables cuando el inventario no alcanza.
 - La funcion no abre SQLite, no lee/escribe carpetas, no modifica `calendar_manifest.json` y no envia a Telegram/Meta.
 - El modulo queda incluido en release normal y updater, pero fuera del paquete bootstrap para preservar el puente de instalaciones antiguas.
+- `shared_planner_sources.py` tambien queda incluido en release normal y updater, fuera de bootstrap.
 
 ## Compatibilidad de actualizacion
 
@@ -33,6 +36,7 @@ Fecha: 2026-09-16
 ## Pendiente R08
 
 - Adaptador de candidatos desde Vault/archivos y cuentas desde catalogo/SQLite.
+- Integracion directa con Vault/catalogo real; el checkpoint actual usa el filesystem de `videos_finales/` y el contrato `DatabaseManager.get_all_accounts()` sin mutaciones.
 - Politicas de elegibilidad, usos previos, Trial/carriles y disponibilidad real.
 - Integracion separada de Por Tandas y Por Cuentas sin cambiar sus algoritmos legacy.
 - Preview visible en GUI con diff antes de escribir.
