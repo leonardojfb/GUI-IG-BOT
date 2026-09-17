@@ -91,6 +91,8 @@ def test_legacy_gui_exposes_opt_in_local_panel_without_replacing_entrypoints():
     assert 'text="Abrir panel local"' in source
     assert "def _open_local_web" in source
     assert 'self.show_frame("Forge")' not in source[source.index("def _open_local_web"):source.index("def _on_close")]
+    assert "calendar_import_root=UPDATE_APP_DIR" in source
+    assert "manual_import_audit.jsonl" in source
 
 
 def test_legacy_gui_exposes_read_only_ios_snapshot_loader():
@@ -107,7 +109,8 @@ def test_local_web_calendar_import_is_previewed_confirmed_and_scoped(tmp_path):
     export_manual_package([{"media_path": str(media), "username": "alice"}], package)
     import_root = tmp_path / "imports"
     db = database.DatabaseManager(str(tmp_path / "db.sqlite"))
-    service = LocalWebService(db, token="web-token", calendar_import_root=str(import_root)).start()
+    audit = tmp_path / "calendar-imports.jsonl"
+    service = LocalWebService(db, token="web-token", calendar_import_root=str(import_root), calendar_audit_path=str(audit)).start()
     try:
         status, preview = _post(f"{service.base_url}/api/calendar/import-preview", "web-token", {"package_path": str(package), "destination": "day-1"})
         assert status == 200
@@ -122,6 +125,7 @@ def test_local_web_calendar_import_is_previewed_confirmed_and_scoped(tmp_path):
         assert status == 200
         assert imported["status"] == "imported"
         assert (import_root / "day-1" / "media" / "0001.mp4").read_bytes() == b"media"
+        assert '"event": "manual_calendar_import"' in audit.read_text(encoding="utf-8")
     finally:
         service.stop()
         db.close()

@@ -19,6 +19,9 @@ Fecha: 2026-09-17
   token introducido en memoria del navegador; no persiste el token.
 - `gui_premium_v7.py` expone `Abrir panel local` en Actualizaciones, inicia el
   servicio bajo demanda, copia el token temporal y lo detiene en cierre.
+- La GUI configura la raíz de importación en la instalación y la bitácora en
+  `CALENDARIO_POSTEO/manual_import_audit.jsonl`; la operación sigue exigiendo
+  preview, Bearer y confirmación.
 - Con `calendar_import_root` configurado, el panel ofrece
   `/api/calendar/import-preview` y `/api/calendar/import`: ambos exigen Bearer,
   el primero no escribe, y el segundo exige `confirm=true`, limita el destino a

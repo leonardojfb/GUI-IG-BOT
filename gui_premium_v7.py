@@ -1660,6 +1660,8 @@ class InstagramAutoPro(ctk.CTk):
                 self.db,
                 token=token,
                 manifest_path=manifest if os.path.isfile(manifest) else "",
+                calendar_import_root=UPDATE_APP_DIR,
+                calendar_audit_path=os.path.join(UPDATE_APP_DIR, "CALENDARIO_POSTEO", "manual_import_audit.jsonl"),
             ).start()
             self.clipboard_clear()
             self.clipboard_append(self._local_web_service.token)

@@ -1,3 +1,4 @@
+import json
 import zipfile
 
 from manual_calendar_export import export_manifest_v2_package, export_manual_package, import_manual_package, preview_manual_package_import, verify_manual_package
@@ -70,3 +71,20 @@ def test_manual_package_import_requires_confirmation_and_reports_conflicts(tmp_p
     conflict = preview_manual_package_import(package, destination)
     assert conflict["status"] == "conflict"
     assert conflict["conflicts"] == ["media/0001.mp4"]
+
+
+def test_manual_package_import_writes_audit_event_only_after_success(tmp_path):
+    media = tmp_path / "clip.mp4"
+    media.write_bytes(b"media")
+    package = tmp_path / "manifest.zip"
+    export_manual_package([{"media_path": str(media), "username": "alice"}], package)
+    destination = tmp_path / "calendar"
+    audit = tmp_path / "audit.jsonl"
+
+    result = import_manual_package(package, destination, confirm=True, audit_path=audit, actor="operator-1")
+
+    assert result["status"] == "imported"
+    event = json.loads(audit.read_text(encoding="utf-8").splitlines()[0])
+    assert event["actor"] == "operator-1"
+    assert event["destination"] == str(destination.resolve())
+    assert event["entries"] == 1

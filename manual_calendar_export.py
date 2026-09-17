@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -96,7 +97,7 @@ def preview_manual_package_import(package_path, destination_root):
     return {"status": "conflict" if conflicts else "ready", "entries": len(entries), "conflicts": conflicts, "files": entries}
 
 
-def import_manual_package(package_path, destination_root, *, confirm=False):
+def import_manual_package(package_path, destination_root, *, confirm=False, audit_path=None, actor="local"):
     if not confirm:
         raise PermissionError("la importacion requiere confirm=True")
     preview = preview_manual_package_import(package_path, destination_root)
@@ -119,6 +120,18 @@ def import_manual_package(package_path, destination_root, *, confirm=False):
         if temporary.exists():
             import shutil
             shutil.rmtree(temporary)
+    if audit_path:
+        _append_import_audit(
+            audit_path,
+            {
+                "event": "manual_calendar_import",
+                "actor": str(actor or "local"),
+                "package_sha256": _sha256(package_path),
+                "destination": str(destination),
+                "entries": int(preview["entries"]),
+                "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            },
+        )
     return {"status": "imported", "entries": preview["entries"], "path": str(destination)}
 
 
@@ -128,6 +141,13 @@ def _sha256(path):
 
 def _sha256_bytes(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def _append_import_audit(path, event):
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
 
 
 def _safe_archive_path(value):

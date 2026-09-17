@@ -11,13 +11,14 @@ from urllib.parse import parse_qs, urlsplit
 
 
 class LocalWebService:
-    def __init__(self, db, *, token: str | None = None, host: str = "127.0.0.1", port: int = 0, manifest_path: str = "", calendar_import_root: str = ""):
+    def __init__(self, db, *, token: str | None = None, host: str = "127.0.0.1", port: int = 0, manifest_path: str = "", calendar_import_root: str = "", calendar_audit_path: str = ""):
         self.db = db
         self.host = host
         self.port = int(port)
         self.token = token or secrets.token_urlsafe(32)
         self.manifest_path = str(manifest_path or "")
         self.calendar_import_root = Path(calendar_import_root).resolve() if calendar_import_root else None
+        self.calendar_audit_path = str(calendar_audit_path or "")
         self._server = None
         self._thread = None
 
@@ -111,7 +112,13 @@ class LocalWebService:
                 if payload.get("confirm") is not True:
                     self._respond(request, 400, {"error": "confirmation_required"})
                     return
-                result = import_manual_package(package, destination, confirm=True)
+                result = import_manual_package(
+                    package,
+                    destination,
+                    confirm=True,
+                    audit_path=self.calendar_audit_path or None,
+                    actor="local_web",
+                )
             else:
                 result = preview_manual_package_import(package, destination)
             self._respond(request, 200, result)
