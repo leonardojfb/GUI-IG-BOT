@@ -16,7 +16,9 @@ Fecha: 2026-09-17
   skips no negativo; `passed=0` ya no puede certificar un gate.
 - `verify_release_artifact()` valida el SHA-256, `package_kind` y la presencia
   en el ZIP de todos los archivos declarados por `release-manifest.json`.
-- Suite global ejecutada desde el worktree aislado: `544 passed, 2 skipped,
+- `build_release.ps1` ejecuta el verificador después de escribir el manifest y
+  antes de anunciar el artefacto.
+- Suite global ejecutada desde el worktree aislado: `547 passed, 0 skipped,
   7 subtests passed`.
 - Release/updater incluyen el gate de forma aditiva y bootstrap permanece
   estable.
