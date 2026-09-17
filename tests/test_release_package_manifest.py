@@ -252,6 +252,13 @@ def test_release_includes_r19_platform_adapters_but_bootstrap_does_not():
     assert "platform_adapters.py" not in _bootstrap_release_files_from_build_script()
 
 
+def test_release_includes_r20_certification_but_bootstrap_does_not():
+    release_files = _release_files_from_build_script()
+    assert "release_certification.py" in release_files
+    assert "release_certification.py" in updater.DEFAULT_UPDATEABLE_FILES
+    assert "release_certification.py" not in _bootstrap_release_files_from_build_script()
+
+
 def test_legacy_updater_python_files_do_not_require_new_console_encoding_names():
     release_files = _release_files_from_build_script()
     legacy_python = [

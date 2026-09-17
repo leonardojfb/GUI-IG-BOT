@@ -56,6 +56,7 @@ $ReleaseFiles = @(
     "crm_insights.py",
     "manual_calendar_export.py",
     "platform_adapters.py",
+    "release_certification.py",
     "social_publishing.py",
     "telegram_core.py",
     "cleaner.py",
