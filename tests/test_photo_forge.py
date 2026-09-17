@@ -87,3 +87,11 @@ def test_photo_handler_resumes_and_records_vault_lineage(tmp_path):
     parents = VaultLineage(db).parents_for_asset(output_asset["asset_id"])
     assert source_asset["asset_id"] in [row["parent_asset_id"] for row in parents]
     db.close()
+
+
+def test_legacy_gui_exposes_photo_forge_controls():
+    source = open("gui_premium_v7.py", encoding="utf-8").read()
+    assert 'title="Photo Forge"' in source
+    assert "def photo_forge_add_images" in source
+    assert "def photo_forge_preview" in source
+    assert "def photo_forge_generate" in source

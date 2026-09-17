@@ -20,6 +20,8 @@ Fecha: 2026-09-17
 - Con `VaultStorage` inyectado, el output se importa como asset gestionado y se
   enlaza con el asset fuente mediante `vault.integration` y `VaultLineage`.
 - `submit_photo_forge_job()` persiste el trabajo con idempotencia opcional.
+- `gui_premium_v7.py` expone dentro de Forge una tarjeta Photo Forge con
+  selección de imágenes, preview y generación explícita en `fotos_forge/`.
 
 ## Compatibilidad
 
@@ -32,8 +34,8 @@ Fecha: 2026-09-17
 
 - `py -m pytest -q tests/test_photo_forge.py`: `4 passed`.
 - Se agrega prueba de release/updater e inventario de importación.
-- Pendiente para el checkpoint siguiente: exponer una pantalla GUI de selección,
-  preview y ejecución; este R11 deja primero estable el contrato de backend.
+- La tarjeta GUI usa el mismo motor Pillow y refresca el panel de logs después
+  de generar; los botones de video Forge no cambian.
 
 ## Limites
 

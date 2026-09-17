@@ -5832,6 +5832,7 @@ class InstagramAutoPro(ctk.CTk):
     def _build_forge_frame(self):
         self.forge_video_paths = []
         self.forge_meta_assignments = []
+        self.photo_forge_paths = []
 
         f = self._frames["Forge"]
         f.grid_rowconfigure(0, weight=1)
@@ -6096,6 +6097,31 @@ class InstagramAutoPro(ctk.CTk):
             row=4, column=0, sticky="nsew", padx=24, pady=(0, 20)
         )
 
+        photo_card = Card(scroll, title="Photo Forge")
+        photo_card.grid(row=5, column=0, sticky="ew", padx=24, pady=(0, 20))
+        photo_body = photo_card.body
+        photo_body.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            photo_body,
+            text="Variantes de imagen con Pillow, sin modificar los originales.",
+            text_color=TEXT_MUTED,
+            font=ctk.CTkFont(size=11),
+            anchor="w",
+        ).grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        photo_controls = ctk.CTkFrame(photo_body, fg_color="transparent")
+        photo_controls.grid(row=1, column=0, sticky="ew")
+        self.photo_forge_lbl = ctk.CTkLabel(
+            photo_controls, text="0 imágenes", text_color=TEXT_MUTED,
+            font=ctk.CTkFont(size=11),
+        )
+        self.photo_forge_lbl.pack(side="left", padx=(0, 12))
+        GhostButton(photo_controls, text="Agregar imágenes", command=self.photo_forge_add_images).pack(side="left", padx=(0, 8))
+        GhostButton(photo_controls, text="Preview", command=self.photo_forge_preview).pack(side="left", padx=(0, 8))
+        self.photo_forge_btn = PrimaryButton(photo_controls, text="Generar variantes", command=self.photo_forge_generate, state="disabled")
+        self.photo_forge_btn.pack(side="left")
+        self.photo_forge_preview_lbl = ctk.CTkLabel(photo_body, text="", text_color=TEXT_MUTED)
+        self.photo_forge_preview_lbl.grid(row=2, column=0, sticky="w", pady=(8, 0))
+
         # Estado inicial "Default": ocultar toggles manuales y slider de Custom.
         self._forge_on_efectos_change("Default")
         self._forge_on_fuerza_change("Default")
@@ -6115,6 +6141,68 @@ class InstagramAutoPro(ctk.CTk):
                                          sticky="ew", padx=18, pady=(0, 6))
         elif self.forge_custom_panel.winfo_manager():
             self.forge_custom_panel.grid_remove()
+
+    def photo_forge_add_images(self):
+        paths = filedialog.askopenfilenames(
+            title="Seleccionar imágenes para Photo Forge",
+            filetypes=[("Imágenes", "*.jpg *.jpeg *.png *.webp"), ("Todos los archivos", "*.*")],
+        )
+        for path in paths:
+            if path not in self.photo_forge_paths:
+                self.photo_forge_paths.append(path)
+        self.photo_forge_lbl.configure(text=f"{len(self.photo_forge_paths)} imágenes")
+        self.photo_forge_btn.configure(state="normal" if self.photo_forge_paths else "disabled")
+
+    def photo_forge_preview(self):
+        if not self.photo_forge_paths:
+            return messagebox.showwarning("Photo Forge", "Agregá al menos una imagen.")
+        from photo_forge import render_photo_preview
+
+        preview_path = os.path.join(_BASE_DIR, ".photo_forge_preview.jpg")
+        try:
+            render_photo_preview(self.photo_forge_paths[0], preview_path, {"brightness": 1.05, "contrast": 1.02})
+            from PIL import Image
+
+            image = Image.open(preview_path).convert("RGB")
+            image.thumbnail((420, 260), Image.Resampling.LANCZOS)
+            self.photo_forge_preview_image = ctk.CTkImage(light_image=image, dark_image=image, size=image.size)
+            self.photo_forge_preview_lbl.configure(image=self.photo_forge_preview_image, text="")
+        except Exception as exc:
+            messagebox.showerror("Photo Forge", str(exc))
+
+    def photo_forge_generate(self):
+        if not self.photo_forge_paths:
+            return messagebox.showwarning("Photo Forge", "Agregá al menos una imagen.")
+        from photo_forge import render_photo_variant
+
+        output_root = os.path.join(_BASE_DIR, "fotos_forge")
+        operations = {"brightness": 1.05, "contrast": 1.02}
+        self.photo_forge_btn.configure(state="disabled")
+
+        def task():
+            outputs = []
+            for index, source in enumerate(self.photo_forge_paths, start=1):
+                output = os.path.join(output_root, f"{os.path.splitext(os.path.basename(source))[0]}__pf{index:02d}.jpg")
+                result = render_photo_variant(source, output, operations, profile="source")
+                log_id = self.db.save_video_transform_log("photo_forge", source, output, result)
+                try:
+                    from vault.integration import register_transform_output_if_possible
+                    from vault.storage import VaultStorage
+                    register_transform_output_if_possible(self.db, VaultStorage(self.db, os.path.join(_BASE_DIR, "vault")), log_id)
+                except Exception:
+                    pass
+                outputs.append(output)
+            return outputs
+
+        def done(success, result):
+            self.photo_forge_btn.configure(state="normal")
+            if success:
+                self.photo_forge_preview_lbl.configure(text=f"Generadas: {len(result)} variantes", image=None)
+                self.refresh_transform_log_table()
+            else:
+                messagebox.showerror("Photo Forge", str(result))
+
+        WorkerThread(self, done, task).start()
 
     def forge_add_videos(self):
         paths = filedialog.askopenfilenames(
