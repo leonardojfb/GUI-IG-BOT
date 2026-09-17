@@ -28,7 +28,7 @@ Estados usados:
 | R04 Vault | Parcial validado; storage, consultas, thumbnails e inspector backend listos, UI operativa completa pendiente. |
 | R05 captions | Parcial alto validado; snapshots y migracion conservadora listos, UI de edicion/diff completa pendiente. |
 | R06 linaje/firmas/reutilizacion | Parcial validado; backend auditable listo, leases/reservas y UI pendiente. |
-| R07-R20 | Mayormente pendiente o legacy existente sin contrato nuevo. |
+| R07-R20 | Contratos backend incrementales implementados; R07, R11-R20 conservan pendientes explícitos de UI, servicios externos y certificación operativa. |
 
 Estimacion conservadora del prototipo final: `20-25%`.
 Estimacion por paquetes tocados: `R00-R06 de R00-R20`, pero R04-R06 no estan cerrados al 100%.
@@ -68,7 +68,7 @@ Estimacion por paquetes tocados: `R00-R06 de R00-R20`, pero R04-R06 no estan cer
 | LEG-03 | Airtable hacia GUI | R03 | Parcial validado | `airtable_sync.py`; import manual/preview existe, pero falta ciclo operacional completo. |
 | LEG-04 | GUI hacia Airtable | R03 | Parcial validado | Mirror/delete opt-in parcialmente cubierto; falta cierre UI y prueba con Airtable real. |
 | LEG-05 | Tandas P1 x P2 | R10 | Legacy existente | Motor legacy funciona; falta contrato jobs R10. |
-| LEG-06 | Forge generico y por destinos | R10/R14 | Legacy existente / pendiente destinos | Forge generico existe; Forge por destinos pendiente. |
+| LEG-06 | Forge generico y por destinos | R10/R14 | Parcial validado | R10 conserva Forge legacy y R14 añade preview/reserva/job por destino; UI y reconciliación con historial aún pendientes. |
 | LEG-07 | Efectos y Fuerza independientes | R10 | Legacy existente | Hay pruebas historicas; falta versionarlo en jobs/perfiles. |
 | LEG-08 | Custom y rangos | R10 | Legacy existente | Falta contrato nuevo, validacion min/max y snapshots de presets. |
 | LEG-09 | Fingerprints y metadata | R06/R10/R11/R14 | Parcial validado | `vault/signatures.py`, `metadata_fingerprints`; faltan firmas perceptuales y jobs. |
@@ -90,35 +90,35 @@ Estimacion por paquetes tocados: `R00-R06 de R00-R20`, pero R04-R06 no estan cer
 | LEG-25 | Trial MAX e intercalado | R08 | Legacy existente / parcial | Politica v2 separa carril Trial; faltan fixture historico completo, MAX/intercalado y planificador unico R08. |
 | LEG-26 | Manifest comun | R07 | Parcial validado | Manifest v1/v2, snapshots, `build_entry_v2()`, `replace_entries_v2()`, preview/apply con revision, migracion v1->v2 por CLI/GUI, lock/journal de escritor con snapshots base/destino e inspeccion/limpieza por API/CLI/GUI; aplicacion de reconstruccion controlada pendiente. |
 | LEG-27 | Horarios y zonas | R07 | Parcial validado bajo | `schedule_snapshot` v2 captura dia/slot/carril y puede guardar hora/zona; falta conectarlo al planificador real. |
-| LEG-28 | Telegram como metodo | R15 | Legacy existente / parcial | Envio fake validado y uso Vault; ledger/multiformato pendiente. |
-| LEG-29 | Limpieza selectiva | R15/R16 | Legacy existente / parcial | Limpieza por cuentas/manifest existe; limpieza por IDs/carriles pendiente. |
-| LEG-30 | Express y paralelismo | R15 | Legacy existente / parcial | `tests/test_telegram_express_parallel.py`; falta ledger R15. |
-| LEG-31 | Entrega nativa archivos | R15 | Legacy existente / parcial | Video actual; imagen/formato nativo pendiente. |
-| LEG-32 | Publicado y copiar caption/link | R16 | Legacy parcial / pendiente | Contrato Story/caption preparado parcialmente; confirmacion persistente pendiente. |
+| LEG-28 | Telegram como metodo | R15 | Parcial validado | Ledger idempotente, Bot API sender nativo y uso Vault existente; falta conectar todo el worker legacy. |
+| LEG-29 | Limpieza selectiva | R15/R16 | Parcial validado | Inbox/callbacks versionados y undo one-shot; limpieza por IDs/carriles aún requiere integración UI. |
+| LEG-30 | Express y paralelismo | R15 | Parcial validado | Paralelismo legacy y ledger nativo cubiertos por tests; falta recuperación operativa del worker. |
+| LEG-31 | Entrega nativa archivos | R15 | Parcial validado | `sendPhoto`, `sendVideo` y `sendDocument` definidos con multipart; falta smoke real por formato. |
+| LEG-32 | Publicado y copiar caption/link | R16 | Parcial validado | Callbacks persistentes y undo definidos; confirmación real de publicación y copia de caption/link pendientes. |
 | LEG-33 | Recuperacion y casos limite | R02/R15/R16 | Parcial validado | Updater recuperable validado; recuperacion Telegram/jobs pendiente. |
 | LEG-34 | Originales persistentes | R04 | Parcial validado | `vault/storage.py`; UI/migracion operativa completa pendiente. |
 | LEG-35 | Firmas sin capacidad teorica | R06 | Parcial validado | `vault/signatures.py`, `vault/reuse.py`; leases y politica pendiente. |
-| LEG-36 | Biblioteca, familias y colecciones | R04/R12 | Parcial validado | `vault/query.py`; UI biblioteca completa pendiente. |
+| LEG-36 | Biblioteca, familias y colecciones | R04/R12 | Parcial validado | `vault/query.py` y API local de lectura; UI web/GUI de biblioteca completa pendiente. |
 | LEG-37 | Linaje e historial efectivo | R04/R06 | Parcial validado | `vault/lineage.py`, transform lineage, usages; visualizacion pendiente. |
 | LEG-38 | CRM y reutilizacion | R06/R16/R17 | Parcial bajo validado | Reuse audit backend; CRM operativo pendiente. |
-| LEG-39 | CRM en navegador | R12 | Pendiente | Sin web local. |
+| LEG-39 | CRM en navegador | R12/R17 | Parcial bajo | API local y export CRM existen; vista CRM navegable y métricas reales pendientes. |
 | LEG-40 | Calendario manual Instagram/Facebook | R07/R18/R19 | Parcial bajo | `build_entry_v2()` puede representar destinos manuales; UI, export y adapters pendientes. |
 | LEG-41 | Links y anuncio Story | R05/R18 | Parcial bajo | Campos existen en manifest/DB, flujo manual final pendiente. |
 | LEG-42 | Control web, roles, licencias y cloud | Backlog / R12+ | Pospuesto | No forma parte del nucleo local inmediato. |
-| LEG-43 | CRM ampliado | R17 | Pendiente | Sin metricas/relaciones ampliadas. |
-| LEG-44 | Timeline recetas y cola | R09/R14 | Pendiente | Transform logs no equivalen a jobs duraderos. |
+| LEG-43 | CRM ampliado | R17 | Parcial validado | Identidades tipadas, engagement, viralidad y referencias hash; fuentes reales y persistencia histórica pendientes. |
+| LEG-44 | Timeline recetas y cola | R09/R14 | Parcial validado | Jobs duraderos R09 y Forge por destino R14 existen; timeline UI y cola visible pendientes. |
 | LEG-45 | Social Cards | Backlog | Pospuesto / legacy externo | No integrado en este roadmap branch. |
-| LEG-46 | Rediseno GUI/web | R12 | Pendiente | GUI visible sigue siendo la historica. |
+| LEG-46 | Rediseno GUI/web | R12 | Parcial bajo | Shell web local navegable; la GUI principal y vistas web completas siguen históricas/parciales. |
 | LEG-47 | Launcher y panel herramientas | R00-R20 | Parcial validado | Launcher/updater validado; `Actualizaciones` incluye herramienta Manifest v2; panel herramientas completo pendiente. |
 | LEG-48 | Actualizaciones, datos y backups | R00-R02 | Parcial alto validado | Updater seguro; backup/restauracion UI pendiente. |
 | LEG-49 | Historial jobs, nombres y carpetas | R09 | Parcial bajo | `video_transform_logs`; job history/naming final pendiente. |
 | LEG-50 | Subtitulos, barra y conversores | Backlog | Pospuesto | No implementado en este branch. |
 | LEG-51 | Preview 9:16 e intro | R10 / backlog | Legacy parcial | Preview legacy existe en partes; contrato R10 pendiente. |
 | LEG-52 | E2E y diagnostico | R00-R20 | Parcial validado | Smokes y suite local; matriz final/ciclos piloto pendiente. |
-| LEG-53 | Photo Forge | R11 | Pendiente | No implementado. |
+| LEG-53 | Photo Forge | R11 | Parcial validado | Pillow versionado, preview, jobs, logs Vault y pruebas de corrupción; pantalla visible y lote real pendientes. |
 | LEG-54 | Carriles y colisiones | R07/R19 | Parcial validado bajo | `replace_entries_v2()` conserva otros carriles, rechaza batches fuera del carril objetivo y el writer bloquea pisadas concurrentes; politicas de colision avanzadas pendientes. |
 | LEG-55 | Multimetodo e identidades Meta | R17-R19 | Pendiente | No adapter Meta ni identidades completas. |
-| LEG-56 | Forge por destinos e ios-remote | R13/R14 | Pendiente | ios-remote read-only y Forge destinos no implementados. |
+| LEG-56 | Forge por destinos e ios-remote | R13/R14 | Parcial validado | Snapshots iOS saneados y jobs/reservas Forge por destino; driver real y UI operativa pendientes. |
 
 ## Evidencia de validacion actual
 

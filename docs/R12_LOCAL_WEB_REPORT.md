@@ -15,6 +15,8 @@ Fecha: 2026-09-17
   del camino de arranque y puede detenerse sin dejar un thread vivo.
 - Release/updater incluyen el módulo de forma aditiva; bootstrap permanece
   compatible con instalaciones antiguas.
+- La raíz sirve una shell navegable que carga las cuatro vistas por API con el
+  token introducido en memoria del navegador; no persiste el token.
 
 ## Verificacion
 
@@ -24,6 +26,7 @@ Fecha: 2026-09-17
 
 ## Limites
 
-No se declara aún una UI web completa ni escrituras remotas. Las mutaciones
+No se declaran aún escrituras remotas ni una integración automática con el
+launcher. Las mutaciones
 deben pasar por comandos explícitos, validación de reservas y auditoría, que se
 implementarán después de estabilizar R14-R18.

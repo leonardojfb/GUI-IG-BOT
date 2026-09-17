@@ -115,10 +115,16 @@ class LocalWebService:
 
 _INDEX_HTML = """<!doctype html>
 <html lang=\"es\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
-<title>Metodo IG local</title><h1>Metodo IG</h1>
-<nav><a href=\"/api/accounts\">Cuentas</a> <a href=\"/api/content\">Contenido</a>
-<a href=\"/api/calendar\">Calendario</a> <a href=\"/api/history\">Historial</a></nav>
-</html>"""
+<title>Metodo IG local</title><style>body{font:15px system-ui;margin:2rem;max-width:70rem}button{margin:.25rem;padding:.45rem}.status{min-height:1.5rem}table{border-collapse:collapse;margin-top:1rem}td,th{border:1px solid #ccc;padding:.35rem;text-align:left}</style>
+<h1>Metodo IG</h1><label>Token local <input id=\"token\" type=\"password\" autocomplete=\"off\"></label>
+<button onclick=\"loadView('accounts')\">Cuentas</button><button onclick=\"loadView('content')\">Contenido</button>
+<button onclick=\"loadView('calendar')\">Calendario</button><button onclick=\"loadView('history')\">Historial</button>
+<div class=\"status\" id=\"status\"></div><div id=\"result\"></div>
+<script>
+async function loadView(name){const status=document.getElementById('status');status.textContent='';try{const r=await fetch('/api/'+name,{headers:{Authorization:'Bearer '+document.getElementById('token').value}});const data=await r.json();if(!r.ok)throw Error(data.error||'request failed');render(data.items||[])}catch(e){status.textContent=e.message}}
+function render(items){const root=document.getElementById('result');root.innerHTML='';if(!items.length){root.textContent='Sin registros';return}const table=document.createElement('table');const keys=[...new Set(items.flatMap(x=>Object.keys(x)))].slice(0,8);table.innerHTML='<thead><tr>'+keys.map(k=>'<th>'+escapeHtml(k)+'</th>').join('')+'</tr></thead><tbody>'+items.map(x=>'<tr>'+keys.map(k=>'<td>'+escapeHtml(x[k])+'</td>').join('')+'</tr>').join('')+'</tbody>';root.appendChild(table)}
+function escapeHtml(v){return String(v??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]))}
+</script></html>"""
 
 
 def _read_json_items(path: str) -> list[dict[str, Any]]:
