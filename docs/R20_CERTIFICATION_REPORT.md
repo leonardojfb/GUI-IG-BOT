@@ -14,6 +14,8 @@ Fecha: 2026-09-17
   skips; los booleanos previos siguen aceptándose solo como evidencia legacy.
 - La evidencia estructurada exige al menos una prueba pasada y un número de
   skips no negativo; `passed=0` ya no puede certificar un gate.
+- `verify_release_artifact()` valida el SHA-256, `package_kind` y la presencia
+  en el ZIP de todos los archivos declarados por `release-manifest.json`.
 - Suite global ejecutada desde el worktree aislado: `540 passed, 0 skipped,
   7 subtests passed`.
 - Release/updater incluyen el gate de forma aditiva y bootstrap permanece
