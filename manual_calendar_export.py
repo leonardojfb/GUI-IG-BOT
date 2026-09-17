@@ -41,6 +41,21 @@ def export_manual_package(entries, target_path):
     return {"path": str(target), "entries": len(normalized), "schema_version": 1}
 
 
+def export_manifest_v2_package(manifest_path, target_path):
+    try:
+        payload = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"manifest ilegible: {manifest_path}") from exc
+    if payload.get("version") != 2:
+        raise ValueError("el export manual requiere manifest v2")
+    entries = []
+    for entry in payload.get("entries") or []:
+        if not isinstance(entry, dict) or entry.get("manifest_entry_version") != 2:
+            raise ValueError("entry incompatible con manifest v2")
+        entries.append({**entry, "media_path": entry.get("source_path")})
+    return export_manual_package(entries, target_path)
+
+
 def verify_manual_package(package_path):
     try:
         with zipfile.ZipFile(package_path) as archive:

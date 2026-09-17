@@ -1,6 +1,6 @@
 import zipfile
 
-from manual_calendar_export import export_manual_package, verify_manual_package
+from manual_calendar_export import export_manifest_v2_package, export_manual_package, verify_manual_package
 
 
 def test_manual_package_contains_checksums_and_verifies(tmp_path):
@@ -26,3 +26,18 @@ def test_manual_package_rejects_missing_media(tmp_path):
         pass
     else:
         raise AssertionError("missing media should block manual export")
+
+
+def test_manifest_v2_export_preserves_destination_fields(tmp_path):
+    media = tmp_path / "clip.mp4"
+    media.write_bytes(b"media")
+    manifest = tmp_path / "calendar_manifest.json"
+    manifest.write_text(__import__("json").dumps({"version": 2, "entries": [{"manifest_entry_version": 2, "source_path": str(media), "username": "alice", "lane": "standard", "placement": "feed", "publication_target": "instagram_manual"}]}), encoding="utf-8")
+    package = tmp_path / "manifest.zip"
+
+    export_manifest_v2_package(manifest, package)
+
+    assert verify_manual_package(package)["status"] == "ok"
+    with __import__("zipfile").ZipFile(package) as archive:
+        text = archive.read("package_manifest.json").decode("utf-8")
+    assert "instagram_manual" in text
