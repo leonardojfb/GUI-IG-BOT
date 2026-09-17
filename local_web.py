@@ -9,11 +9,12 @@ from typing import Any
 
 
 class LocalWebService:
-    def __init__(self, db, *, token: str | None = None, host: str = "127.0.0.1", port: int = 0):
+    def __init__(self, db, *, token: str | None = None, host: str = "127.0.0.1", port: int = 0, manifest_path: str = ""):
         self.db = db
         self.host = host
         self.port = int(port)
         self.token = token or secrets.token_urlsafe(32)
+        self.manifest_path = str(manifest_path or "")
         self._server = None
         self._thread = None
 
@@ -48,6 +49,9 @@ class LocalWebService:
             self._thread = None
 
     def _handle(self, request):
+        if request.path == "/":
+            self._respond_html(request, 200, _INDEX_HTML)
+            return
         if request.path == "/health":
             self._respond(request, 200, {"status": "ok", "service": "local_web", "read_only": True})
             return
@@ -83,7 +87,7 @@ class LocalWebService:
         return list(self.db.list_video_transform_logs(limit=500) or [])
 
     def _calendar(self) -> list[dict[str, Any]]:
-        return _read_json_items(getattr(self.db, "calendar_manifest_path", ""))
+        return _read_json_items(self.manifest_path or getattr(self.db, "calendar_manifest_path", ""))
 
     def _history(self) -> list[dict[str, Any]]:
         return self._content()
@@ -97,6 +101,24 @@ class LocalWebService:
         request.send_header("Cache-Control", "no-store")
         request.end_headers()
         request.wfile.write(data)
+
+    @staticmethod
+    def _respond_html(request, status: int, body: str):
+        data = body.encode("utf-8")
+        request.send_response(status)
+        request.send_header("Content-Type", "text/html; charset=utf-8")
+        request.send_header("Content-Length", str(len(data)))
+        request.send_header("Cache-Control", "no-store")
+        request.end_headers()
+        request.wfile.write(data)
+
+
+_INDEX_HTML = """<!doctype html>
+<html lang=\"es\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
+<title>Metodo IG local</title><h1>Metodo IG</h1>
+<nav><a href=\"/api/accounts\">Cuentas</a> <a href=\"/api/content\">Contenido</a>
+<a href=\"/api/calendar\">Calendario</a> <a href=\"/api/history\">Historial</a></nav>
+</html>"""
 
 
 def _read_json_items(path: str) -> list[dict[str, Any]]:

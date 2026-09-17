@@ -33,6 +33,8 @@ def test_local_web_requires_token_and_exposes_read_models(tmp_path):
         assert status == 200
         assert payload["items"] == []
         assert _request(f"{service.base_url}/health")[1]["status"] == "ok"
+        with urllib.request.urlopen(f"{service.base_url}/", timeout=5) as response:
+            assert "Contenido" in response.read().decode("utf-8")
     finally:
         service.stop()
         db.close()
