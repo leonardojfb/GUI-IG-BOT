@@ -13,9 +13,12 @@ Fecha: 2026-09-17
 - Fallos o respuestas sin `message_id` no generan una fila exitosa.
 - El sender se inyecta para mantener pruebas sin red y permitir integrar el
   transporte actual gradualmente.
+- `build_telegram_bot_api_sender()` ofrece el transporte Bot API real con
+  multipart nativo y `message_thread_id`; el token solo vive en memoria del
+  sender y no se persiste en el ledger.
 
 ## Limites
 
-El envío real, topics canónicos y migración de historiales requieren integrar
-este ledger con el worker Telegram existente en el siguiente checkpoint. No se
-reutilizan cookies ni sesiones de Instagram.
+La integración final con el worker Telegram existente, topics canónicos y
+migración de historiales todavía requiere un gate operativo. No se reutilizan
+cookies ni sesiones de Instagram.

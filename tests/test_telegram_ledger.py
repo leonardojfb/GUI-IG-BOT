@@ -1,6 +1,6 @@
 import sqlite3
 
-from telegram_ledger import deliver_media, ensure_telegram_ledger_schema, media_method
+from telegram_ledger import build_telegram_bot_api_sender, deliver_media, ensure_telegram_ledger_schema, media_method
 
 
 def test_media_method_uses_native_telegram_formats():
@@ -37,3 +37,21 @@ def test_failed_delivery_does_not_create_success_ledger_row():
 
     assert result["status"] == "failed"
     assert connection.execute("SELECT COUNT(*) FROM telegram_delivery_ledger").fetchone()[0] == 0
+
+
+def test_bot_api_sender_uses_native_file_field_and_thread(tmp_path):
+    media = tmp_path / "photo.jpg"
+    media.write_bytes(b"image")
+    calls = []
+
+    class Response:
+        def json(self):
+            return {"ok": True}
+
+    sender = build_telegram_bot_api_sender("token-from-env", request_fn=lambda *args, **kwargs: calls.append((args, kwargs)) or Response())
+    result = sender("sendPhoto", {"chat_id": "-1", "caption": "hola", "message_thread_id": 9, "media_path": str(media)})
+
+    assert result["ok"] is True
+    assert calls[0][0][0].endswith("/sendPhoto")
+    assert "photo" in calls[0][1]["files"]
+    assert calls[0][1]["data"]["message_thread_id"] == 9
