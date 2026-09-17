@@ -7,6 +7,8 @@ Fecha: 2026-09-16
 - `shared_planner.py` define `preview_shared_schedule()` como funcion pura y sin efectos laterales.
 - `shared_planner_sources.py` define `load_planner_accounts()` y `collect_tanda_candidates()` como lectores read-only para alimentar el preview con datos concretos.
 - `preview_schedule_from_sources()` compone ambos lectores y conserva un reporte de tandas inexistentes, vacias y archivos ignorados.
+- `load_candidate_usage_rows()` enriquece candidatos por ruta usando `vault_locations` y `vault_asset_usages`, sin insertar ni actualizar registros.
+- Los usos conservan cuenta, carril, tipo y referencia externa; si el carril no esta guardado, se deriva de `publication_target` conocido.
 - El preview recibe cuentas e inventario de candidatos concretos; exige usernames unicos y `source_id` unicos.
 - Cada asignacion conserva `source_id`, `source_path`, `tanda` y cualquier metadata del candidato, y agrega cuenta, dia, slot, carril, placement y metodo.
 - `MAX` calcula la menor cantidad de dias necesaria para exponer todos los candidatos; los dias fijos respetan `days * accounts * daily_quota`.
@@ -37,7 +39,9 @@ Fecha: 2026-09-16
 
 - Adaptador de candidatos desde Vault/archivos y cuentas desde catalogo/SQLite.
 - Integracion directa con Vault/catalogo real; el checkpoint actual usa el filesystem de `videos_finales/` y el contrato `DatabaseManager.get_all_accounts()` sin mutaciones.
+- Integracion del contexto `used_in` en previews por cuenta y resumen GUI de exclusiones.
 - Politicas de elegibilidad, usos previos, Trial/carriles y disponibilidad real.
+- Conexion del contexto de usos Vault con `preview_schedule_from_sources()` bajo una opcion explicita por cuenta.
 - Integracion separada de Por Tandas y Por Cuentas sin cambiar sus algoritmos legacy.
 - Preview visible en GUI con diff antes de escribir.
 - Reservas de contenido/carril y revision de concurrencia.

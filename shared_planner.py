@@ -8,6 +8,82 @@ import math
 import random
 
 
+def assess_candidate_eligibility(
+    candidate: dict,
+    *,
+    username: str,
+    lane: str,
+    allow_reuse: bool = False,
+) -> dict:
+    """Evaluate one candidate for one account and publication lane."""
+    account = _required_label(username, "username").casefold()
+    lane_label = _required_label(lane, "lane")
+    delivery_kind = str(candidate.get("delivery_kind") or "").strip().lower()
+    if (delivery_kind == "trial" and lane_label != "trial_reel") or (
+        delivery_kind == "normal" and lane_label == "trial_reel"
+    ):
+        return {
+            "eligible": False,
+            "reason": "trial_lane_mismatch",
+            "context_usage_count": 0,
+        }
+
+    same_lane = 0
+    context_usage_count = 0
+    for usage in candidate.get("used_in") or []:
+        if not isinstance(usage, dict):
+            continue
+        if str(usage.get("username") or "").strip().casefold() != account:
+            continue
+        if str(usage.get("lane") or "").strip() == lane_label:
+            same_lane += 1
+        else:
+            context_usage_count += 1
+    if same_lane and not allow_reuse:
+        return {
+            "eligible": False,
+            "reason": "already_used_in_lane",
+            "context_usage_count": context_usage_count,
+        }
+    return {"eligible": True, "reason": "", "context_usage_count": context_usage_count}
+
+
+def filter_candidates_for_account(
+    candidates: list[dict],
+    *,
+    username: str,
+    lane: str,
+    allow_reuse: bool = False,
+) -> dict:
+    """Return eligible candidates plus auditable exclusions for one account."""
+    account = _required_label(username, "username")
+    lane_label = _required_label(lane, "lane")
+    eligible = []
+    excluded = []
+    for candidate in candidates:
+        source_id = _required_label(
+            candidate.get("source_id") or candidate.get("source_path"), "source_id"
+        )
+        assessment = assess_candidate_eligibility(
+            candidate,
+            username=account,
+            lane=lane_label,
+            allow_reuse=allow_reuse,
+        )
+        if assessment["eligible"]:
+            eligible.append(candidate)
+            continue
+        excluded.append(
+            {
+                "source_id": source_id,
+                "username": account,
+                "lane": lane_label,
+                "reason": assessment["reason"],
+            }
+        )
+    return {"candidates": eligible, "excluded": excluded}
+
+
 def preview_shared_schedule(
     *,
     accounts: list[dict],

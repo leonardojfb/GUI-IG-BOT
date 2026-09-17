@@ -1,6 +1,10 @@
 import pytest
 
-from shared_planner import preview_shared_schedule
+from shared_planner import (
+    assess_candidate_eligibility,
+    filter_candidates_for_account,
+    preview_shared_schedule,
+)
 
 
 def _candidates(count, tanda="T1"):
@@ -89,6 +93,49 @@ def test_preview_shared_schedule_strict_mode_blocks_partial_plan_without_side_ef
     assert preview["summary"]["omitted"] == 5
 
 
+def test_candidate_eligibility_blocks_only_same_account_and_lane_usage():
+    candidate = {
+        "source_id": "T1:clip.mp4",
+        "delivery_kind": "normal",
+        "used_in": [
+            {"username": "alice", "lane": "reel"},
+            {"username": "alice", "lane": "story"},
+        ],
+    }
+
+    blocked = assess_candidate_eligibility(candidate, username="alice", lane="reel")
+    other_lane = assess_candidate_eligibility(candidate, username="alice", lane="story")
+    other_account = assess_candidate_eligibility(candidate, username="bob", lane="reel")
+
+    assert blocked == {
+        "eligible": False,
+        "reason": "already_used_in_lane",
+        "context_usage_count": 1,
+    }
+    assert other_lane["eligible"] is False
+    assert other_lane["context_usage_count"] == 1
+    assert other_account == {"eligible": True, "reason": "", "context_usage_count": 0}
+
+
+def test_candidate_eligibility_enforces_trial_lane_and_filter_reports_exclusions():
+    candidates = [
+        {"source_id": "normal", "delivery_kind": "normal"},
+        {"source_id": "trial", "delivery_kind": "trial"},
+    ]
+
+    result = filter_candidates_for_account(candidates, username="alice", lane="reel")
+
+    assert [item["source_id"] for item in result["candidates"]] == ["normal"]
+    assert result["excluded"] == [
+        {
+            "source_id": "trial",
+            "username": "alice",
+            "lane": "reel",
+            "reason": "trial_lane_mismatch",
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     "kwargs, message",
     [
@@ -101,4 +148,3 @@ def test_preview_shared_schedule_strict_mode_blocks_partial_plan_without_side_ef
 def test_preview_shared_schedule_rejects_invalid_scope(kwargs, message):
     with pytest.raises(ValueError, match=message):
         preview_shared_schedule(**kwargs)
-

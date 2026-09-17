@@ -1,12 +1,48 @@
 """Read-only adapters that feed concrete data into the shared planner."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from shared_planner import preview_shared_schedule
 
 
 VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".avi"})
+
+
+def load_candidate_usage_rows(db, candidates: list[dict]) -> list[dict]:
+    """Attach normalized Vault usage context to candidates without writes."""
+    result = []
+    for candidate in candidates:
+        enriched = dict(candidate)
+        paths = _candidate_paths(candidate)
+        usages = []
+        if paths:
+            placeholders = ",".join("?" for _ in paths)
+            cur = db.conn.cursor()
+            cur.execute(
+                f"""
+                SELECT vu.usage_kind, vu.external_ref, vu.details_json
+                FROM vault_asset_usages vu
+                JOIN vault_locations vl ON vl.asset_id = vu.asset_id
+                WHERE vl.path IN ({placeholders})
+                ORDER BY vu.id
+                """,
+                paths,
+            )
+            for row in cur.fetchall():
+                details = _parse_details(row["details_json"])
+                usages.append(
+                    {
+                        "username": str(details.get("username") or ""),
+                        "lane": _lane_from_details(details),
+                        "usage_kind": str(row["usage_kind"] or ""),
+                        "external_ref": str(row["external_ref"] or ""),
+                    }
+                )
+        enriched["used_in"] = usages
+        result.append(enriched)
+    return result
 
 
 def preview_schedule_from_sources(
@@ -112,3 +148,37 @@ def _required_label(value, field: str) -> str:
     if not label:
         raise ValueError(f"{field} no puede estar vacio")
     return label
+
+
+def _candidate_paths(candidate: dict) -> list[str]:
+    raw = str(candidate.get("source_path") or candidate.get("path") or "").strip()
+    if not raw:
+        return []
+    paths = [raw]
+    resolved = str(Path(raw).resolve())
+    if resolved not in paths:
+        paths.append(resolved)
+    return paths
+
+
+def _parse_details(raw) -> dict:
+    if isinstance(raw, dict):
+        return dict(raw)
+    try:
+        value = json.loads(raw or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _lane_from_details(details: dict) -> str:
+    lane = str(details.get("lane") or "").strip()
+    if lane:
+        return lane
+    return {
+        "instagram_trial_reel": "trial_reel",
+        "instagram_reel": "reel",
+        "instagram_story": "story",
+        "instagram_post": "post",
+        "facebook_reel": "reel",
+    }.get(str(details.get("publication_target") or "").strip(), "")

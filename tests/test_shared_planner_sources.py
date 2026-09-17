@@ -1,6 +1,7 @@
 from shared_planner_sources import (
     collect_tanda_candidates,
     load_planner_accounts,
+    load_candidate_usage_rows,
     preview_schedule_from_sources,
 )
 
@@ -72,3 +73,41 @@ def test_preview_schedule_from_sources_combines_readers_and_keeps_inventory_repo
         "empty_tandas": [],
         "skipped_files": 0,
     }
+
+
+def test_load_candidate_usage_rows_enriches_candidates_without_writing(tmp_path):
+    import json
+    import sqlite3
+
+    path = str((tmp_path / "clip.mp4").resolve())
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(
+        """
+        CREATE TABLE vault_assets (id INTEGER PRIMARY KEY, display_name TEXT);
+        CREATE TABLE vault_locations (asset_id INTEGER, path TEXT, managed INTEGER DEFAULT 0);
+        CREATE TABLE vault_asset_usages (
+            id INTEGER PRIMARY KEY, asset_id INTEGER, usage_kind TEXT,
+            external_ref TEXT, details_json TEXT
+        );
+        """
+    )
+    conn.execute("INSERT INTO vault_assets VALUES (7, 'clip.mp4')")
+    conn.execute("INSERT INTO vault_locations VALUES (7, ?, 1)", (path,))
+    conn.execute(
+        "INSERT INTO vault_asset_usages VALUES (3, 7, 'calendar', 'entry-3', ?)",
+        (json.dumps({"username": "alice", "lane": "reel"}),),
+    )
+    conn.commit()
+
+    class FakeDb:
+        def __init__(self, connection):
+            self.conn = connection
+
+    candidates = [{"source_id": "T1:clip.mp4", "source_path": path}]
+    result = load_candidate_usage_rows(FakeDb(conn), candidates)
+
+    assert result[0]["used_in"] == [
+        {"username": "alice", "lane": "reel", "usage_kind": "calendar", "external_ref": "entry-3"}
+    ]
+    assert result[0]["source_id"] == candidates[0]["source_id"]
