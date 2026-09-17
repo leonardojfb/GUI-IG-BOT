@@ -103,6 +103,7 @@ def import_manual_package(package_path, destination_root, *, confirm=False):
     if preview["status"] != "ready":
         raise FileExistsError("el paquete no esta listo para importar: " + ", ".join(preview.get("conflicts", [])))
     destination = Path(destination_root).resolve()
+    destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(tempfile.mkdtemp(prefix=f".{destination.name}.import-", dir=str(destination.parent)))
     try:
         with zipfile.ZipFile(package_path) as archive:

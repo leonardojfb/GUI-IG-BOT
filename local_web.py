@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -9,12 +10,13 @@ from typing import Any
 
 
 class LocalWebService:
-    def __init__(self, db, *, token: str | None = None, host: str = "127.0.0.1", port: int = 0, manifest_path: str = ""):
+    def __init__(self, db, *, token: str | None = None, host: str = "127.0.0.1", port: int = 0, manifest_path: str = "", calendar_import_root: str = ""):
         self.db = db
         self.host = host
         self.port = int(port)
         self.token = token or secrets.token_urlsafe(32)
         self.manifest_path = str(manifest_path or "")
+        self.calendar_import_root = Path(calendar_import_root).resolve() if calendar_import_root else None
         self._server = None
         self._thread = None
 
@@ -30,6 +32,9 @@ class LocalWebService:
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 service._handle(self)
+
+            def do_POST(self):
+                service._handle_post(self)
 
             def log_message(self, *_args):
                 return
@@ -72,6 +77,43 @@ class LocalWebService:
             self._respond(request, 200, {"items": producer()})
         except Exception as exc:
             self._respond(request, 500, {"error": type(exc).__name__, "message": str(exc)})
+
+    def _handle_post(self, request):
+        if not self._authorized(request):
+            self._respond(request, 401, {"error": "unauthorized"})
+            return
+        if request.path not in {"/api/calendar/import-preview", "/api/calendar/import"}:
+            self._respond(request, 404, {"error": "not_found"})
+            return
+        try:
+            length = int(request.headers.get("Content-Length", "0"))
+            payload = json.loads(request.rfile.read(length).decode("utf-8") or "{}")
+            package = Path(str(payload.get("package_path") or "")).resolve()
+            if self.calendar_import_root is None:
+                self._respond(request, 400, {"error": "calendar_import_disabled"})
+                return
+            destination_name = str(payload.get("destination") or "").strip()
+            destination_path = Path(destination_name)
+            if not destination_name or destination_path.is_absolute() or ".." in destination_path.parts:
+                self._respond(request, 400, {"error": "invalid_destination"})
+                return
+            destination = (self.calendar_import_root / destination_path).resolve()
+            if self.calendar_import_root not in destination.parents:
+                self._respond(request, 400, {"error": "invalid_destination"})
+                return
+            from manual_calendar_export import import_manual_package, preview_manual_package_import
+            if request.path.endswith("/import"):
+                if payload.get("confirm") is not True:
+                    self._respond(request, 400, {"error": "confirmation_required"})
+                    return
+                result = import_manual_package(package, destination, confirm=True)
+            else:
+                result = preview_manual_package_import(package, destination)
+            self._respond(request, 200, result)
+        except FileExistsError as exc:
+            self._respond(request, 409, {"error": "conflict", "message": str(exc)})
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            self._respond(request, 400, {"error": type(exc).__name__, "message": str(exc)})
 
     def _authorized(self, request) -> bool:
         value = request.headers.get("Authorization", "")

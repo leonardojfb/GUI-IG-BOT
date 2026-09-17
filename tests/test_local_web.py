@@ -5,6 +5,7 @@ import urllib.request
 import database
 
 from local_web import LocalWebService
+from manual_calendar_export import export_manual_package
 
 
 def _request(url, token=None):
@@ -12,6 +13,18 @@ def _request(url, token=None):
     if token:
         request.add_header("Authorization", f"Bearer {token}")
     with urllib.request.urlopen(request, timeout=5) as response:
+        return response.status, json.loads(response.read().decode("utf-8"))
+
+
+def _post(url, token, payload):
+    request = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), method="POST")
+    request.add_header("Authorization", f"Bearer {token}")
+    request.add_header("Content-Type", "application/json")
+    try:
+        response = urllib.request.urlopen(request, timeout=5)
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read().decode("utf-8"))
+    with response:
         return response.status, json.loads(response.read().decode("utf-8"))
 
 
@@ -61,3 +74,30 @@ def test_legacy_gui_exposes_opt_in_local_panel_without_replacing_entrypoints():
     assert 'text="Abrir panel local"' in source
     assert "def _open_local_web" in source
     assert 'self.show_frame("Forge")' not in source[source.index("def _open_local_web"):source.index("def _on_close")]
+
+
+def test_local_web_calendar_import_is_previewed_confirmed_and_scoped(tmp_path):
+    media = tmp_path / "clip.mp4"
+    media.write_bytes(b"media")
+    package = tmp_path / "calendar.zip"
+    export_manual_package([{"media_path": str(media), "username": "alice"}], package)
+    import_root = tmp_path / "imports"
+    db = database.DatabaseManager(str(tmp_path / "db.sqlite"))
+    service = LocalWebService(db, token="web-token", calendar_import_root=str(import_root)).start()
+    try:
+        status, preview = _post(f"{service.base_url}/api/calendar/import-preview", "web-token", {"package_path": str(package), "destination": "day-1"})
+        assert status == 200
+        assert preview["status"] == "ready"
+        assert not import_root.exists()
+
+        status, denied = _post(f"{service.base_url}/api/calendar/import", "web-token", {"package_path": str(package), "destination": "day-1", "confirm": False})
+        assert status == 400
+        assert denied["error"] == "confirmation_required"
+
+        status, imported = _post(f"{service.base_url}/api/calendar/import", "web-token", {"package_path": str(package), "destination": "day-1", "confirm": True})
+        assert status == 200
+        assert imported["status"] == "imported"
+        assert (import_root / "day-1" / "media" / "0001.mp4").read_bytes() == b"media"
+    finally:
+        service.stop()
+        db.close()

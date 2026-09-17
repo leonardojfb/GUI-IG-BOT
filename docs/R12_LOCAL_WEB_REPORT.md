@@ -19,6 +19,10 @@ Fecha: 2026-09-17
   token introducido en memoria del navegador; no persiste el token.
 - `gui_premium_v7.py` expone `Abrir panel local` en Actualizaciones, inicia el
   servicio bajo demanda, copia el token temporal y lo detiene en cierre.
+- Con `calendar_import_root` configurado, el panel ofrece
+  `/api/calendar/import-preview` y `/api/calendar/import`: ambos exigen Bearer,
+  el primero no escribe, y el segundo exige `confirm=true`, limita el destino a
+  la raíz configurada y delega en la importación atómica R18.
 
 ## Verificacion
 
@@ -28,7 +32,7 @@ Fecha: 2026-09-17
 
 ## Limites
 
-No se declaran aún escrituras remotas ni una integración automática con el
-launcher. Las mutaciones
-deben pasar por comandos explícitos, validación de reservas y auditoría, que se
-implementarán después de estabilizar R14-R18.
+No se declaran escrituras remotas ni publicación de plataforma. Las mutaciones
+locales quedan limitadas al import de paquetes de calendario; reservas,
+publicación y acciones sobre cuentas aún requieren comandos explícitos y
+auditoría.
