@@ -48,6 +48,7 @@ $ReleaseFiles = @(
     "job_runner.py",
     "producer_jobs.py",
     "photo_forge.py",
+    "local_web.py",
     "social_publishing.py",
     "telegram_core.py",
     "cleaner.py",
