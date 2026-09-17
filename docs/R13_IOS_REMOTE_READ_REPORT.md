@@ -12,6 +12,8 @@ Fecha: 2026-09-17
 - `ios_remote_adapter.load_ios_remote_snapshot()` normaliza contenedores,
   cuentas y perfiles allowlisted para Forge y calcula un hash `sha256:` del
   snapshot normalizado.
+- La tarjeta de Forge permite cargar ese export y muestra contenedores, cuentas,
+  perfiles e hash; la carga no abre SSH ni ejecuta comandos sobre el dispositivo.
 - El adapter es sólo lectura y no acepta ni persiste cookies, tokens,
   contraseñas o sesiones.
 - No se implementa login, captura de cookies, requests a Instagram ni

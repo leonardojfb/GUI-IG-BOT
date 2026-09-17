@@ -19,6 +19,8 @@ Fecha: 2026-09-17
 - La GUI Forge expone un bloque opt-in con filas
   `cuenta|contenedor|perfil|copias`, muestra las asignaciones y permite
   reservar el preview con confirmacion; el preview no crea jobs ni archivos.
+- La misma tarjeta puede cargar un snapshot read-only de ios-remote y mostrar
+  su identidad antes de preparar destinos; el fallback manual sigue visible.
 - Release/updater incluyen el contrato sin modificar bootstrap.
 
 ## Limites
