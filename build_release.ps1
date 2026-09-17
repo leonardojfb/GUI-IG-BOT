@@ -44,6 +44,8 @@ $ReleaseFiles = @(
     "shared_planner_sources.py",
     "shared_planner_apply.py",
     "planner_reservations.py",
+    "durable_jobs.py",
+    "job_runner.py",
     "social_publishing.py",
     "telegram_core.py",
     "cleaner.py",
