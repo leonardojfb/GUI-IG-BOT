@@ -33,6 +33,35 @@ def parse_destination_specs(text):
     return result
 
 
+def bind_destinations_to_snapshot(destinations, snapshot):
+    """Resolve each destination to exactly one read-only ios-remote container."""
+    if not isinstance(snapshot, dict) or not snapshot.get("snapshot_hash"):
+        raise ValueError("snapshot ios-remote invalido")
+    containers = snapshot.get("containers") or []
+    bound = []
+    for destination in destinations or []:
+        username = str(destination.get("username") or "").strip().casefold()
+        profile = str(destination.get("profile") or "").strip()
+        matches = []
+        for container in containers:
+            accounts = container.get("accounts") or []
+            has_account = any(str(account.get("username") or "").strip().casefold() == username for account in accounts)
+            actual_profile = (container.get("device_profile") or {}).get("profile_id")
+            if has_account and actual_profile == profile:
+                matches.append(container)
+        if not matches:
+            raise ValueError(f"@{username} no tiene contenedor unico para {profile}")
+        if len(matches) > 1:
+            raise ValueError(f"@{username} tiene multiples contenedores para {profile}")
+        container = matches[0]
+        enriched = dict(destination)
+        enriched["remote_container_id"] = container.get("container_id")
+        enriched["snapshot_hash"] = snapshot["snapshot_hash"]
+        enriched["profile_version"] = (container.get("device_profile") or {}).get("version")
+        bound.append(enriched)
+    return bound
+
+
 def preview_destination_forge(video_paths, destinations):
     paths = [str(Path(path).resolve()) for path in video_paths]
     if not paths or any(not Path(path).is_file() for path in paths):
@@ -50,7 +79,7 @@ def preview_destination_forge(video_paths, destinations):
         lane = f"{container}:{profile}"
         for source in paths:
             for copy_number in range(1, copies + 1):
-                assignments.append({"source_id": source, "source_path": source, "username": username, "container": container, "profile": profile, "lane": lane, "copy_number": copy_number})
+                assignments.append({"source_id": source, "source_path": source, "username": username, "container": container, "profile": profile, "lane": lane, "copy_number": copy_number, **{key: value for key, value in destination.items() if key.startswith("remote_") or key.startswith("snapshot_") or key == "profile_version"}})
     return {"status": "ready", "scope": {"lane": "destination"}, "assignments": assignments, "requested": len(assignments)}
 
 
@@ -70,7 +99,11 @@ def build_destination_forge_job_spec(preview, *, output_root, metadata):
         source = Path(assignment["source_path"])
         destination_dir = root / assignment["username"] / assignment["container"] / assignment["profile"]
         output = destination_dir / f"{source.stem}__{assignment['username']}__c{assignment['copy_number']:02d}{source.suffix}"
-        steps.append({"step_id": f"destination-forge-{index:04d}", "kind": "forge.copy", "payload": {"source_path": str(source), "output_path": str(output), "metadata": dict(metadata), "copy_number": assignment["copy_number"], "username": assignment["username"], "container": assignment["container"], "profile": assignment["profile"], "lane": assignment["lane"]}})
+        payload = {"source_path": str(source), "output_path": str(output), "metadata": dict(metadata), "copy_number": assignment["copy_number"], "username": assignment["username"], "container": assignment["container"], "profile": assignment["profile"], "lane": assignment["lane"]}
+        for key in ("remote_container_id", "snapshot_hash", "profile_version"):
+            if key in assignment:
+                payload[key] = assignment[key]
+        steps.append({"step_id": f"destination-forge-{index:04d}", "kind": "forge.copy", "payload": payload})
     if not steps:
         raise ValueError("el preview no contiene assignments")
     return {"job_type": "forge.destination.v1", "recipe": {"recipe_version": 1, "producer": "forge", "destination_mode": True, "output_root": str(root), "metadata": dict(metadata), "assignment_count": len(steps)}, "steps": steps}

@@ -21,6 +21,9 @@ Fecha: 2026-09-17
   reservar el preview con confirmacion; el preview no crea jobs ni archivos.
 - La misma tarjeta puede cargar un snapshot read-only de ios-remote y mostrar
   su identidad antes de preparar destinos; el fallback manual sigue visible.
+- Si hay snapshot cargado, `bind_destinations_to_snapshot()` exige que cada
+  cuenta/perfil resuelva a un único contenedor y conserva `remote_container_id`,
+  `profile_version` y `snapshot_hash` en el assignment y el job.
 - Release/updater incluyen el contrato sin modificar bootstrap.
 
 ## Limites

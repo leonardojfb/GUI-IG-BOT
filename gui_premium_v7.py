@@ -35,7 +35,7 @@ from calendar_manifest import (
 from shared_planner_apply import preview_shared_manifest_apply
 from shared_planner_sources import preview_schedule_by_account_from_sources
 from planner_reservations import reserve_shared_preview, release_reservation, reservation_covers_preview
-from destination_forge import parse_destination_specs, preview_destination_forge, reserve_destination_preview
+from destination_forge import bind_destinations_to_snapshot, parse_destination_specs, preview_destination_forge, reserve_destination_preview
 from captions.service import CaptionService, MissingCaptionError
 from database import DatabaseManager
 from vault.calendar_usage import record_calendar_manifest_usages
@@ -6180,6 +6180,8 @@ class InstagramAutoPro(ctk.CTk):
         try:
             raw = self.destination_specs_text.get("1.0", "end")
             specs = parse_destination_specs("\n".join(line for line in raw.splitlines() if not line.lstrip().startswith("#")))
+            if getattr(self, "_r13_snapshot", None):
+                specs = bind_destinations_to_snapshot(specs, self._r13_snapshot)
             preview = preview_destination_forge(self.forge_video_paths, specs)
         except Exception as exc:
             self._r14_preview = None
