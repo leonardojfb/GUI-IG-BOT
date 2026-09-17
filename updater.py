@@ -65,6 +65,7 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "photo_forge.py",
         "local_web.py",
         "ios_remote_read.py",
+        "ios_remote_adapter.py",
         "destination_forge.py",
         "telegram_ledger.py",
         "confirmation_ledger.py",
