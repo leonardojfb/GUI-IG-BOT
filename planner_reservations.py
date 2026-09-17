@@ -6,13 +6,23 @@ import uuid
 
 def ensure_reservation_schema(connection) -> None:
     existing = connection.execute("PRAGMA table_info(planner_reservations)").fetchall()
-    if existing and "copy_number" not in {str(row[1]) for row in existing}:
+    columns = {str(row[1]) for row in existing}
+    table_row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='planner_reservations'"
+    ).fetchone()
+    table_sql = "".join(str(table_row[0] or "").lower().split()) if table_row else ""
+    needs_migration = bool(existing) and (
+        "copy_number" not in columns
+        or "unique(source_id,username,lane,copy_number)" not in table_sql
+    )
+    if needs_migration:
         connection.execute("ALTER TABLE planner_reservations RENAME TO planner_reservations_legacy")
         _create_reservation_schema(connection)
+        copy_expression = "copy_number" if "copy_number" in columns else "1"
         connection.execute(
-            """INSERT INTO planner_reservations
+            f"""INSERT INTO planner_reservations
                 (reservation_id, owner, source_id, username, lane, copy_number, expires_at, created_at)
-                SELECT reservation_id, owner, source_id, username, lane, 1, expires_at, created_at
+                SELECT reservation_id, owner, source_id, username, lane, {copy_expression}, expires_at, created_at
                 FROM planner_reservations_legacy"""
         )
         connection.execute("DROP TABLE planner_reservations_legacy")

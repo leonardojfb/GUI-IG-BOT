@@ -107,3 +107,21 @@ def test_reservation_schema_migrates_legacy_rows_to_copy_one():
     preview = {"status": "ready", "scope": {"lane": "lane"}, "assignments": [{"source_id": "source", "username": "alice", "lane": "lane", "copy_number": 2}]}
     result = reserve_shared_preview(conn, preview, owner="new", now=100)
     assert result["status"] == "reserved"
+
+
+def test_reservation_schema_repairs_old_unique_constraint_after_partial_migration():
+    from planner_reservations import ensure_reservation_schema, reserve_shared_preview
+
+    conn = sqlite3.connect(":memory:")
+    conn.execute("""CREATE TABLE planner_reservations (
+        reservation_id TEXT NOT NULL, owner TEXT NOT NULL, source_id TEXT NOT NULL,
+        username TEXT NOT NULL, lane TEXT NOT NULL, copy_number INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
+        PRIMARY KEY(reservation_id, source_id, username, lane, copy_number),
+        UNIQUE(source_id, username, lane)
+    )""")
+    conn.execute("INSERT INTO planner_reservations VALUES (?, ?, ?, ?, ?, ?, ?, ?)", ("old", "legacy", "source", "alice", "lane", 1, 999, 1))
+    ensure_reservation_schema(conn)
+
+    preview = {"status": "ready", "scope": {"lane": "lane"}, "assignments": [{"source_id": "source", "username": "alice", "lane": "lane", "copy_number": 2}]}
+    assert reserve_shared_preview(conn, preview, owner="new", now=100)["status"] == "reserved"

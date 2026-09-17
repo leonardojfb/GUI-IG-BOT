@@ -16,7 +16,9 @@ Fecha: 2026-09-17
   cuenta/contenedor/perfil.
 - `reconcile_destination_reservation()` comprueba cobertura exacta y libera la
   reserva despues de que el consumidor procese el job; antes guarda una fila
-  idempotente por assignment en `destination_forge_history`.
+  idempotente por assignment (incluido `copy_number`) en
+  `destination_forge_history`; ambas tablas reparan también una instalación
+  parcialmente migrada que conserve la unicidad antigua.
 - La GUI Forge expone un bloque opt-in con filas
   `cuenta|contenedor|perfil|copias`, muestra las asignaciones y permite
   reservar el preview con confirmacion; el preview no crea jobs ni archivos.

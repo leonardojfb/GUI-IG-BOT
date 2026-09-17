@@ -159,14 +159,24 @@ def _record_reconciliation_history(connection, reservation, preview, *, now):
 
 def _ensure_destination_history_schema(connection):
     existing = connection.execute("PRAGMA table_info(destination_forge_history)").fetchall()
-    if existing and "copy_number" not in {str(row[1]) for row in existing}:
+    columns = {str(row[1]) for row in existing}
+    table_row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='destination_forge_history'"
+    ).fetchone()
+    table_sql = "".join(str(table_row[0] or "").lower().split()) if table_row else ""
+    needs_migration = bool(existing) and (
+        "copy_number" not in columns
+        or "unique(reservation_id,source_id,username,lane,copy_number)" not in table_sql
+    )
+    if needs_migration:
         connection.execute("ALTER TABLE destination_forge_history RENAME TO destination_forge_history_legacy")
         _create_destination_history_schema(connection)
+        copy_expression = "copy_number" if "copy_number" in columns else "1"
         connection.execute(
-            """INSERT INTO destination_forge_history
+            f"""INSERT INTO destination_forge_history
                 (reservation_id, owner, source_id, username, lane, copy_number,
                  remote_container_id, snapshot_hash, status, created_at)
-                SELECT reservation_id, owner, source_id, username, lane, 1,
+                SELECT reservation_id, owner, source_id, username, lane, {copy_expression},
                        remote_container_id, snapshot_hash, status, created_at
                 FROM destination_forge_history_legacy"""
         )

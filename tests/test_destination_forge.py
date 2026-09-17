@@ -134,3 +134,33 @@ def test_destination_job_preserves_remote_snapshot_binding(tmp_path):
     assert payload["remote_container_id"] == "remote-c1"
     assert payload["snapshot_hash"] == "sha256:abc"
     assert payload["profile_version"] == 4
+
+
+def test_destination_history_repairs_partial_unique_constraint(tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"video")
+    preview = preview_destination_forge(
+        [source],
+        [{"username": "alice", "container": "reel", "profile": "instagram_reel", "copies": 2}],
+    )
+    db = database.DatabaseManager(str(tmp_path / "db.sqlite"))
+    try:
+        db.conn.execute("""CREATE TABLE destination_forge_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reservation_id TEXT NOT NULL, owner TEXT NOT NULL, source_id TEXT NOT NULL,
+            username TEXT NOT NULL, lane TEXT NOT NULL, copy_number INTEGER NOT NULL,
+            remote_container_id TEXT, snapshot_hash TEXT, status TEXT NOT NULL,
+            created_at INTEGER NOT NULL, UNIQUE(reservation_id, source_id, username, lane)
+        )""")
+        db.conn.execute(
+            "INSERT INTO destination_forge_history (reservation_id, owner, source_id, username, lane, copy_number, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("old", "legacy", "old-source", "alice", "reel:instagram_reel", 1, "reconciled", 1),
+        )
+        db.conn.commit()
+        reservation = reserve_destination_preview(db.conn, preview, owner="worker", now=100)
+        result = reconcile_destination_reservation(db.conn, reservation, preview, owner="worker", now=101)
+        assert result["history_count"] == 2
+        rows = db.conn.execute("SELECT copy_number FROM destination_forge_history ORDER BY id").fetchall()
+        assert [row[0] for row in rows] == [1, 1, 2]
+    finally:
+        db.close()
