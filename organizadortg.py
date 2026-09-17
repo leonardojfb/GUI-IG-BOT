@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import mimetypes
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -875,6 +876,77 @@ def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, usern
         if compressed_tmp and os.path.exists(compressed_tmp):
             os.unlink(compressed_tmp)
 
+
+def _send_media_to_topic(chat_id, t_id, caption, media_path, topics_state, username, tag, db=None, asset_ref=None, idempotency_key=None):
+    """Deliver an image/document natively while preserving the legacy topic flow."""
+    from telegram_ledger import media_method, find_delivery, record_confirmed_delivery
+
+    method = media_method(media_path)
+    if method == "sendVideo":
+        return _send_video_to_topic(
+            chat_id, t_id, caption, media_path, topics_state, username, tag,
+            db=db, asset_ref=asset_ref, idempotency_key=idempotency_key,
+        )
+    ledger_bot_id = "legacy-bot"
+    if db is not None and asset_ref and idempotency_key:
+        existing = find_delivery(
+            db.conn, asset_ref=asset_ref, chat_id=chat_id, topic_id=t_id,
+            bot_id=ledger_bot_id, idempotency_key=idempotency_key,
+        )
+        if existing:
+            return True, t_id
+
+    field = {"sendPhoto": "photo", "sendDocument": "document"}[method]
+    content_type = mimetypes.guess_type(media_path)[0] or "application/octet-stream"
+    for attempt in range(5):
+        payload = {
+            "chat_id": chat_id,
+            "message_thread_id": t_id,
+            "reply_markup": json.dumps(_publish_button_markup(caption), ensure_ascii=False),
+        }
+        if caption:
+            payload["caption"] = caption
+        try:
+            with open(_windows_long_path(media_path), "rb") as handle:
+                response = requests.post(
+                    f"https://api.telegram.org/bot{TOKEN}/{method}",
+                    data=payload,
+                    files={field: (os.path.basename(media_path), handle, content_type)},
+                )
+        except OSError as exc:
+            print(f"❌ No se pudo abrir el archivo de @{username}: {exc}")
+            return False, t_id
+
+        if response.status_code == 200:
+            if db is not None and asset_ref and idempotency_key:
+                try:
+                    message_id = (response.json().get("result") or {}).get("message_id")
+                    if message_id is not None:
+                        record_confirmed_delivery(
+                            db.conn, asset_ref=asset_ref, path=media_path,
+                            chat_id=chat_id, topic_id=t_id, bot_id=ledger_bot_id,
+                            caption=caption, idempotency_key=idempotency_key,
+                            message_id=message_id, method=method,
+                        )
+                except Exception:
+                    pass
+            return True, t_id
+        if response.status_code == 429:
+            try:
+                retry_after = response.json().get("parameters", {}).get("retry_after", 15)
+            except Exception:
+                retry_after = 15
+            time.sleep(retry_after + 1)
+            continue
+        if "thread not found" in response.text:
+            t_id = get_or_create_topic(chat_id, username, tag, topics_state, force_recreate=True)
+            if not t_id:
+                return False, None
+            continue
+        print(f"❌ Error API Telegram ({method}): {response.text}")
+        return False, t_id
+    return False, t_id
+
 def scan_calendar_structure():
     print(f"📂 Escaneando calendario en: {input_root}")
     print(f"📄 Archivo organizadortg cargado: {__file__}")
@@ -911,7 +983,7 @@ def scan_calendar_structure():
             continue
 
         for f in files:
-            if not f.lower().endswith((".mp4", ".mov")):
+            if not f.lower().endswith((".mp4", ".mov", ".mkv", ".avi", ".jpg", ".jpeg", ".png", ".webp", ".pdf", ".zip")):
                 continue
 
             video_path = os.path.join(root, f)
@@ -961,7 +1033,7 @@ def scan_trial_calendar_structure(accounts):
         if not account or not account.get("trials_active"):
             continue
         for filename in files:
-            if filename.lower().endswith((".mp4", ".mov")):
+            if filename.lower().endswith((".mp4", ".mov", ".mkv", ".avi", ".jpg", ".jpeg", ".png", ".webp", ".pdf", ".zip")):
                 all_videos.append({
                     "path": os.path.join(root, filename),
                     "filename": filename,
@@ -1207,13 +1279,14 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     job["chat_id"], topic_id, job["caption"], job["path"],
                     topics_state, job["username"], job["tag"],
                 )
-                if getattr(_send_video_to_topic, "__module__", None) == __name__:
+                sender = _send_video_to_topic if str(job["path"]).lower().endswith((".mp4", ".mov", ".mkv", ".avi")) else _send_media_to_topic
+                if getattr(sender, "__module__", None) == __name__:
                     send_args += (
                         db,
                         str(job.get("transform_log_id") or os.path.abspath(job["path"])),
                         f"{job.get('dia_str', '')}|{job['username']}|{job['path']}|{topic_id}",
                     )
-                ok, _topic_id = _send_video_to_topic(*send_args)
+                ok, _topic_id = sender(*send_args)
                 if ok:
                     record_telegram_send_usage(db, job, chat_id=job["chat_id"], topic_id=topic_id)
                     sent += 1
@@ -1236,7 +1309,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     return f"🛑 Abortado. Enviados: {global_sent}"
 
     save_json(os.path.join(base_dir, STATE_FILE), topics_state)
-    return f"✨ PROCESO TERMINADO. Se enviaron {global_sent} videos."
+    return f"✨ PROCESO TERMINADO. Se enviaron {global_sent} archivos."
 
 # --- 4. CONTROLADOR DE HILOS Y MOTOR DE EJECUCIÓN ---
 class TelegramBotController:

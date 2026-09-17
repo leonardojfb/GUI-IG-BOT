@@ -1,4 +1,5 @@
 import sqlite3
+from types import SimpleNamespace
 
 from telegram_ledger import build_telegram_bot_api_sender, deliver_media, ensure_telegram_ledger_schema, find_delivery, media_method, record_confirmed_delivery
 
@@ -66,3 +67,60 @@ def test_confirmed_delivery_record_is_idempotent_for_legacy_worker(tmp_path):
     assert first["status"] == "recorded"
     assert second["status"] == "already_sent"
     assert find_delivery(connection, asset_ref="asset", chat_id="-1", topic_id=4, bot_id="legacy-bot", idempotency_key="day1")["message_id"] == "12"
+
+
+def test_legacy_worker_sends_photo_with_native_field_and_ledger(monkeypatch, tmp_path):
+    import organizadortg
+
+    media = tmp_path / "story.jpg"
+    media.write_bytes(b"image")
+    calls = []
+
+    class Response:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"ok": True, "result": {"message_id": 77}}
+
+    def post(url, **kwargs):
+        calls.append((url, kwargs))
+        return Response()
+
+    monkeypatch.setattr(organizadortg.requests, "post", post)
+    connection = sqlite3.connect(":memory:")
+    db = SimpleNamespace(conn=connection)
+
+    first = organizadortg._send_media_to_topic(
+        "-1", 9, "caption", str(media), {}, "account", "MAIN",
+        db=db, asset_ref="asset-photo", idempotency_key="job-photo",
+    )
+    second = organizadortg._send_media_to_topic(
+        "-1", 9, "caption", str(media), {}, "account", "MAIN",
+        db=db, asset_ref="asset-photo", idempotency_key="job-photo",
+    )
+
+    assert first == (True, 9)
+    assert second == (True, 9)
+    assert len(calls) == 1
+    assert calls[0][0].endswith("/sendPhoto")
+    assert "photo" in calls[0][1]["files"]
+    assert connection.execute("SELECT method, message_id FROM telegram_delivery_ledger").fetchone() == ("sendPhoto", "77")
+
+
+def test_calendar_scan_includes_native_photo_and_document_files(monkeypatch, tmp_path):
+    import organizadortg
+
+    account_dir = tmp_path / "Dia_1" / "account"
+    account_dir.mkdir(parents=True)
+    (account_dir / "story.jpg").write_bytes(b"image")
+    (account_dir / "brief.pdf").write_bytes(b"document")
+    (account_dir / "ignored.txt").write_text("ignored")
+    monkeypatch.setattr(organizadortg, "input_root", str(tmp_path))
+    monkeypatch.setattr(organizadortg, "trial_input_root", str(tmp_path / "trial"))
+    monkeypatch.setattr(organizadortg, "_calendar_manifest_file", lambda: str(tmp_path / "missing.json"))
+    monkeypatch.setattr(organizadortg, "get_accounts_with_va_info", lambda: [{"username": "account", "account_type": "main"}])
+
+    files = organizadortg.scan_calendar_structure()
+
+    assert {item["filename"] for item in files} == {"story.jpg", "brief.pdf"}

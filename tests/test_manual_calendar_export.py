@@ -1,6 +1,6 @@
 import zipfile
 
-from manual_calendar_export import export_manifest_v2_package, export_manual_package, verify_manual_package
+from manual_calendar_export import export_manifest_v2_package, export_manual_package, import_manual_package, preview_manual_package_import, verify_manual_package
 
 
 def test_manual_package_contains_checksums_and_verifies(tmp_path):
@@ -41,3 +41,32 @@ def test_manifest_v2_export_preserves_destination_fields(tmp_path):
     with __import__("zipfile").ZipFile(package) as archive:
         text = archive.read("package_manifest.json").decode("utf-8")
     assert "instagram_manual" in text
+
+
+def test_manual_package_import_requires_confirmation_and_reports_conflicts(tmp_path):
+    media = tmp_path / "clip.mp4"
+    media.write_bytes(b"media")
+    package = tmp_path / "manifest.zip"
+    export_manual_package([{"media_path": str(media), "username": "alice"}], package)
+    destination = tmp_path / "calendar"
+
+    preview = preview_manual_package_import(package, destination)
+    assert preview["status"] == "ready"
+    assert preview["entries"] == 1
+    assert preview["conflicts"] == []
+    assert not destination.exists()
+
+    try:
+        import_manual_package(package, destination)
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError("import must require explicit confirmation")
+
+    result = import_manual_package(package, destination, confirm=True)
+    assert result["status"] == "imported"
+    assert (destination / "media" / "0001.mp4").read_bytes() == b"media"
+
+    conflict = preview_manual_package_import(package, destination)
+    assert conflict["status"] == "conflict"
+    assert conflict["conflicts"] == ["media/0001.mp4"]

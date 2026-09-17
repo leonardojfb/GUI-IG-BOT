@@ -9,11 +9,15 @@ Fecha: 2026-09-17
 - Cada archivo incluye SHA-256 y la exportacion es atomica.
 - `verify_manual_package()` valida estructura y bytes antes de importar o
   entregar el paquete.
+- `preview_manual_package_import()` devuelve alcance y conflictos sin crear
+  archivos.
+- `import_manual_package()` exige confirmación explícita, extrae en temporal y
+  publica el destino sólo cuando termina; no sobrescribe destinos existentes.
 - No publica, no llama Meta y no modifica el manifest activo.
 - `export_manifest_v2_package()` integra el lector del manifest v2, conserva
   destino/lane/placement y bloquea v1 o entries incompatibles.
 
 ## Limites
 
-Falta comprobar capacidades reales de cada plataforma y ofrecer el remapeo
-desde una UI con confirmacion explicita.
+Falta comprobar capacidades reales de cada plataforma, modificar el manifest
+operativo desde una UI de remapeo y registrar auditoría de importaciones.

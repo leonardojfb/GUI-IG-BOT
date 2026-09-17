@@ -74,9 +74,63 @@ def verify_manual_package(package_path):
     return {"status": "ok", "entries": checked, "schema_version": 1}
 
 
+def preview_manual_package_import(package_path, destination_root):
+    """Verify a package and report the exact files that an import would create."""
+    verification = verify_manual_package(package_path)
+    if verification["status"] != "ok":
+        return {"status": "error", "error": verification["error"], "entries": 0, "conflicts": []}
+    destination = Path(destination_root).resolve()
+    conflicts = []
+    entries = []
+    try:
+        with zipfile.ZipFile(package_path) as archive:
+            manifest = json.loads(archive.read("package_manifest.json").decode("utf-8"))
+            for entry in manifest.get("entries") or []:
+                relative = _safe_archive_path(entry.get("media_path"))
+                target = destination / relative
+                if target.exists():
+                    conflicts.append(relative.as_posix())
+                entries.append({"media_path": relative.as_posix(), "target_path": str(target)})
+    except (OSError, KeyError, ValueError, zipfile.BadZipFile) as exc:
+        return {"status": "error", "error": str(exc), "entries": 0, "conflicts": []}
+    return {"status": "conflict" if conflicts else "ready", "entries": len(entries), "conflicts": conflicts, "files": entries}
+
+
+def import_manual_package(package_path, destination_root, *, confirm=False):
+    if not confirm:
+        raise PermissionError("la importacion requiere confirm=True")
+    preview = preview_manual_package_import(package_path, destination_root)
+    if preview["status"] != "ready":
+        raise FileExistsError("el paquete no esta listo para importar: " + ", ".join(preview.get("conflicts", [])))
+    destination = Path(destination_root).resolve()
+    temporary = Path(tempfile.mkdtemp(prefix=f".{destination.name}.import-", dir=str(destination.parent)))
+    try:
+        with zipfile.ZipFile(package_path) as archive:
+            for item in preview["files"]:
+                relative = Path(item["media_path"])
+                target = temporary / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(relative.as_posix()) as source, target.open("wb") as output:
+                    output.write(source.read())
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(temporary, destination)
+    finally:
+        if temporary.exists():
+            import shutil
+            shutil.rmtree(temporary)
+    return {"status": "imported", "entries": preview["entries"], "path": str(destination)}
+
+
 def _sha256(path):
     return _sha256_bytes(Path(path).read_bytes())
 
 
 def _sha256_bytes(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def _safe_archive_path(value):
+    relative = Path(str(value or ""))
+    if not str(value) or relative.is_absolute() or ".." in relative.parts:
+        raise ValueError("ruta de archivo no segura en el paquete")
+    return relative

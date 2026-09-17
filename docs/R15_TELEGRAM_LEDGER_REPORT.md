@@ -19,8 +19,15 @@ Fecha: 2026-09-17
 - `organizadortg._send_video_to_topic()` registra el envío confirmado cuando
   recibe DB/asset/idempotency context, pero conserva la llamada legacy cuando
   un test o wrapper sustituye el handler.
+- El escaneo legacy acepta imágenes (`jpg`, `jpeg`, `png`, `webp`) y
+  documentos (`pdf`, `zip`) además de los videos históricos.
+- `organizadortg._send_media_to_topic()` conecta esos archivos al worker
+  existente con el mismo topic, caption, botón y ledger; los videos mantienen
+  su ruta de compresión específica.
 
 ## Limites
 
 Topics canónicos y migración de historiales todavía requieren un gate
-operativo. No se reutilizan cookies ni sesiones de Instagram.
+operativo. Falta un smoke contra un bot/grupo controlado; los tests no
+demuestran publicación externa. No se reutilizan cookies ni sesiones de
+Instagram.
