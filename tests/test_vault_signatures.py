@@ -66,3 +66,27 @@ def test_vault_inspector_includes_signatures(tmp_path):
         "media_type",
     }
     db.close()
+
+
+def test_perceptual_signatures_find_visual_reuse_candidates(tmp_path):
+    from PIL import Image, ImageDraw
+
+    db = DatabaseManager(str(tmp_path / "organizador.db"))
+    storage = VaultStorage(db, tmp_path / "vault")
+    first_path = tmp_path / "first.png"
+    second_path = tmp_path / "second.jpg"
+    for path in (first_path, second_path):
+        image = Image.new("RGB", (64, 64), "white")
+        ImageDraw.Draw(image).rectangle((8, 8, 28, 28), fill="red")
+        image.save(path, format="JPEG" if path.suffix == ".jpg" else "PNG")
+    first = storage.import_managed(first_path)
+    second = storage.import_managed(second_path)
+    signatures = VaultSignatures(db)
+    signatures.ensure_perceptual_signature(first["asset_id"], first["path"])
+    signatures.ensure_perceptual_signature(second["asset_id"], second["path"])
+
+    matches = signatures.find_assets_by_perceptual_similarity(second["asset_id"], max_distance=0)
+
+    assert [row["asset_id"] for row in matches] == [first["asset_id"]]
+    assert matches[0]["distance"] == 0
+    db.close()

@@ -33,6 +33,59 @@ class VaultSignatures:
             self.record_signature(asset_id, kind, value, algorithm=algorithm, details=details)
         return self.signatures_for_asset(asset_id)
 
+    def ensure_perceptual_signature(self, asset_id: int, path: str | Path) -> dict[str, Any]:
+        target = Path(path)
+        if target.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp"}:
+            raise ValueError("la firma perceptual requiere una imagen")
+        self._require_asset(asset_id)
+        from photo_forge import perceptual_signature
+
+        value = perceptual_signature(target)
+        return self.record_signature(
+            asset_id, "perceptual_hash", value, algorithm="average_hash_8x8",
+            details={"source": "photo_forge", "hash_size": 8},
+        )
+
+    def find_assets_by_perceptual_similarity(self, asset_id: int, *, max_distance: int = 4) -> list[dict[str, Any]]:
+        if int(max_distance) < 0 or int(max_distance) > 64:
+            raise ValueError("max_distance fuera de rango")
+        current = next(
+            (row for row in self.signatures_for_asset(asset_id)
+             if row["signature_kind"] == "perceptual_hash" and row["algorithm"] == "average_hash_8x8"),
+            None,
+        )
+        if current is None:
+            raise ValueError("el asset no tiene firma perceptual")
+        from photo_forge import perceptual_distance
+
+        candidates = self.find_assets_by_signature(
+            "perceptual_hash", current["signature_value"],
+            algorithm="average_hash_8x8", exclude_asset_id=asset_id,
+        )
+        # Exact signatures are indexed by SQLite. Near matches are evaluated
+        # against all stored perceptual signatures without changing the schema.
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT asset_id, signature_value FROM vault_asset_signatures WHERE signature_kind=? AND algorithm=? AND asset_id<>? ORDER BY asset_id",
+            ("perceptual_hash", "average_hash_8x8", int(asset_id)),
+        )
+        by_asset = {row[0]: row[1] for row in cur.fetchall()}
+        result = []
+        for candidate in self.find_assets_by_signature("perceptual_hash", current["signature_value"], algorithm="average_hash_8x8", exclude_asset_id=asset_id):
+            candidate["distance"] = 0
+            result.append(candidate)
+        exact_ids = {row["asset_id"] for row in result}
+        for candidate_id, value in by_asset.items():
+            if candidate_id in exact_ids:
+                continue
+            distance = perceptual_distance(current["signature_value"], value)
+            if distance <= int(max_distance):
+                rows = self.find_assets_by_signature("perceptual_hash", value, algorithm="average_hash_8x8", exclude_asset_id=asset_id)
+                for candidate in rows:
+                    candidate["distance"] = distance
+                    result.append(candidate)
+        return sorted(result, key=lambda row: (row["distance"], row["asset_id"]))
+
     def record_signature(
         self,
         asset_id: int,
@@ -57,6 +110,8 @@ class VaultSignatures:
                 signature_value = excluded.signature_value,
                 details_json = excluded.details_json,
                 updated_at = CURRENT_TIMESTAMP
+            WHERE vault_asset_signatures.signature_value <> excluded.signature_value
+               OR vault_asset_signatures.details_json <> excluded.details_json
             """,
             (asset, kind, algo, value, self._json(details)),
         )

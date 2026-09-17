@@ -28,6 +28,9 @@ Fecha: 2026-09-13
 - `VaultSignatures.ensure_file_signatures()` guarda firmas tecnicas reproducibles: `sha256`, `size_bytes`, `extension` y `media_type`.
 - `VaultSignatures.record_signature()` permite guardar firmas futuras o manuales sin cambiar el schema.
 - `VaultSignatures.find_assets_by_signature()` consulta candidatos por firma y puede excluir el asset actual para auditorias de similitud.
+- `VaultSignatures.ensure_perceptual_signature()` registra average-hash de
+  imágenes y `find_assets_by_perceptual_similarity()` devuelve candidatos por
+  distancia Hamming, sin bloquear ni reasignar usos.
 - `VaultReuseAudit.candidates_for_asset()` cruza firmas compartidas con usos registrados para reportar posibles reutilizaciones sin tomar decisiones automaticas.
 - `VaultQuery.inspect_asset()` ahora incluye `parents`, `children` y `usages` junto al asset, ubicaciones, familias, colecciones, transform logs y thumbnail.
 - `VaultQuery.inspect_asset()` tambien incluye `signatures`.
@@ -73,6 +76,7 @@ Fecha: 2026-09-13
 
 - Completar linaje automatico en productores que todavia no pasen por `register_transform_output()`.
 - Enriquecer la auditoria Telegram con IDs reales de mensaje si el transporte los expone en una fase posterior.
-- Agregar firmas perceptuales adicionales para detectar reutilizacion visual aunque cambie el hash exacto.
+- Integrar las firmas perceptuales en reglas explícitas por cuenta/carril y
+  mostrar advertencias en la UI antes de bloquear o sugerir reutilización.
 - Exponer linaje, firmas, usos y candidatos en la UI del Vault con estados claros antes de bloquear o sugerir reutilizacion.
 - Definir reglas de reutilizacion por cuenta/categoria cuando haya suficiente evidencia de linaje y uso.

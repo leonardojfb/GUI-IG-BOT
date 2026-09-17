@@ -27,7 +27,7 @@ Estados usados:
 | R03 catalogo/cuentas | Parcial validado; backend y guards listos, cierre completo depende de flujos UI/evidencia operativa. |
 | R04 Vault | Parcial validado; storage, consultas, thumbnails e inspector backend listos, UI operativa completa pendiente. |
 | R05 captions | Parcial alto validado; snapshots y migracion conservadora listos, UI de edicion/diff completa pendiente. |
-| R06 linaje/firmas/reutilizacion | Parcial validado; backend auditable listo, leases/reservas y UI pendiente. |
+| R06 linaje/firmas/reutilizacion | Parcial validado; backend auditable listo, firmas perceptuales integradas, leases/reservas y UI pendiente. |
 | R07-R20 | Contratos backend incrementales implementados; R07, R11-R20 conservan pendientes explícitos de UI, servicios externos y certificación operativa. |
 
 Estimacion conservadora del prototipo final: `20-25%`.
@@ -71,7 +71,7 @@ Estimacion por paquetes tocados: `R00-R06 de R00-R20`, pero R04-R06 no estan cer
 | LEG-06 | Forge generico y por destinos | R10/R14 | Parcial validado | R10 conserva Forge legacy y R14 añade preview/reserva/job por destino; UI y reconciliación con historial aún pendientes. |
 | LEG-07 | Efectos y Fuerza independientes | R10 | Legacy existente | Hay pruebas historicas; falta versionarlo en jobs/perfiles. |
 | LEG-08 | Custom y rangos | R10 | Legacy existente | Falta contrato nuevo, validacion min/max y snapshots de presets. |
-| LEG-09 | Fingerprints y metadata | R06/R10/R11/R14 | Parcial validado | `vault/signatures.py`, `metadata_fingerprints`; faltan firmas perceptuales y jobs. |
+| LEG-09 | Fingerprints y metadata | R06/R10/R11/R14 | Parcial validado | `vault/signatures.py`, `metadata_fingerprints`; firmas perceptuales para imágenes integradas, falta política y jobs completos. |
 | LEG-10 | Editor foto sobre video y preview | R10 | Legacy existente | Falta adaptar a jobs y preview coherente compartido. |
 | LEG-11 | Lote cartesiano | R10 | Legacy existente | Falta trazabilidad por receta/job y reservas. |
 | LEG-12 | Cache de overlays preparados | R10 | Legacy existente | Falta integrar al contrato de jobs/perfiles. |
