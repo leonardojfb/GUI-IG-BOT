@@ -128,21 +128,7 @@ def reconcile_destination_reservation(connection, reservation, preview, *, owner
 
 
 def _record_reconciliation_history(connection, reservation, preview, *, now):
-    connection.execute(
-        """CREATE TABLE IF NOT EXISTS destination_forge_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            reservation_id TEXT NOT NULL,
-            owner TEXT NOT NULL,
-            source_id TEXT NOT NULL,
-            username TEXT NOT NULL,
-            lane TEXT NOT NULL,
-            remote_container_id TEXT,
-            snapshot_hash TEXT,
-            status TEXT NOT NULL,
-            created_at INTEGER NOT NULL,
-            UNIQUE(reservation_id, source_id, username, lane)
-        )"""
-    )
+    _ensure_destination_history_schema(connection)
     inserted = 0
     for assignment in preview.get("assignments") or []:
         source_id = str(assignment.get("source_id") or assignment.get("source_path") or "")
@@ -150,15 +136,16 @@ def _record_reconciliation_history(connection, reservation, preview, *, now):
         lane = str(assignment.get("lane") or "").strip()
         cursor = connection.execute(
             """INSERT OR IGNORE INTO destination_forge_history
-                (reservation_id, owner, source_id, username, lane,
+                (reservation_id, owner, source_id, username, lane, copy_number,
                  remote_container_id, snapshot_hash, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 str(reservation.get("reservation_id") or ""),
                 str(reservation.get("owner") or ""),
                 source_id,
                 username,
                 lane,
+                int(assignment.get("copy_number") or 1),
                 assignment.get("remote_container_id"),
                 assignment.get("snapshot_hash"),
                 "reconciled",
@@ -168,3 +155,40 @@ def _record_reconciliation_history(connection, reservation, preview, *, now):
         inserted += int(cursor.rowcount > 0)
     connection.commit()
     return inserted
+
+
+def _ensure_destination_history_schema(connection):
+    existing = connection.execute("PRAGMA table_info(destination_forge_history)").fetchall()
+    if existing and "copy_number" not in {str(row[1]) for row in existing}:
+        connection.execute("ALTER TABLE destination_forge_history RENAME TO destination_forge_history_legacy")
+        _create_destination_history_schema(connection)
+        connection.execute(
+            """INSERT INTO destination_forge_history
+                (reservation_id, owner, source_id, username, lane, copy_number,
+                 remote_container_id, snapshot_hash, status, created_at)
+                SELECT reservation_id, owner, source_id, username, lane, 1,
+                       remote_container_id, snapshot_hash, status, created_at
+                FROM destination_forge_history_legacy"""
+        )
+        connection.execute("DROP TABLE destination_forge_history_legacy")
+    elif not existing:
+        _create_destination_history_schema(connection)
+
+
+def _create_destination_history_schema(connection):
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS destination_forge_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reservation_id TEXT NOT NULL,
+            owner TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            username TEXT NOT NULL,
+            lane TEXT NOT NULL,
+            copy_number INTEGER NOT NULL,
+            remote_container_id TEXT,
+            snapshot_hash TEXT,
+            status TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            UNIQUE(reservation_id, source_id, username, lane, copy_number)
+        )"""
+    )

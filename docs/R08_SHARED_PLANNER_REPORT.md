@@ -45,6 +45,6 @@ Fecha: 2026-09-16
 - Ejecuciones duraderas, reintentos y recuperacion despues del cierre de la aplicacion, que corresponden a R09.
 ## Cierre R08
 
-El branch incluye una tarjeta opt-in en Logistica para `Previsualizar R08`, `Reservar fuentes` y `Aplicar al manifest`. La reserva usa SQLite con TTL y conflicto atomico por fuente, cuenta y carril; la aplicacion convierte assignments a manifest v2 y pasa por `preview_replace_entries_v2()` mas `apply_manifest_preview()`, por lo que no hay escritura sin confirmacion ni revision vigente.
+El branch incluye una tarjeta opt-in en Logistica para `Previsualizar R08`, `Reservar fuentes` y `Aplicar al manifest`. La reserva usa SQLite con TTL y conflicto atomico por fuente, cuenta, carril y `copy_number`; la aplicacion convierte assignments a manifest v2 y pasa por `preview_replace_entries_v2()` mas `apply_manifest_preview()`, por lo que no hay escritura sin confirmacion ni revision vigente. Las filas del esquema anterior se migran como copia 1.
 
 El flujo actual soporta `reel` y `trial_reel`. Los carriles manuales `story` y `post`, horarios historicos exactos y publicacion real en Instagram no se declaran terminados por este checkpoint.

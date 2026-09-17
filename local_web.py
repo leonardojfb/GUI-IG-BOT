@@ -88,7 +88,8 @@ class LocalWebService:
         if not self._authorized(request):
             self._respond(request, 401, {"error": "unauthorized"})
             return
-        if request.path not in {"/api/calendar/import-preview", "/api/calendar/import"}:
+        route = urlsplit(request.path).path
+        if route not in {"/api/calendar/import-preview", "/api/calendar/import"}:
             self._respond(request, 404, {"error": "not_found"})
             return
         try:
@@ -108,7 +109,7 @@ class LocalWebService:
                 self._respond(request, 400, {"error": "invalid_destination"})
                 return
             from manual_calendar_export import import_manual_package, preview_manual_package_import
-            if request.path.endswith("/import"):
+            if route.endswith("/import"):
                 if payload.get("confirm") is not True:
                     self._respond(request, 400, {"error": "confirmation_required"})
                     return

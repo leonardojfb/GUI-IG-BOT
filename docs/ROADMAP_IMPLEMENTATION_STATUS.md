@@ -68,10 +68,10 @@ Estimacion por paquetes tocados: `R00-R06 de R00-R20`, pero R04-R06 no estan cer
 | LEG-03 | Airtable hacia GUI | R03 | Parcial validado | `airtable_sync.py`; import manual/preview existe, pero falta ciclo operacional completo. |
 | LEG-04 | GUI hacia Airtable | R03 | Parcial validado | Mirror/delete opt-in parcialmente cubierto; falta cierre UI y prueba con Airtable real. |
 | LEG-05 | Tandas P1 x P2 | R10 | Legacy existente | Motor legacy funciona; falta contrato jobs R10. |
-| LEG-06 | Forge generico y por destinos | R10/R14 | Parcial validado | R10 conserva Forge legacy y R14 añade preview/reserva/job por destino; UI y reconciliación con historial aún pendientes. |
+| LEG-06 | Forge generico y por destinos | R10/R14 | Parcial validado | R10 conserva Forge legacy y R14 añade preview/reserva/job por destino; reconciliación idempotente por assignment y `copy_number` queda en historial local; resultado visual post-render externo aún pendiente. |
 | LEG-07 | Efectos y Fuerza independientes | R10 | Legacy existente | Hay pruebas historicas; falta versionarlo en jobs/perfiles. |
 | LEG-08 | Custom y rangos | R10 | Legacy existente | Falta contrato nuevo, validacion min/max y snapshots de presets. |
-| LEG-09 | Fingerprints y metadata | R06/R10/R11/R14 | Parcial validado | `vault/signatures.py`, `metadata_fingerprints`; firmas perceptuales para imágenes integradas, falta política y jobs completos. |
+| LEG-09 | Fingerprints y metadata | R06/R10/R11/R14 | Parcial validado | `vault/signatures.py`, `metadata_fingerprints` y política Photo Forge por cuenta/carril; faltan jobs completos y lote real. |
 | LEG-10 | Editor foto sobre video y preview | R10 | Legacy existente | Falta adaptar a jobs y preview coherente compartido. |
 | LEG-11 | Lote cartesiano | R10 | Legacy existente | Falta trazabilidad por receta/job y reservas. |
 | LEG-12 | Cache de overlays preparados | R10 | Legacy existente | Falta integrar al contrato de jobs/perfiles. |
@@ -97,7 +97,7 @@ Estimacion por paquetes tocados: `R00-R06 de R00-R20`, pero R04-R06 no estan cer
 | LEG-32 | Publicado y copiar caption/link | R16 | Parcial validado | Webhook conserva marcado/caption y callbacks versionados quedan persistidos de forma opt-in; publicación real y copia de caption/link siguen pendientes. |
 | LEG-33 | Recuperacion y casos limite | R02/R15/R16 | Parcial validado | Updater recuperable validado; recuperacion Telegram/jobs pendiente. |
 | LEG-34 | Originales persistentes | R04 | Parcial validado | `vault/storage.py`; UI/migracion operativa completa pendiente. |
-| LEG-35 | Firmas sin capacidad teorica | R06 | Parcial validado | `vault/signatures.py`, `vault/reuse.py`; leases y politica pendiente. |
+| LEG-35 | Firmas sin capacidad teorica | R06 | Parcial validado | `vault/signatures.py`, `vault/reuse.py` y `photo_forge.audit_photo_forge_reuse()`; leases de firma y UI siguen pendientes. |
 | LEG-36 | Biblioteca, familias y colecciones | R04/R12 | Parcial validado | `vault/query.py` y API local de lectura; UI web/GUI de biblioteca completa pendiente. |
 | LEG-37 | Linaje e historial efectivo | R04/R06 | Parcial validado | `vault/lineage.py`, transform lineage, usages; visualizacion pendiente. |
 | LEG-38 | CRM y reutilizacion | R06/R16/R17 | Parcial bajo validado | Reuse audit backend; CRM operativo pendiente. |
@@ -125,7 +125,7 @@ Estimacion por paquetes tocados: `R00-R06 de R00-R20`, pero R04-R06 no estan cer
 Ultima suite completa observada en este branch:
 
 ```text
-454 passed, 1 skipped, 7 subtests passed in 162.97s (0:02:42)
+547 passed, 0 skipped, 7 subtests passed in 202.66s (0:03:22)
 ```
 
 Smokes controlados de runtime/launcher/UI:

@@ -112,7 +112,7 @@ def test_local_web_calendar_import_is_previewed_confirmed_and_scoped(tmp_path):
     audit = tmp_path / "calendar-imports.jsonl"
     service = LocalWebService(db, token="web-token", calendar_import_root=str(import_root), calendar_audit_path=str(audit)).start()
     try:
-        status, preview = _post(f"{service.base_url}/api/calendar/import-preview", "web-token", {"package_path": str(package), "destination": "day-1"})
+        status, preview = _post(f"{service.base_url}/api/calendar/import-preview?source=manual", "web-token", {"package_path": str(package), "destination": "day-1"})
         assert status == 200
         assert preview["status"] == "ready"
         assert not import_root.exists()

@@ -77,6 +77,29 @@ def test_destination_reservation_is_atomic_and_covers_same_preview(tmp_path):
         db.close()
 
 
+def test_destination_reservation_preserves_multiple_copies_and_history(tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"video")
+    preview = preview_destination_forge(
+        [source],
+        [{"username": "alice", "container": "reel", "profile": "instagram_reel", "copies": 2}],
+    )
+    db = database.DatabaseManager(str(tmp_path / "db.sqlite"))
+    try:
+        reservation = reserve_destination_preview(db.conn, preview, owner="worker", now=100)
+        assert reservation["status"] == "reserved"
+        assert reservation["count"] == 2
+        assert reservation_covers_preview(db.conn, reservation, preview, now=101)
+        result = reconcile_destination_reservation(db.conn, reservation, preview, owner="worker", now=101)
+        assert result["history_count"] == 2
+        rows = db.conn.execute(
+            "SELECT copy_number FROM destination_forge_history ORDER BY copy_number"
+        ).fetchall()
+        assert [row[0] for row in rows] == [1, 2]
+    finally:
+        db.close()
+
+
 def test_destination_preview_becomes_durable_job_and_reservation_reconciles(tmp_path):
     source = tmp_path / "clip.mp4"
     source.write_bytes(b"video")

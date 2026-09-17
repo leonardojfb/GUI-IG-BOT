@@ -5,13 +5,30 @@ import uuid
 
 
 def ensure_reservation_schema(connection) -> None:
+    existing = connection.execute("PRAGMA table_info(planner_reservations)").fetchall()
+    if existing and "copy_number" not in {str(row[1]) for row in existing}:
+        connection.execute("ALTER TABLE planner_reservations RENAME TO planner_reservations_legacy")
+        _create_reservation_schema(connection)
+        connection.execute(
+            """INSERT INTO planner_reservations
+                (reservation_id, owner, source_id, username, lane, copy_number, expires_at, created_at)
+                SELECT reservation_id, owner, source_id, username, lane, 1, expires_at, created_at
+                FROM planner_reservations_legacy"""
+        )
+        connection.execute("DROP TABLE planner_reservations_legacy")
+    elif not existing:
+        _create_reservation_schema(connection)
+    connection.commit()
+
+
+def _create_reservation_schema(connection) -> None:
     connection.execute("""CREATE TABLE IF NOT EXISTS planner_reservations (
         reservation_id TEXT NOT NULL, owner TEXT NOT NULL, source_id TEXT NOT NULL,
-        username TEXT NOT NULL, lane TEXT NOT NULL, expires_at INTEGER NOT NULL,
-        created_at INTEGER NOT NULL, PRIMARY KEY(reservation_id, source_id, username, lane),
-        UNIQUE(source_id, username, lane)
+        username TEXT NOT NULL, lane TEXT NOT NULL, copy_number INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
+        PRIMARY KEY(reservation_id, source_id, username, lane, copy_number),
+        UNIQUE(source_id, username, lane, copy_number)
     )""")
-    connection.commit()
 
 
 def _purge_expired(connection, now: int) -> None:
@@ -29,22 +46,22 @@ def reserve_shared_preview(connection, preview: dict, *, owner: str, now: int, t
     rows = []
     scope_lane = (preview.get("scope") or {}).get("lane")
     for assignment in preview.get("assignments") or []:
-        rows.append((str(assignment.get("source_id") or assignment.get("source_path") or ""), str(assignment.get("username") or "").casefold(), str(assignment.get("lane") or scope_lane or "")))
+        rows.append((str(assignment.get("source_id") or assignment.get("source_path") or ""), str(assignment.get("username") or "").casefold(), str(assignment.get("lane") or scope_lane or ""), int(assignment.get("copy_number") or 1)))
     if any(not all(row) for row in rows):
         raise ValueError("El preview contiene una reserva incompleta")
     connection.execute("BEGIN IMMEDIATE")
     try:
         _purge_expired(connection, now)
         conflicts = []
-        for source_id, username, lane in rows:
-            hit = connection.execute("SELECT owner, expires_at FROM planner_reservations WHERE source_id=? AND username=? AND lane=?", (source_id, username, lane)).fetchone()
+        for source_id, username, lane, copy_number in rows:
+            hit = connection.execute("SELECT owner, expires_at FROM planner_reservations WHERE source_id=? AND username=? AND lane=? AND copy_number=?", (source_id, username, lane, copy_number)).fetchone()
             if hit:
-                conflicts.append({"source_id": source_id, "username": username, "lane": lane, "owner": hit[0], "expires_at": hit[1]})
+                conflicts.append({"source_id": source_id, "username": username, "lane": lane, "copy_number": copy_number, "owner": hit[0], "expires_at": hit[1]})
         if conflicts:
             connection.rollback()
             return {"status": "conflict", "conflicts": conflicts}
-        for source_id, username, lane in rows:
-            connection.execute("INSERT INTO planner_reservations VALUES (?, ?, ?, ?, ?, ?, ?)", (reservation_id, owner, source_id, username, lane, int(now) + int(ttl_seconds), int(now)))
+        for source_id, username, lane, copy_number in rows:
+            connection.execute("INSERT INTO planner_reservations VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (reservation_id, owner, source_id, username, lane, copy_number, int(now) + int(ttl_seconds), int(now)))
         connection.commit()
     except Exception:
         connection.rollback()
@@ -56,9 +73,9 @@ def inspect_reservations(connection, *, now: int) -> list[dict]:
     ensure_reservation_schema(connection)
     connection.execute("BEGIN IMMEDIATE")
     _purge_expired(connection, now)
-    rows = connection.execute("SELECT reservation_id, owner, source_id, username, lane, expires_at FROM planner_reservations ORDER BY reservation_id").fetchall()
+    rows = connection.execute("SELECT reservation_id, owner, source_id, username, lane, copy_number, expires_at FROM planner_reservations ORDER BY reservation_id, copy_number").fetchall()
     connection.commit()
-    keys = ("reservation_id", "owner", "source_id", "username", "lane", "expires_at")
+    keys = ("reservation_id", "owner", "source_id", "username", "lane", "copy_number", "expires_at")
     return [dict(zip(keys, row)) for row in rows]
 
 
@@ -74,7 +91,7 @@ def reservation_covers_preview(connection, reservation: dict, preview: dict, *, 
         return False
     scope_lane = (preview.get("scope") or {}).get("lane")
     expected = {
-        (str(row.get("source_id") or row.get("source_path") or ""), str(row.get("username") or "").casefold(), str(row.get("lane") or scope_lane or ""))
+        (str(row.get("source_id") or row.get("source_path") or ""), str(row.get("username") or "").casefold(), str(row.get("lane") or scope_lane or ""), int(row.get("copy_number") or 1))
         for row in preview.get("assignments") or []
     }
     if not expected:
@@ -82,8 +99,8 @@ def reservation_covers_preview(connection, reservation: dict, preview: dict, *, 
     ensure_reservation_schema(connection)
     _purge_expired(connection, now)
     found_rows = connection.execute(
-        "SELECT source_id, username, lane FROM planner_reservations WHERE reservation_id=? AND owner=? AND expires_at>?",
+        "SELECT source_id, username, lane, copy_number FROM planner_reservations WHERE reservation_id=? AND owner=? AND expires_at>?",
         (reservation.get("reservation_id"), reservation.get("owner"), int(now)),
     ).fetchall()
-    found = {(str(row[0]), str(row[1]), str(row[2])) for row in found_rows}
+    found = {(str(row[0]), str(row[1]), str(row[2]), int(row[3])) for row in found_rows}
     return found == expected and len(found) == len(expected)

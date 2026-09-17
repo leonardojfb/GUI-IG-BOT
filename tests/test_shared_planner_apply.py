@@ -87,3 +87,23 @@ def test_reservations_are_atomic_and_expire_without_import_side_effects(tmp_path
     assert expired["status"] == "reserved"
     assert release_reservation(conn, expired["reservation_id"], owner="gui-b") is True
     assert inspect_reservations(conn, now=111) == []
+
+
+def test_reservation_schema_migrates_legacy_rows_to_copy_one():
+    from planner_reservations import ensure_reservation_schema, inspect_reservations, reserve_shared_preview
+
+    conn = sqlite3.connect(":memory:")
+    conn.execute("""CREATE TABLE planner_reservations (
+        reservation_id TEXT NOT NULL, owner TEXT NOT NULL, source_id TEXT NOT NULL,
+        username TEXT NOT NULL, lane TEXT NOT NULL, expires_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL, PRIMARY KEY(reservation_id, source_id, username, lane),
+        UNIQUE(source_id, username, lane)
+    )""")
+    conn.execute("INSERT INTO planner_reservations VALUES (?, ?, ?, ?, ?, ?, ?)", ("old", "legacy", "source", "alice", "lane", 999, 1))
+
+    ensure_reservation_schema(conn)
+    rows = inspect_reservations(conn, now=100)
+    assert rows[0]["copy_number"] == 1
+    preview = {"status": "ready", "scope": {"lane": "lane"}, "assignments": [{"source_id": "source", "username": "alice", "lane": "lane", "copy_number": 2}]}
+    result = reserve_shared_preview(conn, preview, owner="new", now=100)
+    assert result["status"] == "reserved"
