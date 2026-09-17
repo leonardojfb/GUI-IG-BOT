@@ -18,7 +18,7 @@ Fecha: 2026-09-17
   en el ZIP de todos los archivos declarados por `release-manifest.json`.
 - `build_release.ps1` ejecuta el verificador después de escribir el manifest y
   antes de anunciar el artefacto.
-- Suite global ejecutada desde el worktree aislado: `547 passed, 0 skipped,
+- Suite global ejecutada desde el worktree aislado: `549 passed, 0 skipped,
   7 subtests passed`.
 - Release/updater incluyen el gate de forma aditiva y bootstrap permanece
   estable.
