@@ -19,3 +19,10 @@ def test_certification_accepts_reproducible_gate_evidence():
     gates["full_suite"] = make_gate_evidence("py -m pytest .\\tests", passed=518, skipped=1)
     report = certify_checkpoints(gates)
     assert report["evidence"]["full_suite"]["passed"] == 518
+
+
+def test_certification_rejects_evidence_without_passed_tests():
+    gates = {name: make_gate_evidence("py -m pytest", passed=1) for name in [f"R{number:02d}" for number in range(11, 20)]}
+    gates["full_suite"] = {"status": "passed", "command": "py -m pytest", "passed": 0}
+    with pytest.raises(ValueError, match="evidencia invalida"):
+        certify_checkpoints(gates)

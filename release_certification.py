@@ -15,7 +15,14 @@ def certify_checkpoints(gates):
         if value is True:
             evidence[name] = {"status": "passed", "evidence_quality": "legacy_boolean"}
         elif isinstance(value, dict) and value.get("status") == "passed" and value.get("command"):
-            evidence[name] = {"status": "passed", "command": str(value["command"]), "passed": int(value.get("passed", 0)), "skipped": int(value.get("skipped", 0))}
+            try:
+                passed = int(value.get("passed", 0))
+                skipped = int(value.get("skipped", 0))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"evidencia invalida para {name}") from exc
+            if passed < 1 or skipped < 0:
+                raise ValueError(f"evidencia invalida para {name}")
+            evidence[name] = {"status": "passed", "command": str(value["command"]), "passed": passed, "skipped": skipped}
         else:
             raise ValueError(f"evidencia invalida para {name}")
     return {"status": "certified_local", "gates": list(REQUIRED_GATES), "evidence": evidence, "external_validation": "required", "production_media": "not_run", "real_platform_publish": "not_run"}
