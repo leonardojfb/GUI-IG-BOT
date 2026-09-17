@@ -152,6 +152,10 @@ class VaultQuery:
         reuse = VaultReuseAudit(self.db)
         signatures = VaultSignatures(self.db)
         thumbnail = VaultThumbnailer(storage, thumbnail_cache).ensure_thumbnail(asset_id)
+        try:
+            perceptual_candidates = signatures.find_assets_by_perceptual_similarity(asset_id)
+        except ValueError:
+            perceptual_candidates = []
         return {
             "asset": asset,
             "locations": locations,
@@ -162,6 +166,7 @@ class VaultQuery:
             "children": lineage.children_for_asset(asset_id),
             "usages": lineage.usages_for_asset(asset_id),
             "signatures": signatures.signatures_for_asset(asset_id),
+            "perceptual_reuse_candidates": perceptual_candidates,
             "reuse_candidates": reuse.candidates_for_asset(asset_id),
             "thumbnail": thumbnail,
         }

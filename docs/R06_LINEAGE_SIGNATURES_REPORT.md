@@ -35,6 +35,8 @@ Fecha: 2026-09-13
 - `VaultQuery.inspect_asset()` ahora incluye `parents`, `children` y `usages` junto al asset, ubicaciones, familias, colecciones, transform logs y thumbnail.
 - `VaultQuery.inspect_asset()` tambien incluye `signatures`.
 - `VaultQuery.inspect_asset()` tambien incluye `reuse_candidates`.
+- `VaultQuery.inspect_asset()` incluye `perceptual_reuse_candidates` con
+  distancia Hamming cuando el asset tiene firma de imagen.
 - `build_release.ps1`, `updater.DEFAULT_UPDATEABLE_FILES` y el inventario R00 incluyen `vault/lineage.py`, `vault/reuse.py` y `vault/signatures.py`.
 
 ## Compatibilidad de actualizacion

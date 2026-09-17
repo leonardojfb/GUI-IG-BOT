@@ -90,3 +90,25 @@ def test_perceptual_signatures_find_visual_reuse_candidates(tmp_path):
     assert [row["asset_id"] for row in matches] == [first["asset_id"]]
     assert matches[0]["distance"] == 0
     db.close()
+
+
+def test_vault_inspector_exposes_perceptual_reuse_candidates(tmp_path):
+    from PIL import Image
+    from vault.query import VaultQuery
+
+    db = DatabaseManager(str(tmp_path / "organizador.db"))
+    storage = VaultStorage(db, tmp_path / "vault")
+    first_path = tmp_path / "first.png"
+    second_path = tmp_path / "second.jpg"
+    Image.new("RGB", (64, 64), "white").save(first_path)
+    Image.new("RGB", (64, 64), "white").save(second_path, format="JPEG")
+    first = storage.import_managed(first_path)
+    second = storage.import_managed(second_path)
+    signatures = VaultSignatures(db)
+    signatures.ensure_perceptual_signature(first["asset_id"], first["path"])
+    signatures.ensure_perceptual_signature(second["asset_id"], second["path"])
+
+    inspected = VaultQuery(db).inspect_asset(second["asset_id"], storage=storage, thumbnail_cache=tmp_path / "thumbs")
+
+    assert inspected["perceptual_reuse_candidates"][0]["asset_id"] == first["asset_id"]
+    db.close()
