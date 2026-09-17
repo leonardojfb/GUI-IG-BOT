@@ -81,8 +81,9 @@ def reservation_covers_preview(connection, reservation: dict, preview: dict, *, 
         return False
     ensure_reservation_schema(connection)
     _purge_expired(connection, now)
-    found = connection.execute(
+    found_rows = connection.execute(
         "SELECT source_id, username, lane FROM planner_reservations WHERE reservation_id=? AND owner=? AND expires_at>?",
         (reservation.get("reservation_id"), reservation.get("owner"), int(now)),
     ).fetchall()
-    return set(found) == expected and len(found) == len(expected)
+    found = {(str(row[0]), str(row[1]), str(row[2])) for row in found_rows}
+    return found == expected and len(found) == len(expected)
