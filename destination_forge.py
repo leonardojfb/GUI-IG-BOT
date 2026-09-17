@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from planner_reservations import reserve_shared_preview
+from planner_reservations import release_reservation, reservation_covers_preview, reserve_shared_preview
 
 
 SUPPORTED_CONTAINERS = {"feed", "story", "reel"}
@@ -33,3 +33,36 @@ def preview_destination_forge(video_paths, destinations):
 
 def reserve_destination_preview(connection, preview, *, owner, now, ttl_seconds=900):
     return reserve_shared_preview(connection, preview, owner=owner, now=now, ttl_seconds=ttl_seconds)
+
+
+def build_destination_forge_job_spec(preview, *, output_root, metadata):
+    """Translate a reserved destination preview into R09 Forge steps."""
+    if preview.get("status") not in {"ready", "partial"}:
+        raise ValueError("el preview destino no esta listo")
+    if not isinstance(metadata, dict) or not metadata:
+        raise ValueError("metadata debe ser un objeto no vacio")
+    root = Path(output_root).resolve()
+    steps = []
+    for index, assignment in enumerate(preview.get("assignments") or [], start=1):
+        source = Path(assignment["source_path"])
+        destination_dir = root / assignment["username"] / assignment["container"] / assignment["profile"]
+        output = destination_dir / f"{source.stem}__{assignment['username']}__c{assignment['copy_number']:02d}{source.suffix}"
+        steps.append({"step_id": f"destination-forge-{index:04d}", "kind": "forge.copy", "payload": {"source_path": str(source), "output_path": str(output), "metadata": dict(metadata), "copy_number": assignment["copy_number"], "username": assignment["username"], "container": assignment["container"], "profile": assignment["profile"], "lane": assignment["lane"]}})
+    if not steps:
+        raise ValueError("el preview no contiene assignments")
+    return {"job_type": "forge.destination.v1", "recipe": {"recipe_version": 1, "producer": "forge", "destination_mode": True, "output_root": str(root), "metadata": dict(metadata), "assignment_count": len(steps)}, "steps": steps}
+
+
+def submit_destination_forge_job(connection, preview, *, output_root, metadata, idempotency_key=None):
+    from durable_jobs import create_job
+
+    spec = build_destination_forge_job_spec(preview, output_root=output_root, metadata=metadata)
+    return create_job(connection, **spec, idempotency_key=idempotency_key)
+
+
+def reconcile_destination_reservation(connection, reservation, preview, *, owner, now):
+    """Release a short-lived reservation only after verifying its exact scope."""
+    if not reservation_covers_preview(connection, reservation, preview, now=now):
+        raise ValueError("la reserva no cubre el preview destino")
+    released = release_reservation(connection, reservation["reservation_id"], owner=owner)
+    return {"status": "released" if released else "already_released", "reservation_id": reservation["reservation_id"]}

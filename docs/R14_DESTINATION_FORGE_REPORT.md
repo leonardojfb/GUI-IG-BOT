@@ -11,10 +11,13 @@ Fecha: 2026-09-17
 - `reserve_destination_preview()` delega en la reserva atomica R08, con TTL,
   deteccion de conflicto y comprobacion de cobertura del preview.
 - El modulo no renderiza ni publica: la reserva es un gate previo al job R10.
+- `build_destination_forge_job_spec()` y `submit_destination_forge_job()` convierten
+  assignments validados en steps `forge.copy` R09 con salida aislada por
+  cuenta/contenedor/perfil.
+- `reconcile_destination_reservation()` comprueba cobertura exacta y libera la
+  reserva despues de que el consumidor procese el job.
 - Release/updater incluyen el contrato sin modificar bootstrap.
 
 ## Limites
 
-El siguiente paso debe crear jobs `forge.copy` por assignment y liberar o
-confirmar reservas segun cada resultado. La pantalla de destinos y la
-reconciliacion post-render quedan pendientes.
+La pantalla de destinos y la confirmacion visual post-render quedan pendientes.
