@@ -110,6 +110,16 @@ def test_secret_header_rejects_wrong_token():
     assert webhook.is_authorized({}, "") is True
 
 
+def test_confirmation_authorizer_requires_an_explicit_telegram_user_allowlist():
+    authorize = webhook.build_confirmation_authorizer("99, 101")
+
+    assert authorize({"action": "confirm", "entity_id": "asset-1"}, "99", {}) is True
+    assert authorize({"action": "confirm", "entity_id": "asset-1"}, "100", {}) is False
+    assert webhook.build_confirmation_authorizer("")(
+        {"action": "confirm", "entity_id": "asset-1"}, "99", {}
+    ) is False
+
+
 def test_get_accounts_normalizes_telegram_chat_id_labels(monkeypatch):
     import organizadortg
 

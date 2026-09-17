@@ -19,8 +19,11 @@ Fecha: 2026-09-17
   duplicado sin repetir la mutación.
 - El despliegue HTTP activa esa persistencia sólo con `CONFIRMATION_DB_PATH`;
   sin la variable conserva el callback legacy `pub`.
+- Cuando la persistencia está activa, el webhook construye una política
+  deny-by-default desde `TELEGRAM_ALLOWED_USER_IDS` (IDs separados por coma) y
+  no inserta confirmaciones de usuarios ausentes de la allowlist.
 
 ## Limites
 
-Falta desplegarlo en Railway, autorizar usuarios con una política real y
+Falta desplegarlo en Railway con la variable de allowlist configurada y
 conectar acciones de limpieza por IDs/carriles.

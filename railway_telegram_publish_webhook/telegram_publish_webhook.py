@@ -23,6 +23,20 @@ def is_authorized(headers, expected_secret: str) -> bool:
     return False
 
 
+def build_confirmation_authorizer(raw_user_ids):
+    """Build a deny-by-default authorizer for persisted confirmations."""
+    allowed = {
+        item.strip()
+        for item in str(raw_user_ids or "").split(",")
+        if item.strip()
+    }
+
+    def authorize(_parsed, user_id, _payload):
+        return str(user_id or "").strip() in allowed
+
+    return authorize
+
+
 def post_telegram_method(token: str, method: str, payload: dict) -> dict:
     body = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
@@ -215,7 +229,17 @@ class TelegramCallbackHandler(BaseHTTPRequestHandler):
             if confirmation_path:
                 confirmation_connection = sqlite3.connect(confirmation_path)
             try:
-                result = handle_update(update, token, confirmation_connection=confirmation_connection)
+                authorize_fn = (
+                    build_confirmation_authorizer(os.environ.get("TELEGRAM_ALLOWED_USER_IDS", ""))
+                    if confirmation_connection is not None
+                    else None
+                )
+                result = handle_update(
+                    update,
+                    token,
+                    confirmation_connection=confirmation_connection,
+                    authorize_fn=authorize_fn,
+                )
             finally:
                 if confirmation_connection is not None:
                     confirmation_connection.close()
