@@ -76,6 +76,13 @@ def test_legacy_gui_exposes_opt_in_local_panel_without_replacing_entrypoints():
     assert 'self.show_frame("Forge")' not in source[source.index("def _open_local_web"):source.index("def _on_close")]
 
 
+def test_legacy_gui_exposes_read_only_ios_snapshot_loader():
+    source = open("gui_premium_v7.py", encoding="utf-8").read()
+    assert "Cargar snapshot ios-remote" in source
+    assert "def destination_load_ios_snapshot" in source
+    assert "load_ios_remote_snapshot" in source
+
+
 def test_local_web_calendar_import_is_previewed_confirmed_and_scoped(tmp_path):
     media = tmp_path / "clip.mp4"
     media.write_bytes(b"media")

@@ -6140,6 +6140,7 @@ class InstagramAutoPro(ctk.CTk):
         self.destination_specs_text.grid(row=1, column=0, sticky="ew", pady=(0, 8))
         destination_actions = ctk.CTkFrame(destination_body, fg_color="transparent")
         destination_actions.grid(row=2, column=0, sticky="ew")
+        GhostButton(destination_actions, text="Cargar snapshot ios-remote", command=self.destination_load_ios_snapshot).pack(side="left", padx=(0, 8))
         GhostButton(destination_actions, text="Preview destinos", command=self.destination_forge_preview).pack(side="left", padx=(0, 8))
         self.destination_reserve_btn = PrimaryButton(
             destination_actions, text="Reservar preview", command=self.destination_forge_reserve, state="disabled",
@@ -6151,6 +6152,28 @@ class InstagramAutoPro(ctk.CTk):
         # Estado inicial "Default": ocultar toggles manuales y slider de Custom.
         self._forge_on_efectos_change("Default")
         self._forge_on_fuerza_change("Default")
+
+    def destination_load_ios_snapshot(self):
+        path = filedialog.askopenfilename(
+            title="Cargar snapshot ios-remote",
+            filetypes=[("JSON", "*.json"), ("Todos los archivos", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            from ios_remote_adapter import load_ios_remote_snapshot
+            snapshot = load_ios_remote_snapshot(path)
+        except Exception as exc:
+            self._r13_snapshot = None
+            self.destination_forge_status.configure(text=f"Snapshot invalido: {exc}")
+            return
+        self._r13_snapshot = snapshot
+        containers = snapshot["containers"]
+        account_count = sum(len(item.get("accounts") or []) for item in containers)
+        profiles = sorted({str((item.get("device_profile") or {}).get("profile_id")) for item in containers})
+        self.destination_forge_status.configure(
+            text=f"Snapshot cargado: {len(containers)} contenedores / {account_count} cuentas / perfiles {', '.join(profiles)} / {snapshot['snapshot_hash']}"
+        )
 
     def destination_forge_preview(self):
         """Preview destination assignments without creating jobs or files."""
