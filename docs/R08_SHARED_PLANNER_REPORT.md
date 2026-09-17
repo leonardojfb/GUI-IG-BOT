@@ -9,6 +9,8 @@ Fecha: 2026-09-16
 - `preview_schedule_from_sources()` compone ambos lectores y conserva un reporte de tandas inexistentes, vacias y archivos ignorados.
 - `load_candidate_usage_rows()` enriquece candidatos por ruta usando `vault_locations` y `vault_asset_usages`, sin insertar ni actualizar registros.
 - Los usos conservan cuenta, carril, tipo y referencia externa; si el carril no esta guardado, se deriva de `publication_target` conocido.
+- `preview_shared_schedule_by_account()` mantiene un pool elegible independiente por cuenta, evitando que el uso previo de una cuenta bloquee material valido para otra.
+- `preview_schedule_by_account_from_sources()` compone cuentas, tandas, usos opcionales y planner; `include_usage_context` es opt-in durante la transicion.
 - El preview recibe cuentas e inventario de candidatos concretos; exige usernames unicos y `source_id` unicos.
 - Cada asignacion conserva `source_id`, `source_path`, `tanda` y cualquier metadata del candidato, y agrega cuenta, dia, slot, carril, placement y metodo.
 - `MAX` calcula la menor cantidad de dias necesaria para exponer todos los candidatos; los dias fijos respetan `days * accounts * daily_quota`.
@@ -43,6 +45,7 @@ Fecha: 2026-09-16
 - Politicas de elegibilidad, usos previos, Trial/carriles y disponibilidad real.
 - Conexion del contexto de usos Vault con `preview_schedule_from_sources()` bajo una opcion explicita por cuenta.
 - Integracion separada de Por Tandas y Por Cuentas sin cambiar sus algoritmos legacy.
+- Integracion del preview por cuenta en la GUI, mostrando `account_summary`, exclusiones y `usage_context_loaded`.
 - Preview visible en GUI con diff antes de escribir.
 - Reservas de contenido/carril y revision de concurrencia.
 - Aplicacion protegida a manifest v2 y pruebas historicas MAX/intercalado.

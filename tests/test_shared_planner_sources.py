@@ -3,6 +3,7 @@ from shared_planner_sources import (
     load_planner_accounts,
     load_candidate_usage_rows,
     preview_schedule_from_sources,
+    preview_schedule_by_account_from_sources,
 )
 
 
@@ -73,6 +74,31 @@ def test_preview_schedule_from_sources_combines_readers_and_keeps_inventory_repo
         "empty_tandas": [],
         "skipped_files": 0,
     }
+
+
+def test_preview_schedule_by_account_from_sources_keeps_account_scope(tmp_path):
+    root = tmp_path / "videos_finales"
+    (root / "T1").mkdir(parents=True)
+    (root / "T1" / "clip.mp4").write_bytes(b"clip")
+    db = FakeDatabase([
+        {"id": 9, "username": "alice", "assigned_va": "VA1", "account_type": "MAIN"},
+        {"id": 10, "username": "bob", "assigned_va": "VA1", "account_type": "MAIN"},
+    ])
+
+    preview = preview_schedule_by_account_from_sources(
+        db,
+        root,
+        ["T1"],
+        usernames=["alice", "bob"],
+        daily_quota=1,
+        days=1,
+        seed=5,
+    )
+
+    assert preview["status"] == "ready"
+    assert preview["summary"]["assignable"] == 2
+    assert {row["username"] for row in preview["assignments"]} == {"alice", "bob"}
+    assert preview["inventory"]["missing_tandas"] == []
 
 
 def test_load_candidate_usage_rows_enriches_candidates_without_writing(tmp_path):

@@ -188,6 +188,133 @@ def preview_shared_schedule(
     }
 
 
+def preview_shared_schedule_by_account(
+    *,
+    accounts: list[dict],
+    candidates_by_account: dict[str, list[dict]],
+    daily_quota: int,
+    days: int | str,
+    lane: str = "reel",
+    placement: str = "feed",
+    method: str = "telegram",
+    mode: str = "partial",
+    seed: int | None = None,
+) -> dict:
+    """Build a deterministic preview from an independent pool per account."""
+    normalized_accounts = _normalize_accounts(accounts)
+    if not isinstance(candidates_by_account, dict):
+        raise ValueError("candidates_by_account debe ser un objeto")
+    quota = _positive_int(daily_quota, "daily_quota")
+    mode_label = str(mode or "").strip().lower()
+    if mode_label not in {"partial", "strict"}:
+        raise ValueError("mode debe ser partial o strict")
+    lane_label = _required_label(lane, "lane")
+    placement_label = _required_label(placement, "placement")
+    method_label = _required_label(method, "method")
+    random_seed = 0 if seed is None else int(seed)
+
+    pools = {}
+    exclusions = {}
+    for account in normalized_accounts:
+        username = account["username"]
+        raw_pool = candidates_by_account.get(username.casefold(), candidates_by_account.get(username, []))
+        normalized_pool = _normalize_candidates(raw_pool or [])
+        filtered = filter_candidates_for_account(
+            normalized_pool,
+            username=username,
+            lane=lane_label,
+        )
+        shuffled = list(filtered["candidates"])
+        random.Random(f"{random_seed}:{username.casefold()}").shuffle(shuffled)
+        pools[username] = shuffled
+        exclusions[username] = filtered["excluded"]
+
+    if isinstance(days, str) and days.strip().upper() == "MAX":
+        target_days = max(
+            (math.ceil(len(pool) / quota) for pool in pools.values()),
+            default=0,
+        )
+        requested = sum(min(target_days * quota, len(pool)) for pool in pools.values())
+        fixed_period = False
+    else:
+        target_days = _positive_int(days, "days")
+        requested = target_days * len(normalized_accounts) * quota
+        fixed_period = True
+
+    assignments = []
+    omitted = []
+    account_summary = {}
+    indexes = {account["username"]: 0 for account in normalized_accounts}
+    for day in range(1, target_days + 1):
+        for slot in range(1, quota + 1):
+            for account in normalized_accounts:
+                username = account["username"]
+                pool = pools[username]
+                index = indexes[username]
+                if index < len(pool):
+                    assignment = dict(pool[index])
+                    assignment.update(
+                        {
+                            "username": username,
+                            "account_id": account.get("account_id"),
+                            "day": day,
+                            "slot": slot,
+                            "lane": lane_label,
+                            "placement": placement_label,
+                            "method": method_label,
+                        }
+                    )
+                    assignments.append(assignment)
+                    indexes[username] += 1
+                elif fixed_period:
+                    omitted.append(
+                        {
+                            "username": username,
+                            "day": day,
+                            "slot": slot,
+                            "lane": lane_label,
+                            "placement": placement_label,
+                            "reason": "insufficient_inventory",
+                        }
+                    )
+
+    for account in normalized_accounts:
+        username = account["username"]
+        account_omitted = [row for row in omitted if row["username"] == username]
+        account_summary[username] = {
+            "requested": target_days * quota if fixed_period else min(target_days * quota, len(pools[username])),
+            "assignable": indexes[username],
+            "omitted": len(account_omitted),
+            "excluded": len(exclusions[username]),
+        }
+
+    status = "ready"
+    if omitted:
+        status = "blocked" if mode_label == "strict" else "partial"
+        if mode_label == "strict":
+            assignments = []
+    return {
+        "plan_version": 1,
+        "status": status,
+        "mode": mode_label,
+        "seed": random_seed,
+        "scope": {"lane": lane_label, "placement": placement_label, "method": method_label},
+        "summary": {
+            "requested": requested,
+            "assignable": sum(indexes.values()),
+            "omitted": len(omitted),
+            "excluded": sum(len(rows) for rows in exclusions.values()),
+            "accounts": len(normalized_accounts),
+            "days": target_days,
+            "daily_quota": quota,
+        },
+        "account_summary": account_summary,
+        "assignments": assignments,
+        "omitted": omitted,
+        "excluded": [row for rows in exclusions.values() for row in rows],
+    }
+
+
 def _normalize_accounts(accounts: list[dict]) -> list[dict]:
     if not accounts:
         raise ValueError("accounts no puede estar vacio")

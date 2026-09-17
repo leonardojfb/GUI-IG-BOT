@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from shared_planner import preview_shared_schedule
+from shared_planner import preview_shared_schedule, preview_shared_schedule_by_account
 
 
 VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".avi"})
@@ -65,6 +65,38 @@ def preview_schedule_from_sources(
         key: inventory[key]
         for key in ("missing_tandas", "empty_tandas", "skipped_files")
     }
+    return preview
+
+
+def preview_schedule_by_account_from_sources(
+    db,
+    videos_root,
+    tanda_names,
+    *,
+    usernames=None,
+    include_usage_context: bool = False,
+    **planner_options,
+) -> dict:
+    """Build the per-account preview from read-only local sources."""
+    accounts = load_planner_accounts(db, usernames=usernames)
+    inventory = collect_tanda_candidates(videos_root, tanda_names)
+    candidates = inventory["candidates"]
+    if include_usage_context:
+        candidates = load_candidate_usage_rows(db, candidates)
+    candidates_by_account = {
+        account["username"].casefold(): [dict(candidate) for candidate in candidates]
+        for account in accounts
+    }
+    preview = preview_shared_schedule_by_account(
+        accounts=accounts,
+        candidates_by_account=candidates_by_account,
+        **planner_options,
+    )
+    preview["inventory"] = {
+        key: inventory[key]
+        for key in ("missing_tandas", "empty_tandas", "skipped_files")
+    }
+    preview["usage_context_loaded"] = bool(include_usage_context)
     return preview
 
 

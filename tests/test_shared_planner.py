@@ -3,6 +3,7 @@ import pytest
 from shared_planner import (
     assess_candidate_eligibility,
     filter_candidates_for_account,
+    preview_shared_schedule_by_account,
     preview_shared_schedule,
 )
 
@@ -134,6 +135,48 @@ def test_candidate_eligibility_enforces_trial_lane_and_filter_reports_exclusions
             "reason": "trial_lane_mismatch",
         }
     ]
+
+
+def test_preview_shared_schedule_by_account_applies_usage_per_account():
+    candidates = [
+        {"source_id": "shared", "tanda": "T1", "used_in": [{"username": "alice", "lane": "reel"}]},
+        {"source_id": "fresh", "tanda": "T1", "used_in": []},
+    ]
+
+    preview = preview_shared_schedule_by_account(
+        accounts=[{"username": "alice"}, {"username": "bob"}],
+        candidates_by_account={"alice": candidates, "bob": candidates},
+        daily_quota=1,
+        days=1,
+        lane="reel",
+        seed=4,
+    )
+
+    alice = [row for row in preview["assignments"] if row["username"] == "alice"]
+    bob = [row for row in preview["assignments"] if row["username"] == "bob"]
+    assert preview["status"] == "ready"
+    assert alice[0]["source_id"] == "fresh"
+    assert bob[0]["source_id"] in {"shared", "fresh"}
+    assert preview["account_summary"]["alice"]["excluded"] == 1
+    assert preview["account_summary"]["bob"]["excluded"] == 0
+
+
+def test_preview_shared_schedule_by_account_reports_fixed_period_shortage():
+    preview = preview_shared_schedule_by_account(
+        accounts=[{"username": "alice"}, {"username": "bob"}],
+        candidates_by_account={"alice": _candidates(1), "bob": _candidates(3, "T2")},
+        daily_quota=2,
+        days=2,
+        mode="partial",
+        seed=2,
+    )
+
+    assert preview["status"] == "partial"
+    assert preview["summary"]["requested"] == 8
+    assert preview["summary"]["assignable"] == 4
+    assert preview["summary"]["omitted"] == 4
+    assert preview["account_summary"]["alice"]["omitted"] == 3
+    assert preview["account_summary"]["bob"]["omitted"] == 1
 
 
 @pytest.mark.parametrize(
