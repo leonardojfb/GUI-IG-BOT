@@ -118,7 +118,53 @@ def submit_destination_forge_job(connection, preview, *, output_root, metadata, 
 
 def reconcile_destination_reservation(connection, reservation, preview, *, owner, now):
     """Release a short-lived reservation only after verifying its exact scope."""
+    if str(reservation.get("owner") or "") != str(owner or ""):
+        raise ValueError("el owner no coincide con la reserva destino")
     if not reservation_covers_preview(connection, reservation, preview, now=now):
         raise ValueError("la reserva no cubre el preview destino")
+    history_count = _record_reconciliation_history(connection, reservation, preview, now=now)
     released = release_reservation(connection, reservation["reservation_id"], owner=owner)
-    return {"status": "released" if released else "already_released", "reservation_id": reservation["reservation_id"]}
+    return {"status": "released" if released else "already_released", "reservation_id": reservation["reservation_id"], "history_count": history_count}
+
+
+def _record_reconciliation_history(connection, reservation, preview, *, now):
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS destination_forge_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reservation_id TEXT NOT NULL,
+            owner TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            username TEXT NOT NULL,
+            lane TEXT NOT NULL,
+            remote_container_id TEXT,
+            snapshot_hash TEXT,
+            status TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            UNIQUE(reservation_id, source_id, username, lane)
+        )"""
+    )
+    inserted = 0
+    for assignment in preview.get("assignments") or []:
+        source_id = str(assignment.get("source_id") or assignment.get("source_path") or "")
+        username = str(assignment.get("username") or "").strip().casefold()
+        lane = str(assignment.get("lane") or "").strip()
+        cursor = connection.execute(
+            """INSERT OR IGNORE INTO destination_forge_history
+                (reservation_id, owner, source_id, username, lane,
+                 remote_container_id, snapshot_hash, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                str(reservation.get("reservation_id") or ""),
+                str(reservation.get("owner") or ""),
+                source_id,
+                username,
+                lane,
+                assignment.get("remote_container_id"),
+                assignment.get("snapshot_hash"),
+                "reconciled",
+                int(now),
+            ),
+        )
+        inserted += int(cursor.rowcount > 0)
+    connection.commit()
+    return inserted

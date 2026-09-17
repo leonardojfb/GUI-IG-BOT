@@ -15,7 +15,8 @@ Fecha: 2026-09-17
   assignments validados en steps `forge.copy` R09 con salida aislada por
   cuenta/contenedor/perfil.
 - `reconcile_destination_reservation()` comprueba cobertura exacta y libera la
-  reserva despues de que el consumidor procese el job.
+  reserva despues de que el consumidor procese el job; antes guarda una fila
+  idempotente por assignment en `destination_forge_history`.
 - La GUI Forge expone un bloque opt-in con filas
   `cuenta|contenedor|perfil|copias`, muestra las asignaciones y permite
   reservar el preview con confirmacion; el preview no crea jobs ni archivos.
@@ -29,5 +30,6 @@ Fecha: 2026-09-17
 ## Limites
 
 La consulta real de perfiles ios-remote, la validacion de snapshots y la
-confirmacion visual post-render quedan pendientes. Las filas manuales son un
-fallback explicito y no prueban un dispositivo fisico.
+confirmacion visual post-render quedan pendientes. El historial registra la
+reconciliacion local de la reserva, no prueba un render ni un dispositivo
+fisico.

@@ -91,6 +91,10 @@ def test_destination_preview_becomes_durable_job_and_reservation_reconciles(tmp_
         reconciled = reconcile_destination_reservation(db.conn, reservation, preview, owner="worker", now=101)
         assert job["recipe"]["destination_mode"] is True
         assert reconciled["status"] == "released"
+        history = db.conn.execute(
+            "SELECT username, lane, status FROM destination_forge_history"
+        ).fetchall()
+        assert [tuple(row) for row in history] == [("alice", "reel:instagram_reel", "reconciled")]
     finally:
         db.close()
 
