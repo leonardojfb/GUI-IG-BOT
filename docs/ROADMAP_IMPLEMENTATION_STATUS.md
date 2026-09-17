@@ -57,7 +57,7 @@ Estimacion por paquetes tocados: `R00-R06 de R00-R20`, pero R04-R06 no estan cer
 | R17. CRM ampliado | Parcial validado | `crm_insights.py` define identidades tipadas, engagement, viralidad, referencias hash y export CSV saneado; añade snapshots SQLite temporales deduplicados y saneados; `local_web.py` expone serie temporal autenticada por cuenta; tests y packaging. | Conectar fuentes reales con account/org context y añadir visualización gráfica rica. |
 | R18. Calendario manual/export | Parcial validado | `manual_calendar_export.py` genera y verifica ZIP schema v1 desde entries o manifest v2; añade preview de importación, conflictos, extracción confirmada sin sobrescritura y auditoría append-only; la GUI conecta raíz y bitácora de importación; tests y packaging. | Comprobar capacidades reales de cada plataforma y ofrecer un editor visual más completo del manifest operativo. |
 | R19. Meta adapters/crosspost | Parcial validado | `platform_adapters.py` define fases/capabilities, grupos independientes, duplicados downstream y policies opt-in de target/media/tamaño/rate-limit/contexto; tests y packaging. | Implementar adapters Meta reales sólo tras permisos/account context verificados y pruebas externas. |
-| R20. Certificacion final | Parcial validado | `release_certification.py` exige gates R11-R19, evidencia estructurada, suite global y verificación de ZIP contra manifest/hash; `build_release.ps1` ejecuta el verificador antes de anunciar el ZIP; última suite: `549 passed, 0 skipped, 7 subtests passed`; declara explícitamente que media de producción/publicación real siguen sin validar. | Ejecutar matriz completa LEG-01..56, cohortes de updater, ciclo piloto y pruebas reales externas antes de certificar producción. |
+| R20. Certificacion final | Parcial validado | `release_certification.py` exige gates R11-R19, evidencia estructurada, suite global y verificación de ZIP contra manifest/hash; `build_release.ps1` ejecuta el verificador antes de anunciar el ZIP; última suite: `549 passed, 2 skipped, 7 subtests passed`; declara explícitamente que media de producción/publicación real siguen sin validar. | Ejecutar matriz completa LEG-01..56, cohortes de updater, ciclo piloto y pruebas reales externas antes de certificar producción. |
 
 ## Estado por funciones LEG-01 a LEG-56
 
@@ -125,7 +125,7 @@ Estimacion por paquetes tocados: `R00-R06 de R00-R20`, pero R04-R06 no estan cer
 Ultima suite completa observada en este branch:
 
 ```text
-549 passed, 0 skipped, 7 subtests passed in 185.71s (0:03:05)
+549 passed, 2 skipped, 7 subtests passed in 181.51s (0:03:01)
 ```
 
 Smokes controlados de runtime/launcher/UI:
