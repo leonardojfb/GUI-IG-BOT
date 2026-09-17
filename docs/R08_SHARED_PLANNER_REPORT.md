@@ -35,17 +35,16 @@ Fecha: 2026-09-16
 - `tests/test_shared_planner.py::test_preview_shared_schedule_strict_mode_blocks_partial_plan_without_side_effects`
 - `tests/test_shared_planner.py::test_preview_shared_schedule_rejects_invalid_scope`
 - `tests/test_release_package_manifest.py::test_release_includes_shared_planner_but_bootstrap_does_not`
-- Validacion focal: `20 passed` en planner, release e inventario.
+- Validacion focal R08/release: `32 passed`; suite completa del branch: `459 passed, 7 subtests passed`.
 
-## Pendiente R08
+## Fuera de R08
 
-- Adaptador de candidatos desde Vault/archivos y cuentas desde catalogo/SQLite.
-- Integracion directa con Vault/catalogo real; el checkpoint actual usa el filesystem de `videos_finales/` y el contrato `DatabaseManager.get_all_accounts()` sin mutaciones.
-- Integracion del contexto `used_in` en previews por cuenta y resumen GUI de exclusiones.
-- Politicas de elegibilidad, usos previos, Trial/carriles y disponibilidad real.
-- Conexion del contexto de usos Vault con `preview_schedule_from_sources()` bajo una opcion explicita por cuenta.
-- Integracion separada de Por Tandas y Por Cuentas sin cambiar sus algoritmos legacy.
-- Integracion del preview por cuenta en la GUI, mostrando `account_summary`, exclusiones y `usage_context_loaded`.
-- Preview visible en GUI con diff antes de escribir.
-- Reservas de contenido/carril y revision de concurrencia.
-- Aplicacion protegida a manifest v2 y pruebas historicas MAX/intercalado.
+- Horarios historicos exactos y adaptacion de los productores Tandas/Forge/Edicion al contrato de jobs.
+- Carriles manuales `story` y `post` en la tarjeta R08; el contrato de manifest v2 ya los valida, pero requieren su propio formulario y payload.
+- Publicacion real en Instagram/Meta o Telegram: R08 solo deja el manifest planificado y sus reservas.
+- Ejecuciones duraderas, reintentos y recuperacion despues del cierre de la aplicacion, que corresponden a R09.
+## Cierre R08
+
+El branch incluye una tarjeta opt-in en Logistica para `Previsualizar R08`, `Reservar fuentes` y `Aplicar al manifest`. La reserva usa SQLite con TTL y conflicto atomico por fuente, cuenta y carril; la aplicacion convierte assignments a manifest v2 y pasa por `preview_replace_entries_v2()` mas `apply_manifest_preview()`, por lo que no hay escritura sin confirmacion ni revision vigente.
+
+El flujo actual soporta `reel` y `trial_reel`. Los carriles manuales `story` y `post`, horarios historicos exactos y publicacion real en Instagram no se declaran terminados por este checkpoint.

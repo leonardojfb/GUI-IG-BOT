@@ -459,6 +459,8 @@ def _write_guarded_payload(
     version: int,
     *,
     operation: str,
+    expected_revision: str | None = None,
+    expected_version: int | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     assert_manifest_ready(path)
@@ -466,6 +468,10 @@ def _write_guarded_payload(
     journal_path = manifest_journal_path(path)
     payload = {"version": int(version), "entries": entries}
     base_payload = _read_payload(path)
+    if expected_version is not None and base_payload.get("version") != int(expected_version):
+        raise RuntimeError("revision del manifest cambio antes de aplicar el preview")
+    if expected_revision is not None and _manifest_revision(base_payload) != expected_revision:
+        raise RuntimeError("revision del manifest cambio antes de aplicar el preview")
     write_completed = False
     try:
         _write_manifest_journal(
@@ -715,7 +721,14 @@ def apply_manifest_preview(path: str | os.PathLike, preview: dict) -> list[dict]
     if _manifest_revision(payload) != preview.get("base_revision"):
         raise RuntimeError("revision del manifest cambio antes de aplicar el preview")
     entries = list(preview.get("merged_entries") or [])
-    _write_payload_version(manifest, entries, target_version)
+    _write_guarded_payload(
+        manifest,
+        entries,
+        target_version,
+        operation="apply_manifest_preview",
+        expected_revision=preview.get("base_revision"),
+        expected_version=base_version,
+    )
     return entries
 
 

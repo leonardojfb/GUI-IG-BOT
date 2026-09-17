@@ -31,6 +31,9 @@ from calendar_manifest import (
     preview_migrate_manifest_v1_to_v2,
     replace_entries,
 )
+from shared_planner_apply import preview_shared_manifest_apply
+from shared_planner_sources import preview_schedule_by_account_from_sources
+from planner_reservations import reserve_shared_preview, release_reservation, reservation_covers_preview
 from captions.service import CaptionService, MissingCaptionError
 from database import DatabaseManager
 from vault.calendar_usage import record_calendar_manifest_usages
@@ -2950,8 +2953,131 @@ class InstagramAutoPro(ctk.CTk):
         self._build_dist_cuentas_tab(t2)
         self._build_dist_trials_tab(t3)
 
+        self._build_r08_shared_planner_panel(f)
+
         # Cargar datos iniciales
         self.reload_dist_lists()
+
+    @staticmethod
+    def _r08_preview_text(preview: dict) -> str:
+        summary = preview.get("summary") or {}
+        scope = preview.get("scope") or {}
+        lines = [
+            "R08 / PREVIEW COMPARTIDO",
+            "=" * 36,
+            f"Estado: {preview.get('status', '-')}",
+            f"Carril: {scope.get('lane', '-')} | Metodo: {scope.get('method', '-')}",
+            f"Solicitados: {summary.get('requested', 0)} | Asignables: {summary.get('assignable', 0)} | Omitidos: {summary.get('omitted', 0)}",
+            f"Cuentas: {summary.get('accounts', 0)} | Dias: {summary.get('days', 0)} | Cuota: {summary.get('daily_quota', 0)}",
+        ]
+        inventory = preview.get("inventory") or {}
+        if inventory:
+            lines.append("Inventario: faltantes={0}, vacias={1}, omitidos={2}".format(
+                len(inventory.get("missing_tandas") or []),
+                len(inventory.get("empty_tandas") or []),
+                inventory.get("skipped_files", 0),
+            ))
+        for username, detail in sorted((preview.get("account_summary") or {}).items()):
+            lines.append(f"@{username}: {detail.get('assignable', 0)} asignables / {detail.get('omitted', 0)} omitidos")
+        return "\n".join(lines)
+
+    def _build_r08_shared_planner_panel(self, parent):
+        """Opt-in R08 flow; legacy distribution tabs remain unchanged."""
+        card = Card(parent, title="R08 · Preview, reservas y aplicación protegida")
+        card.grid(row=2, column=0, sticky="ew", padx=24, pady=(0, 16))
+        body = card.body
+        body.grid_columnconfigure(1, weight=1)
+        body.grid_columnconfigure(3, weight=1)
+        self._r08_lane = ctk.CTkComboBox(body, values=["reel", "trial_reel"], fg_color=BG_INPUT, border_color=BORDER)
+        self._r08_lane.set("reel")
+        self._r08_days = ctk.CTkComboBox(body, values=["1", "7", "14", "MAX"], fg_color=BG_INPUT, border_color=BORDER)
+        self._r08_days.set("1")
+        self._r08_quota = Stepper(body, value=1, min=1, max=50)
+        self._r08_mode = ctk.CTkComboBox(body, values=["partial", "strict"], fg_color=BG_INPUT, border_color=BORDER)
+        self._r08_mode.set("strict")
+        for column, label, widget in ((0, "Carril", self._r08_lane), (2, "Dias", self._r08_days), (4, "Cuota", self._r08_quota), (6, "Modo", self._r08_mode)):
+            ctk.CTkLabel(body, text=label, text_color=TEXT_MUTED).grid(row=0, column=column, padx=(8, 4), pady=8, sticky="e")
+            widget.grid(row=0, column=column + 1, padx=(0, 8), pady=8, sticky="ew")
+        self._r08_result = ctk.CTkTextbox(body, height=105, fg_color=BG_INPUT, text_color=TEXT_BODY, font=FONT_MONO)
+        self._r08_result.grid(row=1, column=0, columnspan=8, padx=8, pady=(0, 8), sticky="ew")
+        self._r08_reservation = None
+        self._r08_preview = None
+        self._r08_preview_btn = PrimaryButton(body, text="Previsualizar R08", command=self._r08_preview_schedule)
+        self._r08_preview_btn.grid(row=2, column=0, columnspan=2, padx=8, pady=(0, 8), sticky="ew")
+        self._r08_reserve_btn = GhostButton(body, text="Reservar fuentes", state="disabled", command=self._r08_reserve_schedule)
+        self._r08_reserve_btn.grid(row=2, column=2, columnspan=2, padx=8, pady=(0, 8), sticky="ew")
+        self._r08_apply_btn = DangerButton(body, text="Aplicar al manifest", state="disabled", command=self._r08_apply_schedule)
+        self._r08_apply_btn.grid(row=2, column=4, columnspan=2, padx=8, pady=(0, 8), sticky="ew")
+        ctk.CTkLabel(body, text="Solo carriles reel/trial_reel en esta entrega; el manifest v2 y la reserva son obligatorios.", text_color=TEXT_MUTED).grid(row=2, column=6, columnspan=2, padx=8, pady=8, sticky="w")
+
+    def _r08_accounts(self):
+        raw = ""
+        if hasattr(self, "acct_dist_list"):
+            raw = self.acct_dist_list.get("1.0", "end").strip()
+        return [line.strip().lstrip("@") for line in raw.splitlines() if line.strip()] or [row["username"] for row in self.db.get_all_accounts()]
+
+    def _r08_tandas(self):
+        selected = []
+        for attr in ("c_tandas", "c_tandas_2", "acct_dist_tanda", "acct_dist_tanda_2"):
+            widget = getattr(self, attr, None)
+            if widget is not None:
+                value = widget.get().strip()
+                if value and value not in selected:
+                    selected.append(value)
+        return selected
+
+    def _r08_preview_schedule(self):
+        try:
+            if self._r08_reservation:
+                release_reservation(self.db.conn, self._r08_reservation["reservation_id"], owner=self._r08_reservation["owner"])
+            tandas = self._r08_tandas()
+            if not tandas:
+                raise ValueError("Selecciona al menos una tanda")
+            preview = preview_schedule_by_account_from_sources(
+                self.db, os.path.join(_BASE_DIR, "videos_finales"), tandas,
+                usernames=self._r08_accounts(), daily_quota=self._r08_quota.get(),
+                days=self._r08_days.get(), lane=self._r08_lane.get(), placement="feed",
+                method="telegram", mode=self._r08_mode.get(), seed=0, include_usage_context=True,
+            )
+            self._r08_preview = preview
+            self._r08_reservation = None
+            self._r08_result.delete("1.0", "end")
+            self._r08_result.insert("end", self._r08_preview_text(preview))
+            ready = preview.get("status") in {"ready", "partial"} and bool(preview.get("assignments"))
+            self._r08_reserve_btn.configure(state="normal" if ready else "disabled")
+            self._r08_apply_btn.configure(state="disabled")
+        except Exception as exc:
+            messagebox.showerror("R08", str(exc), parent=self)
+
+    def _r08_reserve_schedule(self):
+        if not self._r08_preview:
+            return
+        result = reserve_shared_preview(self.db.conn, self._r08_preview, owner=f"gui-{os.getpid()}", now=int(time.time()))
+        self._r08_reservation = result if result.get("status") == "reserved" else None
+        if self._r08_reservation:
+            self._r08_apply_btn.configure(state="normal")
+            self._r08_result.insert("end", f"\nReserva activa: {result['reservation_id']} ({result['count']} fuentes)")
+        else:
+            messagebox.showwarning("R08", "No se pudo reservar: " + str(result.get("conflicts")), parent=self)
+
+    def _r08_apply_schedule(self):
+        if not self._r08_preview or not self._r08_reservation:
+            return messagebox.showwarning("R08", "Previsualiza y reserva antes de aplicar.", parent=self)
+        try:
+            if not reservation_covers_preview(self.db.conn, self._r08_reservation, self._r08_preview, now=int(time.time())):
+                self._r08_reservation = None
+                self._r08_apply_btn.configure(state="disabled")
+                raise RuntimeError("La reserva R08 expiro o ya no coincide con el preview; vuelve a reservar.")
+            manifest_preview = preview_shared_manifest_apply(manifest_path(_BASE_DIR), self._r08_preview)
+            if not messagebox.askyesno("Aplicar R08", f"Se agregaran {manifest_preview['summary']['added']} entradas y se reemplazaran {manifest_preview['summary']['removed']}. Continuar?", parent=self):
+                return
+            apply_manifest_preview(manifest_path(_BASE_DIR), manifest_preview)
+            release_reservation(self.db.conn, self._r08_reservation["reservation_id"], owner=self._r08_reservation["owner"])
+            self._r08_result.insert("end", "\nAplicado correctamente con revision protegida.")
+            self._r08_apply_btn.configure(state="disabled")
+            self._r08_reservation = None
+        except Exception as exc:
+            messagebox.showerror("R08", str(exc), parent=self)
 
     def _build_dist_tandas_tab(self, parent):
         """Contenido del tab Por Tandas (lógica original)."""

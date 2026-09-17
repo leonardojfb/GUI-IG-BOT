@@ -42,6 +42,8 @@ $ReleaseFiles = @(
     "manifest_migration_cli.py",
     "shared_planner.py",
     "shared_planner_sources.py",
+    "shared_planner_apply.py",
+    "planner_reservations.py",
     "social_publishing.py",
     "telegram_core.py",
     "cleaner.py",
