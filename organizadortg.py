@@ -785,7 +785,17 @@ def delete_known_topics_for_accounts(account_names, topics_state):
         should_delete,
     )
 
-def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, username, tag):
+def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, username, tag, db=None, asset_ref=None, idempotency_key=None):
+    ledger = None
+    ledger_bot_id = "legacy-bot"
+    if db is not None and asset_ref and idempotency_key:
+        try:
+            from telegram_ledger import find_delivery
+            ledger = find_delivery(db.conn, asset_ref=asset_ref, chat_id=chat_id, topic_id=t_id, bot_id=ledger_bot_id, idempotency_key=idempotency_key)
+            if ledger:
+                return True, t_id
+        except Exception:
+            ledger = None
     readable_video_path = _windows_long_path(video_path)
     active_path = readable_video_path
     compressed_tmp = None
@@ -819,6 +829,15 @@ def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, usern
                     files={'video': (upload_name, fv, 'video/mp4')}
                 )
             if r.status_code == 200:
+                if db is not None and asset_ref and idempotency_key:
+                    try:
+                        response_json = r.json()
+                        message_id = (response_json.get("result") or {}).get("message_id")
+                        if message_id is not None:
+                            from telegram_ledger import record_confirmed_delivery
+                            record_confirmed_delivery(db.conn, asset_ref=asset_ref, path=video_path, chat_id=chat_id, topic_id=t_id, bot_id=ledger_bot_id, caption=caption, idempotency_key=idempotency_key, message_id=message_id, method="sendVideo")
+                    except Exception:
+                        pass
                 return True, t_id
             if r.status_code == 413:
                 # El comprimido sigue siendo muy grande — intentar comprimir más agresivamente
@@ -1184,10 +1203,17 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                 topic_id = send_metadata(job)
                 if not topic_id:
                     continue
-                ok, _topic_id = _send_video_to_topic(
+                send_args = (
                     job["chat_id"], topic_id, job["caption"], job["path"],
                     topics_state, job["username"], job["tag"],
                 )
+                if getattr(_send_video_to_topic, "__module__", None) == __name__:
+                    send_args += (
+                        db,
+                        str(job.get("transform_log_id") or os.path.abspath(job["path"])),
+                        f"{job.get('dia_str', '')}|{job['username']}|{job['path']}|{topic_id}",
+                    )
+                ok, _topic_id = _send_video_to_topic(*send_args)
                 if ok:
                     record_telegram_send_usage(db, job, chat_id=job["chat_id"], topic_id=topic_id)
                     sent += 1

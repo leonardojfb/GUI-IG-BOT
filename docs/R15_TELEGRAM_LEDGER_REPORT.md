@@ -16,9 +16,11 @@ Fecha: 2026-09-17
 - `build_telegram_bot_api_sender()` ofrece el transporte Bot API real con
   multipart nativo y `message_thread_id`; el token solo vive en memoria del
   sender y no se persiste en el ledger.
+- `organizadortg._send_video_to_topic()` registra el envío confirmado cuando
+  recibe DB/asset/idempotency context, pero conserva la llamada legacy cuando
+  un test o wrapper sustituye el handler.
 
 ## Limites
 
-La integración final con el worker Telegram existente, topics canónicos y
-migración de historiales todavía requiere un gate operativo. No se reutilizan
-cookies ni sesiones de Instagram.
+Topics canónicos y migración de historiales todavía requieren un gate
+operativo. No se reutilizan cookies ni sesiones de Instagram.

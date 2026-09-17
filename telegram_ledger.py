@@ -55,6 +55,23 @@ def deliver_media(connection, sender, *, asset_ref, path, chat_id, topic_id, bot
     return {"status": "sent", "method": method, "message_id": str(message_id)}
 
 
+def find_delivery(connection, *, asset_ref, chat_id, topic_id, bot_id, idempotency_key):
+    ensure_telegram_ledger_schema(connection)
+    row = connection.execute("SELECT message_id, method FROM telegram_delivery_ledger WHERE asset_ref=? AND bot_id=? AND chat_id=? AND topic_id IS ? AND idempotency_key=?", (str(asset_ref), str(bot_id), str(chat_id), _optional(topic_id), _required(idempotency_key, "idempotency_key"))).fetchone()
+    return None if row is None else {"message_id": str(row[0]), "method": row[1]}
+
+
+def record_confirmed_delivery(connection, *, asset_ref, path, chat_id, topic_id, bot_id, caption="", idempotency_key, message_id, method=None):
+    ensure_telegram_ledger_schema(connection)
+    existing = find_delivery(connection, asset_ref=asset_ref, chat_id=chat_id, topic_id=topic_id, bot_id=bot_id, idempotency_key=idempotency_key)
+    if existing:
+        return {"status": "already_sent", **existing}
+    resolved_method = method or media_method(path)
+    connection.execute("INSERT INTO telegram_delivery_ledger (asset_ref, bot_id, chat_id, topic_id, media_path, method, caption, message_id, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (str(asset_ref), str(bot_id), str(chat_id), _optional(topic_id), os.path.abspath(path), resolved_method, str(caption or ""), str(message_id), _required(idempotency_key, "idempotency_key")))
+    connection.commit()
+    return {"status": "recorded", "method": resolved_method, "message_id": str(message_id)}
+
+
 def build_telegram_bot_api_sender(token: str, *, request_fn=None, timeout: int = 30):
     """Build a real Bot API sender without storing the token in the ledger."""
     token = _required(token, "token")

@@ -1,6 +1,6 @@
 import sqlite3
 
-from telegram_ledger import build_telegram_bot_api_sender, deliver_media, ensure_telegram_ledger_schema, media_method
+from telegram_ledger import build_telegram_bot_api_sender, deliver_media, ensure_telegram_ledger_schema, find_delivery, media_method, record_confirmed_delivery
 
 
 def test_media_method_uses_native_telegram_formats():
@@ -55,3 +55,14 @@ def test_bot_api_sender_uses_native_file_field_and_thread(tmp_path):
     assert calls[0][0][0].endswith("/sendPhoto")
     assert "photo" in calls[0][1]["files"]
     assert calls[0][1]["data"]["message_thread_id"] == 9
+
+
+def test_confirmed_delivery_record_is_idempotent_for_legacy_worker(tmp_path):
+    connection = sqlite3.connect(":memory:")
+    media = tmp_path / "clip.mp4"
+    media.write_bytes(b"video")
+    first = record_confirmed_delivery(connection, asset_ref="asset", path=media, chat_id="-1", topic_id=4, bot_id="legacy-bot", idempotency_key="day1", message_id=12, method="sendVideo")
+    second = record_confirmed_delivery(connection, asset_ref="asset", path=media, chat_id="-1", topic_id=4, bot_id="legacy-bot", idempotency_key="day1", message_id=13, method="sendVideo")
+    assert first["status"] == "recorded"
+    assert second["status"] == "already_sent"
+    assert find_delivery(connection, asset_ref="asset", chat_id="-1", topic_id=4, bot_id="legacy-bot", idempotency_key="day1")["message_id"] == "12"
