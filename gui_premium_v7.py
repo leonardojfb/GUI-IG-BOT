@@ -3527,11 +3527,11 @@ class InstagramAutoPro(ctk.CTk):
                             vid_id = forge_vid_id(item_name(v))
                             if vid_id in acc_today_vid_ids:
                                 continue  # regla dura: no repetir vid_id mismo día/cuenta
+                            if vid_id in day_vid_ids_used:
+                                continue  # regla dura: no repetir origen entre cuentas el mismo día
                             score = 0
                             if vid_id in acc_lifetime_vid_ids[acc]:
                                 score += 200  # penalizar reutilización en misma cuenta
-                            if vid_id in day_vid_ids_used:
-                                score += 100  # penalizar mismo vid_id en distintas cuentas hoy
                             if vid_id in slot_vid_ids_used:
                                 score += 50   # penalizar mismo slot entre cuentas
                             score += random.random()

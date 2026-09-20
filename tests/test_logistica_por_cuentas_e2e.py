@@ -130,7 +130,7 @@ def test_por_cuentas_distributes_manual_cross_category_accounts_without_mixing(t
         os.makedirs(tanda_dir, exist_ok=True)
         needed = 2 * 1 * 7  # 2 accounts x 1 video/day x "1 semana"
         for i in range(1, needed + 1):
-            with open(os.path.join(tanda_dir, f"PC_SRC__c{i:02d}.mp4"), "wb") as fh:
+            with open(os.path.join(tanda_dir, f"PC_SRC__SRC{i:02d}__P2.mp4"), "wb") as fh:
                 fh.write(f"fake-video-{i}".encode())
         app.db.add_tanda(tanda_name, tanda_name, tanda_name, "")
 
@@ -330,5 +330,54 @@ def test_por_cuentas_can_shuffle_two_source_tandas_into_one_account_batch(tmp_pa
         assert all(f"__TANDA_{row['tanda']}__" in row["telegram_filename"] for row in produced)
         assert sum(1 for row in produced if row["username"] == "pc_mix_a") == 2
         assert sum(1 for row in produced if row["username"] == "pc_mix_b") == 2
+    finally:
+        cleanup()
+
+
+def test_por_cuentas_rejects_same_origin_across_accounts_on_same_day(tmp_path, monkeypatch):
+    app, cleanup = _make_app()
+    try:
+        import Organizador
+        import gui_premium_v7 as gui
+
+        base_dir = str(tmp_path)
+        monkeypatch.setattr(Organizador, "output_root", os.path.join(base_dir, "CALENDARIO_POSTEO"))
+        monkeypatch.setattr(gui, "_BASE_DIR", base_dir)
+        monkeypatch.setattr(gui, "_ACCT_HIST_FILE", os.path.join(base_dir, "acct_hist.json"))
+        monkeypatch.setattr(gui, "WorkerThread", _SyncWorkerThread)
+        monkeypatch.setattr(gui.messagebox, "showinfo", lambda *a, **k: None)
+        monkeypatch.setattr(gui.messagebox, "showerror", lambda *a, **k: None)
+        monkeypatch.setattr(gui.messagebox, "showwarning", lambda *a, **k: None)
+        monkeypatch.setattr(gui.messagebox, "askyesno", lambda *a, **k: True)
+
+        app.db.add_category("PC_DAILY_CAT")
+        app.db.add_va("PC_DAILY_VA")
+        for username in ("pc_daily_a", "pc_daily_b"):
+            app.db.add_virtual_account(username, "PC_DAILY_CAT")
+            app.db.update_account(username, assigned_va="PC_DAILY_VA")
+
+        tanda_name = "PC_DAILY_ORIGIN"
+        tanda_dir = os.path.join(base_dir, "videos_finales", tanda_name)
+        os.makedirs(tanda_dir, exist_ok=True)
+        for copy_number in (1, 2):
+            with open(
+                os.path.join(tanda_dir, f"PC_DAILY__ORIGIN_A__P2__c{copy_number:02d}.mp4"),
+                "wb",
+            ) as fh:
+                fh.write(f"same-origin-copy-{copy_number}".encode())
+        app.db.add_tanda(tanda_name, tanda_name, tanda_name, "")
+
+        app.reload_dist_lists()
+        app.acct_dist_tanda.set(tanda_name)
+        app.acct_dist_list.delete("1.0", "end")
+        app.acct_dist_list.insert("end", "pc_daily_a\npc_daily_b\n")
+        app.acct_dist_vpd.set(1)
+        app.acct_dist_period.set("MAX")
+
+        app._acct_dist_run(preview_only=False)
+
+        result_text = app.acct_dist_result.get("1.0", "end")
+        assert "Sin candidatos" in result_text
+        assert not (Path(base_dir) / "calendar_manifest.json").exists()
     finally:
         cleanup()
