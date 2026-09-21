@@ -3,6 +3,7 @@ import urllib.error
 import urllib.request
 
 import database
+import pytest
 
 from local_web import LocalWebService
 from manual_calendar_export import export_manual_package
@@ -55,6 +56,35 @@ def test_local_web_requires_token_and_exposes_read_models(tmp_path):
         db.close()
 
 
+def test_lan_binding_rejects_wildcard_and_public_addresses(tmp_path):
+    db = database.DatabaseManager(str(tmp_path / "db.sqlite"))
+    try:
+        with pytest.raises(ValueError, match="wildcard"):
+            LocalWebService(db, host="0.0.0.0", lan_enabled=True)
+        with pytest.raises(ValueError, match="privada"):
+            LocalWebService(db, host="8.8.8.8", lan_enabled=True)
+    finally:
+        db.close()
+
+
+def test_lan_pairing_requires_csrf_for_mutations(tmp_path):
+    db = database.DatabaseManager(str(tmp_path / "db.sqlite"))
+    service = LocalWebService(db, host="127.0.0.1", lan_enabled=True).start()
+    try:
+        code = service.create_lan_pairing_code()
+        status, payload = _post(f"{service.base_url}/api/auth/pair", None, {"code": code})
+        assert status == 200
+        request = urllib.request.Request(f"{service.base_url}/api/modules", data=b"{}", method="POST")
+        request.add_header("Cookie", f"web_session={payload['session_token']}")
+        request.add_header("Content-Type", "application/json")
+        with pytest.raises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(request, timeout=5)
+        assert error.value.code == 403
+    finally:
+        service.stop()
+        db.close()
+
+
 def test_local_web_read_endpoints_are_json_and_read_only(tmp_path):
     db = database.DatabaseManager(str(tmp_path / "db.sqlite"))
     service = LocalWebService(db, token="abc")
@@ -93,6 +123,18 @@ def test_legacy_gui_exposes_opt_in_local_panel_without_replacing_entrypoints():
     assert 'self.show_frame("Forge")' not in source[source.index("def _open_local_web"):source.index("def _on_close")]
     assert "calendar_import_root=UPDATE_APP_DIR" in source
     assert "manual_import_audit.jsonl" in source
+
+
+def test_legacy_sidebar_has_a_first_class_entry_to_open_the_operational_web_panel():
+    source = open("gui_premium_v7.py", encoding="utf-8").read()
+
+    assert 'text="Abrir panel web"' in source
+    assert 'command=self._open_local_web' in source
+
+
+def test_legacy_gui_opens_panel_with_its_ephemeral_token():
+    source = open("gui_premium_v7.py", encoding="utf-8").read()
+    assert 'webbrowser.open(f"{self._local_web_service.base_url}#token={self._local_web_service.token}&view=workflows")' in source
 
 
 def test_legacy_gui_exposes_read_only_ios_snapshot_loader():
