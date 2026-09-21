@@ -32,6 +32,13 @@ def test_web_workflow_creator_exposes_complete_manual_module_steps_without_defau
     assert 'workflows/manual' in source
 
 
+def test_web_workflow_creator_allows_an_empty_step_while_editing():
+    source = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+
+    assert "if (!moduleType || !subtype) return {" in source
+    assert 'if (state.workflowSteps.some((step) => !step.module_type || !step.subtype))' in source
+
+
 def test_manual_step_editor_has_layout_for_all_form_controls():
     source = (ROOT / "web" / "styles.css").read_text(encoding="utf-8")
 

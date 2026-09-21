@@ -244,7 +244,7 @@ function readManualStep(row) {
   const value = (name) => row.querySelector(`[data-step-field="${name}"]`)?.value.trim() || "";
   const moduleType = value("module_type");
   const subtype = value("subtype");
-  if (!moduleType || !subtype) throw new Error("Elegí módulo y tipo para cada paso.");
+  if (!moduleType || !subtype) return { module_type: moduleType, subtype, fields: {}, input_binding: row.querySelector("[data-step-previous]")?.checked ? { kind: "previous_output" } : {} };
   const fields = { module_type: moduleType, subtype };
   if (moduleType === "forge") {
     fields.video_paths = [...row.querySelectorAll("[data-step-assets] option:checked")].map((option) => option.dataset.path || option.value);
@@ -424,6 +424,7 @@ async function createWorkflow() {
     const name = $("workflow-name").value.trim();
     if (!name) throw new Error("Ingresa un nombre de workflow.");
     if (!state.workflowSteps.length) throw new Error("Agrega al menos un paso.");
+    if (state.workflowSteps.some((step) => !step.module_type || !step.subtype)) throw new Error("Elegí módulo y tipo para cada paso.");
     const workflow = await api("workflows/manual", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, steps: state.workflowSteps }) });
     state.selectedWorkflowId = workflow.workflow_id;
     state.workflowSteps = [];
