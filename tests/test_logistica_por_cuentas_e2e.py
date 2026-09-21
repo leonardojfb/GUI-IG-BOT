@@ -334,11 +334,14 @@ def test_por_cuentas_can_shuffle_two_source_tandas_into_one_account_batch(tmp_pa
         cleanup()
 
 
-def test_por_cuentas_rejects_same_origin_across_accounts_on_same_day(tmp_path, monkeypatch):
+def test_por_cuentas_reuses_copy_sets_across_accounts_without_daily_origin_collisions(
+    tmp_path, monkeypatch
+):
     app, cleanup = _make_app()
     try:
         import Organizador
         import gui_premium_v7 as gui
+        from trial_content import source_key_from_filename
 
         base_dir = str(tmp_path)
         monkeypatch.setattr(Organizador, "output_root", os.path.join(base_dir, "CALENDARIO_POSTEO"))
@@ -350,34 +353,62 @@ def test_por_cuentas_rejects_same_origin_across_accounts_on_same_day(tmp_path, m
         monkeypatch.setattr(gui.messagebox, "showwarning", lambda *a, **k: None)
         monkeypatch.setattr(gui.messagebox, "askyesno", lambda *a, **k: True)
 
-        app.db.add_category("PC_DAILY_CAT")
-        app.db.add_va("PC_DAILY_VA")
-        for username in ("pc_daily_a", "pc_daily_b"):
-            app.db.add_virtual_account(username, "PC_DAILY_CAT")
-            app.db.update_account(username, assigned_va="PC_DAILY_VA")
+        app.db.add_category("PC_COPY_SET_CAT")
+        app.db.add_va("PC_COPY_SET_VA")
+        usernames = [f"pc_copy_set_{index:02d}" for index in range(1, 21)]
+        for username in usernames:
+            app.db.add_virtual_account(username, "PC_COPY_SET_CAT")
+            app.db.update_account(username, assigned_va="PC_COPY_SET_VA")
 
-        tanda_name = "PC_DAILY_ORIGIN"
+        tanda_name = "PC_COPY_SET"
         tanda_dir = os.path.join(base_dir, "videos_finales", tanda_name)
         os.makedirs(tanda_dir, exist_ok=True)
-        for copy_number in (1, 2):
-            with open(
-                os.path.join(tanda_dir, f"PC_DAILY__ORIGIN_A__P2__c{copy_number:02d}.mp4"),
-                "wb",
-            ) as fh:
-                fh.write(f"same-origin-copy-{copy_number}".encode())
+        for origin_number in range(1, 31):
+            for copy_number in range(1, 21):
+                with open(
+                    os.path.join(
+                        tanda_dir,
+                        f"PC_COPY_SET__ORIGIN{origin_number:02d}__P2__c{copy_number:02d}.mp4",
+                    ),
+                    "wb",
+                ) as fh:
+                    fh.write(f"origin-{origin_number}-copy-{copy_number}".encode())
         app.db.add_tanda(tanda_name, tanda_name, tanda_name, "")
 
         app.reload_dist_lists()
         app.acct_dist_tanda.set(tanda_name)
         app.acct_dist_list.delete("1.0", "end")
-        app.acct_dist_list.insert("end", "pc_daily_a\npc_daily_b\n")
-        app.acct_dist_vpd.set(1)
+        app.acct_dist_list.insert("end", "\n".join(usernames) + "\n")
+        app.acct_dist_vpd.set(3)
         app.acct_dist_period.set("MAX")
 
         app._acct_dist_run(preview_only=False)
 
         result_text = app.acct_dist_result.get("1.0", "end")
-        assert "Sin candidatos" in result_text
-        assert not (Path(base_dir) / "calendar_manifest.json").exists()
+        assert "❌" not in result_text, result_text
+
+        payload = json.loads((Path(base_dir) / "calendar_manifest.json").read_text(encoding="utf-8"))
+        produced = [
+            row
+            for row in payload["entries"]
+            if row["delivery_kind"] == "normal" and row["username"] in set(usernames)
+        ]
+        assert len(produced) == 20 * 30
+        assert {row["username"] for row in produced} == set(usernames)
+
+        for username in usernames:
+            rows = [row for row in produced if row["username"] == username]
+            assert len(rows) == 30
+            assert len({source_key_from_filename(row["source_path"]) for row in rows}) == 30
+            for day in {row["day"] for row in rows}:
+                day_rows = [row for row in rows if row["day"] == day]
+                origins = [source_key_from_filename(row["source_path"]) for row in day_rows]
+                assert len(origins) == len(set(origins))
+
+        day_one_rows = [row for row in produced if row["day"] == 1]
+        assert len(day_one_rows) == 20 * 3
+        assert len({source_key_from_filename(row["source_path"]) for row in day_one_rows}) < len(
+            day_one_rows
+        )
     finally:
         cleanup()
