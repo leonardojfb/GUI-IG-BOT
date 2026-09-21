@@ -75,6 +75,7 @@ def build_manual_step(module_type: str, subtype: str, fields: dict[str, Any]) ->
             date=values.get("date"),
             express=values.get("express", False),
             reset_topics=values.get("reset_topics", False),
+            schedule_config=values.get("schedule_config") or {},
         )
 
     input_contract, output_contract = CONTRACTS[module]

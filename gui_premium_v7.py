@@ -1410,8 +1410,8 @@ class InstagramAutoPro(ctk.CTk):
         # — Navegación agrupada por flujo de trabajo —
         nav_groups = [
             ("Edición",       [("🖼️   Edición de video", "VideoEditor")]),
-            ("Contenido",    [("🔮   Forge", "Forge"), ("🎬   Tandas", "Tandas")]),
-            ("Distribución", [("🚀   Logística", "Logistica"), ("📡   Cuentas", "Cuentas"),
+            ("Contenido",    [("🗄️   Vault", "Vault"), ("🔮   Forge", "Forge"), ("🎬   Tandas", "Tandas")]),
+            ("Distribución", [("📅   Calendario", "Calendario"), ("🚀   Logística", "Logistica"), ("📡   Cuentas", "Cuentas"),
                               ("📲   Telegram", "Telegram")]),
             ("Control",      [("📊   Dashboard", "Dashboard")]),
             ("Sistema",      [("⚙️   Admin", "Equipo"), ("🔍   Verify Legacy", "VerifyLegacy"),
@@ -1432,6 +1432,11 @@ class InstagramAutoPro(ctk.CTk):
                 row += 1
 
         # — Selector de tema —
+        PrimaryButton(
+            self.sidebar_nav, text="Abrir panel web", command=self._open_local_web
+        ).grid(row=row, column=0, padx=14, pady=(12, 4), sticky="ew")
+        row += 1
+
         self.theme_seg = ctk.CTkSegmentedButton(
             self.sidebar_nav, values=["Claro", "Oscuro", "Sistema"],
             command=self._on_theme_change,
@@ -1468,7 +1473,7 @@ class InstagramAutoPro(ctk.CTk):
         container.grid_columnconfigure(0, weight=1)
         self._container = container
 
-        for name in ["Dashboard", "Equipo", "Tandas", "Logistica", "Telegram", "Cuentas", "VerifyLegacy", "AIAdvisor", "Forge", "VideoEditor", "Actualizaciones"]:
+        for name in ["Dashboard", "Equipo", "Tandas", "Calendario", "Logistica", "Telegram", "Cuentas", "VerifyLegacy", "AIAdvisor", "Vault", "Forge", "VideoEditor", "Actualizaciones"]:
             f = ctk.CTkFrame(container, fg_color=BG_APP, corner_radius=0)
             f.grid(row=0, column=0, sticky="nsew")
             f.grid_columnconfigure(0, weight=1)
@@ -1478,11 +1483,13 @@ class InstagramAutoPro(ctk.CTk):
         self._build_dashboard_frame()
         self._build_team_frame()
         self._build_mix_frame()
+        self._build_calendar_frame()
         self._build_dist_frame()
         self._build_tg_frame()
         self._build_cuentas_frame()
         self._build_verify_legacy_frame()
         self._build_ai_frame()
+        self._build_vault_frame()
         self._build_forge_frame()
         self._build_video_editor_frame()
         self._build_updates_frame()
@@ -1669,7 +1676,7 @@ class InstagramAutoPro(ctk.CTk):
                 "Panel local",
                 f"Token temporal copiado al portapapeles.\n\n{self._local_web_service.token}",
             )
-        webbrowser.open(self._local_web_service.base_url)
+        webbrowser.open(f"{self._local_web_service.base_url}#token={self._local_web_service.token}&view=workflows")
 
     def _on_close(self):
         service = self._local_web_service
@@ -2958,6 +2965,360 @@ class InstagramAutoPro(ctk.CTk):
         self.btn_render.configure(text="⏳ RENDERIZANDO...", state="disabled")
         WorkerThread(self, done, task).start()
 
+    def _build_calendar_frame(self):
+        """Build reusable workflow, preview and manual-calendar controls."""
+        f = self._frames["Calendario"]
+        f.grid_rowconfigure(0, weight=1)
+        f.grid_columnconfigure(0, weight=1)
+        scroll = ctk.CTkScrollableFrame(f, fg_color="transparent")
+        scroll.grid(row=0, column=0, sticky="nsew")
+        scroll.grid_columnconfigure(0, weight=1)
+        self.calendar_source_paths = []
+        self._calendar_preview = None
+        self._calendar_workflow_id = None
+
+        PageHeader(
+            scroll,
+            kicker="DISTRIBUCION",
+            title="Calendario manual",
+            description="Organiza la publicacion manual para Instagram y Facebook sin publicar automaticamente.",
+            action=("Actualizar tareas", self._calendar_refresh_tasks),
+        ).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 0))
+
+        modular_card = Card(scroll, title="Editor modular de workflows")
+        modular_card.grid(row=1, column=0, sticky="ew", padx=24, pady=(16, 10))
+        ctk.CTkLabel(modular_card.body, text="Define bloques de Produccion (Forge normal, completo o sin espejo) y su Logistica por destino antes de ejecutar una tanda.", text_color=TEXT_MUTED, font=ctk.CTkFont(size=12), anchor="w").pack(fill="x", padx=8, pady=(4, 8))
+        PrimaryButton(modular_card.body, text="Abrir editor modular", command=self._open_local_web).pack(anchor="w", padx=8, pady=(0, 8))
+
+        config_card = Card(scroll, title="Calendario rapido")
+        config_card.grid(row=2, column=0, sticky="ew", padx=24, pady=(0, 10))
+        body = config_card.body
+        body.grid_columnconfigure(1, weight=1)
+        body.grid_columnconfigure(3, weight=1)
+        ctk.CTkLabel(body, text="Nombre", text_color=TEXT_MUTED).grid(row=0, column=0, padx=(8, 6), pady=6, sticky="e")
+        self.calendar_workflow_name = ctk.CTkEntry(body, placeholder_text="Ej. Operacion semanal", fg_color=BG_INPUT, border_color=BORDER)
+        self.calendar_workflow_name.grid(row=0, column=1, padx=(0, 12), pady=6, sticky="ew")
+        ctk.CTkLabel(body, text="Zona horaria", text_color=TEXT_MUTED).grid(row=0, column=2, padx=(8, 6), pady=6, sticky="e")
+        self.calendar_timezone = ctk.CTkEntry(body, fg_color=BG_INPUT, border_color=BORDER)
+        self.calendar_timezone.insert(0, "America/Argentina/Buenos_Aires")
+        self.calendar_timezone.grid(row=0, column=3, padx=(0, 8), pady=6, sticky="ew")
+        ctk.CTkLabel(body, text="Plantilla de frecuencia", text_color=TEXT_MUTED).grid(row=1, column=0, padx=(8, 6), pady=6, sticky="e")
+        from workflow_presets import list_workflow_presets
+        self.calendar_presets = list_workflow_presets()
+        self.calendar_preset_by_label = {"Sin plantilla (configuración manual)": None}
+        self.calendar_preset_by_label.update({preset["label"]: preset["id"] for preset in self.calendar_presets})
+        self.calendar_preset_choice = ctk.CTkOptionMenu(body, values=list(self.calendar_preset_by_label), fg_color=BG_INPUT, button_color=BG_CARD2, command=lambda _: self._calendar_apply_preset())
+        self.calendar_preset_choice.grid(row=1, column=1, columnspan=3, padx=(0, 8), pady=6, sticky="ew")
+        self.calendar_preset_choice.set("Sin plantilla (configuración manual)")
+        self.calendar_preset_summary = ctk.CTkLabel(body, text="", text_color=TEXT_MUTED, font=ctk.CTkFont(size=11), anchor="w")
+        self.calendar_preset_summary.grid(row=2, column=0, columnspan=4, padx=8, pady=(0, 6), sticky="ew")
+
+        ctk.CTkLabel(body, text="Selecciona las cuentas que recibiran esta tanda", text_color=TEXT_BODY, font=ctk.CTkFont(size=12, weight="bold")).grid(row=3, column=0, columnspan=4, padx=8, pady=(8, 2), sticky="w")
+        self.calendar_identity_choices = ctk.CTkFrame(body, fg_color=BG_INPUT, corner_radius=6)
+        self.calendar_identity_choices.grid(row=4, column=0, columnspan=4, padx=8, pady=(0, 6), sticky="ew")
+        self.calendar_identity_vars = {}
+        self._calendar_build_identity_choices()
+
+        self.calendar_advanced_var = tk.BooleanVar(value=False)
+        ctk.CTkCheckBox(body, text="Ajustes avanzados", variable=self.calendar_advanced_var, command=self._calendar_toggle_advanced, text_color=TEXT_MUTED, fg_color=ACCENT, hover_color=ACCENT_HOVER).grid(row=5, column=0, columnspan=4, padx=8, pady=(4, 2), sticky="w")
+        self.calendar_advanced_frame = ctk.CTkFrame(body, fg_color="transparent")
+        self.calendar_advanced_frame.grid(row=6, column=0, columnspan=4, padx=0, pady=(0, 4), sticky="ew")
+        self.calendar_advanced_frame.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(self.calendar_advanced_frame, text="Identidades (formato identidad|plataforma)", text_color=TEXT_MUTED, font=ctk.CTkFont(size=11)).grid(row=0, column=0, padx=8, pady=(4, 2), sticky="w")
+        self.calendar_identities = ctk.CTkTextbox(self.calendar_advanced_frame, height=62, fg_color=BG_INPUT, border_color=BORDER, border_width=1)
+        self.calendar_identities.grid(row=1, column=0, padx=8, pady=(0, 6), sticky="ew")
+        self.calendar_identities.insert("1.0", self._calendar_identity_seed())
+        ctk.CTkLabel(self.calendar_advanced_frame, text="Reglas (destino | HH:MM,HH:MM | cada N dias)", text_color=TEXT_MUTED, font=ctk.CTkFont(size=11)).grid(row=2, column=0, padx=8, pady=(2, 2), sticky="w")
+        self.calendar_rules = ctk.CTkTextbox(self.calendar_advanced_frame, height=105, fg_color=BG_INPUT, border_color=BORDER, border_width=1)
+        self.calendar_rules.grid(row=3, column=0, padx=8, pady=(0, 6), sticky="ew")
+        self._calendar_apply_preset()
+        self._calendar_toggle_advanced()
+
+        ctk.CTkLabel(body, text="Inicio", text_color=TEXT_MUTED).grid(row=7, column=0, padx=(8, 6), pady=6, sticky="e")
+        self.calendar_start = ctk.CTkEntry(body, fg_color=BG_INPUT, border_color=BORDER)
+        self.calendar_start.insert(0, datetime.now().date().isoformat())
+        self.calendar_start.grid(row=7, column=1, padx=(0, 12), pady=6, sticky="ew")
+        ctk.CTkLabel(body, text="Dias", text_color=TEXT_MUTED).grid(row=7, column=2, padx=(8, 6), pady=6, sticky="e")
+        self.calendar_days = Stepper(body, value=7, min=1, max=90)
+        self.calendar_days.grid(row=7, column=3, padx=(0, 8), pady=6, sticky="w")
+
+        source_card = Card(scroll, title="Fuentes para producir")
+        source_card.grid(row=3, column=0, sticky="ew", padx=24, pady=(0, 10))
+        source_body = source_card.body
+        source_buttons = ctk.CTkFrame(source_body, fg_color="transparent")
+        source_buttons.pack(fill="x", padx=8, pady=(0, 6))
+        PrimaryButton(source_buttons, text="Seleccionar archivos", command=self._calendar_select_sources).pack(side="left", padx=(0, 8))
+        GhostButton(source_buttons, text="Guardar workflow", command=self._calendar_save_workflow).pack(side="left", padx=(0, 8))
+        GhostButton(source_buttons, text="Duplicar workflow", command=self._calendar_clone_workflow).pack(side="left", padx=(0, 8))
+        GhostButton(source_buttons, text="Previsualizar calendario", command=self._calendar_preview_workflow).pack(side="left", padx=(0, 8))
+        self.calendar_confirm_button = DangerButton(source_buttons, text="Confirmar tareas", state="disabled", command=self._calendar_confirm_preview)
+        self.calendar_confirm_button.pack(side="left")
+        self.calendar_sources_status = ctk.CTkLabel(source_body, text="Sin fuentes seleccionadas.", text_color=TEXT_MUTED, font=ctk.CTkFont(size=11), anchor="w")
+        self.calendar_sources_status.pack(fill="x", padx=8, pady=(0, 4))
+
+        preview_card = Card(scroll, title="Preview antes de confirmar")
+        preview_card.grid(row=4, column=0, sticky="ew", padx=24, pady=(0, 10))
+        self.calendar_preview_text = ctk.CTkTextbox(preview_card.body, height=155, fg_color=BG_INPUT, text_color=TEXT_BODY, font=FONT_MONO)
+        self.calendar_preview_text.pack(fill="x", padx=8, pady=8)
+
+        tasks_card = Card(scroll, title="Tareas confirmadas")
+        tasks_card.grid(row=5, column=0, sticky="ew", padx=24, pady=(0, 24))
+        task_body = tasks_card.body
+        task_body.grid_columnconfigure(0, weight=1)
+        columns = ("local_date", "local_time", "identity_id", "target", "state", "source_path")
+        self.calendar_task_tree = ttk.Treeview(task_body, columns=columns, show="headings", height=11)
+        headings = {"local_date": "Fecha", "local_time": "Hora", "identity_id": "Identidad", "target": "Destino", "state": "Estado", "source_path": "Fuente"}
+        widths = {"local_date": 95, "local_time": 65, "identity_id": 160, "target": 150, "state": 120, "source_path": 430}
+        for column in columns:
+            self.calendar_task_tree.heading(column, text=headings[column])
+            self.calendar_task_tree.column(column, width=widths[column], minwidth=60, anchor="w")
+        self.calendar_task_tree.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 6))
+        controls = ctk.CTkFrame(task_body, fg_color="transparent")
+        controls.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 6))
+        PrimaryButton(controls, text="Producir Photo Forge", command=self._calendar_produce_photo).pack(side="left", padx=(0, 8))
+        PrimaryButton(controls, text="Producir Forge video", command=self._calendar_produce_video).pack(side="left", padx=(0, 8))
+        GhostButton(controls, text="Marcar publicado", command=self._calendar_mark_published).pack(side="left", padx=(0, 8))
+        GhostButton(controls, text="Actualizar", command=self._calendar_refresh_tasks).pack(side="left")
+        self._calendar_refresh_tasks()
+
+    def _calendar_identity_seed(self):
+        rows = self.db.conn.execute("SELECT identity_id, platform FROM social_identities WHERE archived = 0 ORDER BY display_name").fetchall()
+        return "\n".join(f"{row['identity_id']}|{row['platform']}" for row in rows if row['platform'] in {"instagram", "facebook"})
+
+    def _calendar_build_identity_choices(self):
+        for child in self.calendar_identity_choices.winfo_children():
+            child.destroy()
+        rows = self.db.conn.execute("SELECT identity_id, platform, display_name FROM social_identities WHERE archived = 0 ORDER BY display_name").fetchall()
+        allowed = [row for row in rows if row["platform"] in {"instagram", "facebook"}]
+        if not allowed:
+            ctk.CTkLabel(self.calendar_identity_choices, text="No hay cuentas configuradas todavia.", text_color=TEXT_MUTED).pack(side="left", padx=(10, 8), pady=9)
+            GhostButton(self.calendar_identity_choices, text="Crear identidad", command=lambda: self.show_frame("Cuentas")).pack(side="left", padx=(0, 8), pady=6)
+            return
+        for row in allowed:
+            key = (row["identity_id"], row["platform"])
+            value = self.calendar_identity_vars.get(key, tk.BooleanVar(value=True))
+            self.calendar_identity_vars[key] = value
+            ctk.CTkCheckBox(self.calendar_identity_choices, text=f"{row['display_name']} ({row['platform']})", variable=value, command=self._calendar_sync_selected_identities, text_color=TEXT_BODY, fg_color=ACCENT, hover_color=ACCENT_HOVER).pack(side="left", padx=8, pady=8)
+        self._calendar_sync_selected_identities()
+
+    def _calendar_sync_selected_identities(self):
+        if not hasattr(self, "calendar_identities"):
+            return
+        selected = [f"{identity_id}|{platform}" for (identity_id, platform), value in self.calendar_identity_vars.items() if value.get()]
+        self.calendar_identities.delete("1.0", "end")
+        self.calendar_identities.insert("1.0", "\n".join(selected))
+
+    def _calendar_apply_preset(self):
+        from workflow_presets import get_workflow_preset
+
+        preset_id = self.calendar_preset_by_label[self.calendar_preset_choice.get()]
+        preset = {
+            "description": "Configuración limpia: agrega tus propias reglas de destino y frecuencia.",
+            "rules": [],
+        } if preset_id is None else get_workflow_preset(preset_id)
+        rules_text = "\n".join(f"{rule['target']} | {','.join(rule['times'])} | {rule['every_days']}" for rule in preset["rules"])
+        if hasattr(self, "calendar_rules"):
+            self.calendar_rules.delete("1.0", "end")
+            self.calendar_rules.insert("1.0", rules_text)
+        if hasattr(self, "calendar_preset_summary"):
+            self.calendar_preset_summary.configure(text=preset["description"])
+
+    def _calendar_toggle_advanced(self):
+        if self.calendar_advanced_var.get():
+            self.calendar_advanced_frame.grid()
+        else:
+            self.calendar_advanced_frame.grid_remove()
+
+    def _calendar_parse_identities(self):
+        self._calendar_sync_selected_identities()
+        result = []
+        for raw in self.calendar_identities.get("1.0", "end").splitlines():
+            identity_id, separator, platform = raw.partition("|")
+            identity_id, platform = identity_id.strip(), platform.strip().lower()
+            if not identity_id:
+                continue
+            if separator != "|" or platform not in {"instagram", "facebook"}:
+                raise ValueError("Cada identidad debe usar el formato identidad|instagram o identidad|facebook")
+            result.append({"identity_id": identity_id, "platform": platform})
+        if not result:
+            raise ValueError("Agrega al menos una identidad")
+        return result
+
+    def _calendar_parse_rules(self):
+        from social_publishing import PUBLICATION_TARGETS
+
+        by_platform = {"instagram": [], "facebook": []}
+        for raw in self.calendar_rules.get("1.0", "end").splitlines():
+            if not raw.strip():
+                continue
+            target, separator, remainder = raw.partition("|")
+            times, separator_two, every_days = remainder.partition("|")
+            target = target.strip()
+            if separator != "|" or separator_two != "|" or target not in PUBLICATION_TARGETS:
+                raise ValueError("Regla invalida. Usa destino | HH:MM,HH:MM | cada N dias")
+            parsed_times = [value.strip() for value in times.split(",") if value.strip()]
+            every = int(every_days.strip())
+            platform = "instagram" if target.startswith("instagram_") else "facebook"
+            by_platform[platform].append({"target": target, "times": parsed_times, "count": len(parsed_times), "every_days": every})
+        if not any(by_platform.values()):
+            raise ValueError("Agrega al menos una regla")
+        return by_platform
+
+    def _calendar_select_sources(self):
+        paths = filedialog.askopenfilenames(title="Seleccionar fuentes", filetypes=[("Media", "*.mp4 *.mov *.mkv *.avi *.jpg *.jpeg *.png *.webp"), ("Todos", "*.*")])
+        if not paths:
+            return
+        self.calendar_source_paths = [str(path) for path in paths]
+        self.calendar_sources_status.configure(text=f"{len(paths)} fuentes seleccionadas.")
+
+    def _calendar_upsert_module(self, kind, name, payload):
+        from workflow_store import create_module, create_module_version, list_modules
+
+        existing = next((item for item in list_modules(self.db.conn, kind) if item["name"] == name), None)
+        if existing:
+            return create_module_version(self.db.conn, existing["module_id"], payload, actor="legacy-gui")
+        return create_module(self.db.conn, kind, name, payload, actor="legacy-gui")
+
+    def _calendar_save_workflow(self):
+        from workflow_store import create_workflow, version_workflow
+
+        name = self.calendar_workflow_name.get().strip()
+        if not name:
+            return messagebox.showwarning("Calendario", "Ingresa un nombre de workflow.", parent=self)
+        try:
+            rules = self._calendar_parse_rules()
+            recipe = self._calendar_upsert_module("production_recipe", f"{name} · Receta", {"kind": "forge"})
+            publication_refs = []
+            for platform, items in rules.items():
+                if items:
+                    module = self._calendar_upsert_module("publication_template", f"{name} · {platform}", {"platform": platform, "rules": items})
+                    publication_refs.append([module["module_id"], module["version"]])
+            telegram = self._calendar_upsert_module("telegram_template", f"{name} · Telegram", {"strategy": "identity_daily", "topic_mode": "identity_daily"})
+            row = self.db.conn.execute("SELECT workflow_id FROM workflows WHERE name = ?", (name,)).fetchone()
+            if row:
+                saved = version_workflow(self.db.conn, row["workflow_id"], production_ref=[recipe["module_id"], recipe["version"]], publication_refs=publication_refs, telegram_ref=[telegram["module_id"], telegram["version"]], actor="legacy-gui")
+                self._calendar_workflow_id = saved["workflow_id"]
+            else:
+                saved = create_workflow(self.db.conn, name, production_ref=[recipe["module_id"], recipe["version"]], publication_refs=publication_refs, telegram_ref=[telegram["module_id"], telegram["version"]], actor="legacy-gui")
+                self._calendar_workflow_id = saved["workflow_id"]
+            self.calendar_preview_text.delete("1.0", "end")
+            self.calendar_preview_text.insert("end", f"Workflow guardado: {name} (version {saved['version']})\n")
+        except Exception as exc:
+            messagebox.showerror("Calendario", str(exc), parent=self)
+
+    def _calendar_clone_workflow(self):
+        from workflow_store import clone_workflow
+
+        if not self._calendar_workflow_id:
+            return messagebox.showwarning("Calendario", "Guarda o carga un workflow antes de duplicarlo.", parent=self)
+        current_name = self.calendar_workflow_name.get().strip() or "Workflow"
+        name = simpledialog.askstring("Duplicar workflow", "Nombre de la copia:", initialvalue=f"{current_name} copia", parent=self)
+        if name is None:
+            return
+        try:
+            clone = clone_workflow(self.db.conn, self._calendar_workflow_id, name.strip(), actor="legacy-gui")
+        except (ValueError, KeyError) as exc:
+            return messagebox.showerror("Calendario", str(exc), parent=self)
+        self._calendar_workflow_id = clone["workflow_id"]
+        self.calendar_workflow_name.delete(0, "end")
+        self.calendar_workflow_name.insert(0, clone["name"])
+        self.calendar_preview_text.insert("end", f"Workflow duplicado: {clone['name']}\n")
+
+    def _calendar_preview_workflow(self):
+        from publication_workflow import preview_workflow_tasks
+
+        if not self._calendar_workflow_id:
+            self._calendar_save_workflow()
+        if not self._calendar_workflow_id:
+            return
+        try:
+            if not self.calendar_source_paths:
+                raise ValueError("Selecciona fuentes antes de previsualizar")
+            candidates = []
+            for path in self.calendar_source_paths:
+                ext = os.path.splitext(path)[1].lower()
+                candidates.append({"source_id": os.path.abspath(path), "source_path": os.path.abspath(path), "media_class": "image" if ext in {".jpg", ".jpeg", ".png", ".webp"} else "video"})
+            preview = preview_workflow_tasks(self.db.conn, self._calendar_workflow_id, identities=self._calendar_parse_identities(), candidates=candidates, start_date=self.calendar_start.get().strip(), timezone=self.calendar_timezone.get().strip(), days=self.calendar_days.get(), mode="strict")
+            self._calendar_preview = preview
+            self.calendar_preview_text.delete("1.0", "end")
+            summary = preview["summary"]
+            self.calendar_preview_text.insert("end", f"Workflow {preview['workflow_id']} v{preview['workflow_version']}\nTareas: {summary['tasks']} | Faltantes: {summary['missing']} | Colisiones: {summary['collisions']}\n\n")
+            for task in preview["tasks"]:
+                self.calendar_preview_text.insert("end", f"{task['local_date']} {task['local_time']} | {task['identity_id']} | {task['target']} | {os.path.basename(task.get('source_path') or '') or 'FALTA'}\n")
+            self.calendar_confirm_button.configure(state="normal" if not summary["blocking"] else "disabled")
+        except Exception as exc:
+            self._calendar_preview = None
+            self.calendar_confirm_button.configure(state="disabled")
+            messagebox.showerror("Calendario", str(exc), parent=self)
+
+    def _calendar_confirm_preview(self):
+        from publication_workflow import apply_workflow_preview
+
+        if not self._calendar_preview:
+            return
+        try:
+            result = apply_workflow_preview(self.db.conn, self._calendar_preview, actor="legacy-gui")
+            self.calendar_confirm_button.configure(state="disabled")
+            self._calendar_refresh_tasks()
+            self.calendar_preview_text.insert("end", f"\nConfirmado: {result['created']} tareas creadas.")
+        except Exception as exc:
+            messagebox.showerror("Calendario", str(exc), parent=self)
+
+    def _calendar_refresh_tasks(self):
+        tree = getattr(self, "calendar_task_tree", None)
+        if tree is None:
+            return
+        for item in tree.get_children():
+            tree.delete(item)
+        try:
+            rows = self.db.conn.execute("SELECT t.task_id, t.local_date, t.local_time, t.identity_id, t.target, t.state, COALESCE(a.output_path, t.source_path) AS source_path FROM manual_publication_tasks t LEFT JOIN output_assignments a ON a.task_id = t.task_id ORDER BY t.local_date, t.local_time, t.identity_id").fetchall()
+        except Exception:
+            rows = []
+        for row in rows:
+            tree.insert("", "end", iid=row["task_id"], values=(row["local_date"], row["local_time"], row["identity_id"], row["target"], row["state"], row["source_path"] or ""))
+
+    def _calendar_mark_published(self):
+        selected = self.calendar_task_tree.selection()
+        if not selected:
+            return messagebox.showwarning("Calendario", "Selecciona una tarea.", parent=self)
+        self.db.conn.execute("UPDATE manual_publication_tasks SET state = 'published_manual' WHERE task_id = ?", (selected[0],))
+        self.db.conn.commit()
+        self._calendar_refresh_tasks()
+
+    def _calendar_produce_photo(self):
+        from destination_photo_workflow import produce_photo_tasks
+
+        selected = list(self.calendar_task_tree.selection())
+        if not selected:
+            return messagebox.showwarning("Photo Forge", "Selecciona una o mas tareas de imagen.", parent=self)
+        try:
+            result = produce_photo_tasks(
+                self.db.conn,
+                selected,
+                output_root=os.path.join(_BASE_DIR, "CALENDARIO_POSTEO", "photo_forge_outputs"),
+            )
+            self._calendar_refresh_tasks()
+            messagebox.showinfo("Photo Forge", f"Outputs listos: {sum(1 for row in result['outputs'] if row['ready'])}", parent=self)
+        except Exception as exc:
+            messagebox.showerror("Photo Forge", str(exc), parent=self)
+
+    def _calendar_produce_video(self):
+        from destination_video_workflow import produce_video_tasks
+
+        selected = list(self.calendar_task_tree.selection())
+        if not selected:
+            return messagebox.showwarning("Forge", "Selecciona una o mas tareas de video.", parent=self)
+        try:
+            result = produce_video_tasks(
+                self.db.conn,
+                selected,
+                output_root=os.path.join(_BASE_DIR, "CALENDARIO_POSTEO", "forge_outputs"),
+            )
+            self._calendar_refresh_tasks()
+            messagebox.showinfo("Forge", f"Outputs listos: {sum(1 for row in result['outputs'] if row['ready'])}", parent=self)
+        except Exception as exc:
+            messagebox.showerror("Forge", str(exc), parent=self)
+
     def _build_dist_frame(self):
         """TAREA 5 — Logística y distribución."""
         f = self._frames["Logistica"]
@@ -3173,6 +3534,8 @@ class InstagramAutoPro(ctk.CTk):
                     command=self.preview_distribution).pack(side="left", padx=10)
         PrimaryButton(btn_box, text="DISTRIBUIR REAL AHORA", height=BTN_H_LG,
                       command=self.start_distribution).pack(side="left", padx=10)
+        GhostButton(btn_box, text="Agregar a workflow", height=BTN_H_LG,
+                    command=self._queue_current_logistica).pack(side="left", padx=10)
 
     PERIOD_DAYS = {
         "1 semana": 7,
@@ -3663,6 +4026,8 @@ class InstagramAutoPro(ctk.CTk):
                     command=lambda: self._acct_dist_run(preview_only=True)).pack(side="left", padx=10)
         PrimaryButton(btn_row, text="EJECUTAR POR CUENTAS", height=BTN_H_LG,
                       command=lambda: self._acct_dist_run(preview_only=False)).pack(side="left", padx=10)
+        GhostButton(btn_row, text="Agregar a workflow", height=BTN_H_LG,
+                    command=self._queue_current_logistica_accounts).pack(side="left", padx=10)
 
         # ── Resultados ───────────────────────────────────────────────────
         self.acct_dist_result = ctk.CTkTextbox(parent, fg_color=BG_CARD2, height=200,
@@ -4359,6 +4724,8 @@ class InstagramAutoPro(ctk.CTk):
         self.btn_stop_tg = DangerButton(btn_row, text="⏹ DETENER",
                                          state="disabled", command=self.stop_tg_bot)
         self.btn_stop_tg.pack(side="left", expand=True, padx=(5, 0))
+        GhostButton(btn_row, text="Agregar a workflow",
+                    command=self._queue_current_telegram).pack(side="left", padx=(8, 0))
 
         cleanup_row = ctk.CTkFrame(ctrl, fg_color="transparent")
         cleanup_row.grid(row=9, column=0, sticky="ew", pady=(8, 0))
@@ -4368,6 +4735,18 @@ class InstagramAutoPro(ctk.CTk):
             command=self.delete_selected_calendarizations,
         )
         self.btn_delete_calendar_tg.pack(side="left", fill="x", expand=True)
+
+        manual_card = ctk.CTkFrame(ctrl, fg_color=BG_CARD2, corner_radius=4)
+        manual_card.grid(row=10, column=0, sticky="ew", pady=(12, 0))
+        manual_card.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(manual_card, text="Cola manual confirmada", text_color=TEXT_BODY, font=ctk.CTkFont(size=12, weight="bold")).grid(row=0, column=0, padx=10, pady=(8, 2), sticky="w")
+        manual_actions = ctk.CTkFrame(manual_card, fg_color="transparent")
+        manual_actions.grid(row=0, column=1, padx=8, pady=(6, 2), sticky="e")
+        GhostButton(manual_actions, text="Actualizar", width=90, command=self._refresh_manual_telegram_queue).pack(side="left", padx=(0, 6))
+        PrimaryButton(manual_actions, text="Enviar a Telegram", width=145, command=self._send_manual_telegram_queue).pack(side="left")
+        self.manual_tg_queue_text = ctk.CTkTextbox(manual_card, height=84, fg_color=BG_INPUT, text_color=TEXT_BODY, font=FONT_MONO)
+        self.manual_tg_queue_text.grid(row=1, column=0, columnspan=2, padx=8, pady=(2, 8), sticky="ew")
+        self._refresh_manual_telegram_queue()
 
         # ── Panel Derecho: Live Log ─────────────────────────────────────
         log_card = Card(f, title="Registro de actividad")
@@ -4390,6 +4769,54 @@ class InstagramAutoPro(ctk.CTk):
         self.pb_tg.set(0)
 
     # ── Horarios: toggle / editor de grilla ─────────────────────────────────
+
+    def _refresh_manual_telegram_queue(self):
+        queue_text = getattr(self, "manual_tg_queue_text", None)
+        if queue_text is None:
+            return
+        try:
+            from telegram_universal_queue import list_telegram_queue
+
+            rows = list_telegram_queue(self.db.conn)
+            lines = [f"{row['local_date']} {row['local_time']} | {row['identity_id']} | {row['target']}" for row in rows[:30]]
+            if len(rows) > 30:
+                lines.append(f"... y {len(rows) - 30} mas")
+            text = "Sin outputs finales listos." if not lines else "\n".join(lines)
+        except Exception as exc:
+            text = f"Error al cargar cola: {exc}"
+        queue_text.delete("1.0", "end")
+        queue_text.insert("1.0", text)
+
+    def _send_manual_telegram_queue(self):
+        from telegram_universal_queue import list_telegram_queue
+
+        try:
+            queue = list_telegram_queue(self.db.conn)
+        except Exception as exc:
+            return messagebox.showerror("Telegram", str(exc), parent=self)
+        if not queue:
+            return messagebox.showwarning("Telegram", "No hay outputs finales listos para enviar.", parent=self)
+        if not messagebox.askyesno(
+            "Enviar cola manual",
+            f"Se enviaran {len(queue)} tareas finalizadas a Telegram. No publica en Instagram ni Facebook. Continuar?",
+            parent=self,
+        ):
+            return
+
+        def task():
+            from telegram_universal_queue import deliver_with_legacy_telegram
+
+            return deliver_with_legacy_telegram(self.db.conn, queue)
+
+        def done(success, result):
+            self._refresh_manual_telegram_queue()
+            if success:
+                self.bot_log(f"Cola manual Telegram: {result['sent']} enviadas, {result['already_sent']} ya entregadas, {result['failed']} fallidas.", "SUCCESS" if not result["failed"] else "WARNING")
+                messagebox.showinfo("Telegram", f"Enviadas: {result['sent']}\nYa entregadas: {result['already_sent']}\nFallidas: {result['failed']}\nSin ruta: {result['skipped']}", parent=self)
+            else:
+                messagebox.showerror("Telegram", result, parent=self)
+
+        WorkerThread(self, done, task).start()
 
     def _toggle_schedule_panel(self):
         """Expande o colapsa el panel de configuración de horarios."""
@@ -4568,6 +4995,28 @@ class InstagramAutoPro(ctk.CTk):
             if i < len(self._tg_accounts)
         ]
 
+    def _telegram_schedule_config_for_accounts(self, account_names: list[str]) -> dict:
+        """Capture only explicitly saved Telegram schedules; never inject defaults."""
+        import json
+
+        selected = {str(name).strip() for name in account_names if str(name).strip()}
+        accounts = {str(item.get("username")): item for item in getattr(self, "_tg_accounts", [])}
+        categories = self.db.get_categories() or DEFAULT_CATEGORIES
+        result = {}
+        for username in selected:
+            account = accounts.get(username) or {}
+            va_name = str(account.get("assigned_va") or "").strip()
+            if not va_name:
+                continue
+            for category in categories:
+                for dow, day_name in enumerate(DAY_NAMES):
+                    row = self.db.get_schedule_config(va_name, category, dow)
+                    if not row:
+                        continue
+                    slots = json.loads(row["time_slots"])
+                    result.setdefault(username, {}).setdefault(category, {})[day_name] = slots
+        return result
+
     def delete_selected_calendarizations(self):
         if self.tg_controller and self.tg_controller.is_running:
             return messagebox.showwarning(
@@ -4734,7 +5183,7 @@ class InstagramAutoPro(ctk.CTk):
     # ── Panel Estado de Cuentas ───────────────────────────────────────────────
     def _build_cuentas_frame(self):
         f = self._frames["Cuentas"]
-        f.grid_rowconfigure(3, weight=1)
+        f.grid_rowconfigure(4, weight=1)
         f.grid_columnconfigure(0, weight=1)
 
         PageHeader(
@@ -4788,8 +5237,49 @@ class InstagramAutoPro(ctk.CTk):
             command=self._save_story_link_base_url,
         ).grid(row=0, column=1, sticky="e")
 
+        identity_card = Card(f, title="Identidades para calendario")
+        identity_card.grid(row=3, column=0, sticky="ew", padx=24, pady=(0, 10))
+        identity_body = identity_card.body
+        identity_body.grid_columnconfigure(0, weight=1)
+        identity_body.grid_columnconfigure(2, weight=1)
+        self.identity_settings_tree = ttk.Treeview(
+            identity_body,
+            columns=("identity_id", "platform", "display_name", "story_link", "timezone", "chat_id", "topic_mode"),
+            show="headings", height=4,
+        )
+        for column, label, width in [
+            ("identity_id", "Identidad", 145), ("platform", "Red", 90), ("display_name", "Nombre", 130),
+            ("story_link", "Enlace de Story", 220), ("timezone", "Zona horaria", 180),
+            ("chat_id", "Chat Telegram", 130), ("topic_mode", "Topic Telegram", 145),
+        ]:
+            self.identity_settings_tree.heading(column, text=label)
+            self.identity_settings_tree.column(column, width=width, minwidth=70, anchor="w")
+        self.identity_settings_tree.grid(row=0, column=0, columnspan=4, sticky="ew", padx=8, pady=(0, 8))
+        self.identity_settings_tree.bind("<<TreeviewSelect>>", self._identity_settings_load_selected)
+        self.identity_id_entry = ctk.CTkEntry(identity_body, fg_color=BG_INPUT, border_color=BORDER, placeholder_text="ID: ig:cuenta")
+        self.identity_id_entry.grid(row=1, column=0, sticky="ew", padx=(8, 4), pady=4)
+        self.identity_platform_choice = ctk.CTkOptionMenu(identity_body, values=["instagram", "facebook"], fg_color=BG_INPUT, button_color=BG_CARD2)
+        self.identity_platform_choice.grid(row=1, column=1, sticky="ew", padx=4, pady=4)
+        self.identity_name_entry = ctk.CTkEntry(identity_body, fg_color=BG_INPUT, border_color=BORDER, placeholder_text="Nombre visible")
+        self.identity_name_entry.grid(row=1, column=2, sticky="ew", padx=4, pady=4)
+        self.identity_story_entry = ctk.CTkEntry(identity_body, fg_color=BG_INPUT, border_color=BORDER, placeholder_text="Enlace de Story")
+        self.identity_story_entry.grid(row=2, column=0, sticky="ew", padx=(8, 4), pady=4)
+        self.identity_timezone_entry = ctk.CTkEntry(identity_body, fg_color=BG_INPUT, border_color=BORDER)
+        self.identity_timezone_entry.insert(0, "America/Argentina/Buenos_Aires")
+        self.identity_timezone_entry.grid(row=2, column=1, sticky="ew", padx=4, pady=4)
+        self.identity_chat_entry = ctk.CTkEntry(identity_body, fg_color=BG_INPUT, border_color=BORDER, placeholder_text="Chat Telegram")
+        self.identity_chat_entry.grid(row=2, column=2, sticky="ew", padx=4, pady=4)
+        self.identity_topic_choice = ctk.CTkOptionMenu(identity_body, values=["identity_daily", "identity_placement"], fg_color=BG_INPUT, button_color=BG_CARD2)
+        self.identity_topic_choice.grid(row=2, column=3, sticky="ew", padx=(4, 8), pady=4)
+        controls = ctk.CTkFrame(identity_body, fg_color="transparent")
+        controls.grid(row=3, column=0, columnspan=4, sticky="ew", padx=8, pady=(4, 0))
+        PrimaryButton(controls, text="Guardar identidad", command=self._save_calendar_identity).pack(side="left", padx=(0, 8))
+        GhostButton(controls, text="Nueva identidad", command=self._clear_calendar_identity).pack(side="left", padx=(0, 8))
+        GhostButton(controls, text="Vincular organizativamente", command=self._link_calendar_identities).pack(side="left")
+        self._refresh_calendar_identities()
+
         accounts_card = Card(f, title="Cuentas destino")
-        accounts_card.grid(row=3, column=0, sticky="nsew", padx=24, pady=(0, 20))
+        accounts_card.grid(row=4, column=0, sticky="nsew", padx=24, pady=(0, 20))
         accounts_body = accounts_card.body
         accounts_body.grid_rowconfigure(2, weight=1)
         accounts_body.grid_columnconfigure(0, weight=1)
@@ -4837,6 +5327,100 @@ class InstagramAutoPro(ctk.CTk):
         self._acc_scroll.grid(row=2, column=0, sticky="nsew")
         self._acc_scroll.grid_columnconfigure(0, weight=1)
         self._admin_refresh()
+
+    def _refresh_calendar_identities(self):
+        tree = getattr(self, "identity_settings_tree", None)
+        if tree is None:
+            return
+        from identity_settings import create_identity_settings_schema
+
+        create_identity_settings_schema(self.db.conn)
+        for item in tree.get_children():
+            tree.delete(item)
+        rows = self.db.conn.execute(
+            "SELECT identity_id, platform, display_name FROM social_identities WHERE archived=0 ORDER BY display_name COLLATE NOCASE"
+        ).fetchall()
+        settings = self.db.conn.execute(
+            "SELECT identity_id, setting_key, setting_value FROM identity_publishing_settings"
+        ).fetchall()
+        settings_by_id = {}
+        for row in settings:
+            settings_by_id.setdefault(row["identity_id"], {})[row["setting_key"]] = row["setting_value"]
+        for row in rows:
+            values = settings_by_id.get(row["identity_id"], {})
+            tree.insert("", "end", iid=row["identity_id"], values=(
+                row["identity_id"], row["platform"], row["display_name"], values.get("story_link_url", ""),
+                values.get("timezone", "America/Argentina/Buenos_Aires"), values.get("telegram_chat_id", ""),
+                values.get("telegram_topic_mode", "identity_daily"),
+            ))
+
+    def _clear_calendar_identity(self):
+        for entry in (self.identity_id_entry, self.identity_name_entry, self.identity_story_entry, self.identity_chat_entry):
+            entry.delete(0, "end")
+        self.identity_platform_choice.set("instagram")
+        self.identity_timezone_entry.delete(0, "end")
+        self.identity_timezone_entry.insert(0, "America/Argentina/Buenos_Aires")
+        self.identity_topic_choice.set("identity_daily")
+        self.identity_settings_tree.selection_remove(self.identity_settings_tree.selection())
+
+    def _identity_settings_load_selected(self, _event=None):
+        selected = self.identity_settings_tree.selection()
+        if not selected:
+            return
+        values = self.identity_settings_tree.item(selected[0], "values")
+        if len(values) != 7:
+            return
+        for entry, value in zip(
+            (self.identity_id_entry, self.identity_name_entry, self.identity_story_entry, self.identity_timezone_entry, self.identity_chat_entry),
+            (values[0], values[2], values[3], values[4], values[5]),
+        ):
+            entry.delete(0, "end")
+            entry.insert(0, value)
+        self.identity_platform_choice.set(values[1])
+        self.identity_topic_choice.set(values[6])
+
+    def _save_calendar_identity(self):
+        from identity_settings import set_identity_setting
+
+        identity_id = self.identity_id_entry.get().strip()
+        platform = self.identity_platform_choice.get().strip().lower()
+        display_name = self.identity_name_entry.get().strip()
+        if not identity_id or platform not in {"instagram", "facebook"} or not display_name:
+            return messagebox.showwarning("Identidades", "Completa ID, red y nombre visible.", parent=self)
+        self.db.conn.execute(
+            """INSERT INTO social_identities(identity_id, platform, display_name, archived)
+               VALUES (?, ?, ?, 0)
+               ON CONFLICT(identity_id) DO UPDATE SET platform=excluded.platform,
+                   display_name=excluded.display_name, archived=0, updated_at=CURRENT_TIMESTAMP""",
+            (identity_id, platform, display_name),
+        )
+        self.db.conn.commit()
+        for key, value in {
+            "story_link_url": self.identity_story_entry.get().strip(),
+            "timezone": self.identity_timezone_entry.get().strip(),
+            "telegram_chat_id": self.identity_chat_entry.get().strip(),
+            "telegram_topic_mode": self.identity_topic_choice.get().strip(),
+        }.items():
+            set_identity_setting(self.db.conn, identity_id, key, value)
+        self._refresh_calendar_identities()
+        if hasattr(self, "calendar_identities"):
+            self.calendar_identities.delete("1.0", "end")
+            self.calendar_identities.insert("1.0", self._calendar_identity_seed())
+
+    def _link_calendar_identities(self):
+        from identity_settings import link_identities
+
+        selected = self.identity_settings_tree.selection()
+        if not selected:
+            return messagebox.showwarning("Identidades", "Selecciona la primera identidad.", parent=self)
+        other_id = simpledialog.askstring("Vincular organizativamente", "ID de la otra identidad:", parent=self)
+        if other_id is None:
+            return
+        try:
+            link_identities(self.db.conn, selected[0], other_id.strip(), "organizational")
+        except ValueError as exc:
+            return messagebox.showerror("Identidades", str(exc), parent=self)
+        messagebox.showinfo("Identidades", "Vinculo organizativo guardado. Cada identidad conserva sus propios enlaces y ajustes.", parent=self)
 
     def configure_airtable(self):
         """Prepara una tabla existente y guarda la configuración local al terminar."""
@@ -5832,6 +6416,329 @@ class InstagramAutoPro(ctk.CTk):
         detail.delete("1.0", "end")
         detail.insert("1.0", json.dumps(details, ensure_ascii=False, indent=2))
 
+    def _build_vault_frame(self):
+        """Operational Vault browser backed by the same SQLite services as Forge."""
+        from vault.query import VaultQuery
+        from vault.storage import VaultStorage
+
+        self.vault_storage = VaultStorage(self.db, os.path.join(_BASE_DIR, "content_vault"))
+        self.vault_query = VaultQuery(self.db)
+        self._vault_rows = {}
+
+        f = self._frames["Vault"]
+        f.grid_rowconfigure(0, weight=1)
+        f.grid_columnconfigure(0, weight=1)
+        scroll = ctk.CTkScrollableFrame(f, fg_color="transparent")
+        scroll.grid(row=0, column=0, sticky="nsew")
+        scroll.grid_columnconfigure(0, weight=1)
+
+        PageHeader(
+            scroll,
+            kicker="CONTENIDO",
+            title="Vault",
+            description="Biblioteca verificable de archivos, ubicaciones y linaje.",
+            action=("Actualizar", self._vault_refresh),
+        ).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 0))
+
+        import_card = Card(scroll, title="Ingresar archivos")
+        import_card.grid(row=1, column=0, sticky="ew", padx=24, pady=(16, 10))
+        import_body = import_card.body
+        ctk.CTkLabel(
+            import_body,
+            text="Gestionado copia el archivo al Vault. Externo conserva su ruta y verifica su hash.",
+            text_color=TEXT_MUTED,
+            font=ctk.CTkFont(size=11),
+        ).pack(anchor="w", padx=8, pady=(0, 10))
+        import_buttons = ctk.CTkFrame(import_body, fg_color="transparent")
+        import_buttons.pack(fill="x", padx=8, pady=(0, 4))
+        PrimaryButton(import_buttons, text="Importar copia al Vault", command=lambda: self._vault_import_from_dialog(True)).pack(side="left", padx=(0, 8))
+        GhostButton(import_buttons, text="Registrar archivo externo", command=lambda: self._vault_import_from_dialog(False)).pack(side="left")
+
+        groups = ctk.CTkFrame(scroll, fg_color="transparent")
+        groups.grid(row=2, column=0, sticky="ew", padx=24, pady=(0, 10))
+        groups.grid_columnconfigure((0, 1), weight=1)
+        family_card = Card(groups, title="Familias")
+        family_card.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        collection_card = Card(groups, title="Colecciones")
+        collection_card.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        self.vault_family_name = ctk.CTkEntry(family_card.body, placeholder_text="Nombre de familia", fg_color=BG_INPUT, border_color=BORDER)
+        self.vault_family_name.pack(fill="x", padx=8, pady=(0, 8))
+        GhostButton(family_card.body, text="Crear familia", command=self._vault_create_family).pack(anchor="w", padx=8, pady=(0, 4))
+        self.vault_collection_name = ctk.CTkEntry(collection_card.body, placeholder_text="Nombre de colección", fg_color=BG_INPUT, border_color=BORDER)
+        self.vault_collection_name.pack(fill="x", padx=8, pady=(0, 8))
+        GhostButton(collection_card.body, text="Crear colección", command=self._vault_create_collection).pack(anchor="w", padx=8, pady=(0, 4))
+
+        assets_card = Card(scroll, title="Assets registrados")
+        assets_card.grid(row=3, column=0, sticky="nsew", padx=24, pady=(0, 24))
+        assets_body = assets_card.body
+        assets_body.grid_rowconfigure(0, weight=1)
+        assets_body.grid_columnconfigure(0, weight=1)
+        columns = ("id", "media_type", "display_name", "size_bytes", "status", "path")
+        self.vault_tree = ttk.Treeview(assets_body, columns=columns, show="headings", height=13)
+        widths = {"id": 55, "media_type": 85, "display_name": 210, "size_bytes": 100, "status": 110, "path": 470}
+        headings = {"id": "ID", "media_type": "Tipo", "display_name": "Archivo", "size_bytes": "Bytes", "status": "Estado", "path": "Ruta"}
+        for column in columns:
+            self.vault_tree.heading(column, text=headings[column])
+            self.vault_tree.column(column, width=widths[column], minwidth=55, anchor="w")
+        self.vault_tree.grid(row=0, column=0, sticky="nsew", padx=8, pady=(8, 6))
+        controls = ctk.CTkFrame(assets_body, fg_color="transparent")
+        controls.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 6))
+        GhostButton(controls, text="Verificar seleccionado", command=self._vault_verify_selected).pack(side="left", padx=(0, 8))
+        GhostButton(controls, text="Actualizar lista", command=self._vault_refresh).pack(side="left")
+        self.vault_status = ctk.CTkLabel(assets_body, text="", text_color=TEXT_MUTED, font=ctk.CTkFont(size=11), anchor="w")
+        self.vault_status.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 6))
+        self._vault_refresh()
+
+    def _vault_import_from_dialog(self, managed):
+        paths = filedialog.askopenfilenames(
+            title="Seleccionar archivos para Vault",
+            filetypes=[("Media", "*.mp4 *.mov *.mkv *.avi *.jpg *.jpeg *.png *.webp"), ("Todos", "*.*")],
+        )
+        if not paths:
+            return
+        imported = []
+        errors = []
+        for path in paths:
+            try:
+                result = self.vault_storage.import_managed(path) if managed else self.vault_storage.register_external(path)
+                imported.append(result["asset_id"])
+            except Exception as exc:
+                errors.append(f"{os.path.basename(path)}: {exc}")
+        self._vault_refresh()
+        if errors:
+            messagebox.showwarning("Vault", f"Importados: {len(imported)}\nErrores:\n" + "\n".join(errors), parent=self)
+        else:
+            self.vault_status.configure(text=f"{len(imported)} archivos registrados correctamente.")
+
+    def _vault_refresh(self):
+        tree = getattr(self, "vault_tree", None)
+        if tree is None:
+            return
+        for item in tree.get_children():
+            tree.delete(item)
+        result = self.vault_query.search_assets(limit=500)
+        self._vault_rows = {int(row["id"]): row for row in result["items"]}
+        for row in result["items"]:
+            tree.insert("", "end", iid=str(row["id"]), values=(row["id"], row["media_type"], row["display_name"], row["size_bytes"], row["status"], row.get("path") or ""))
+        self.vault_status.configure(text=f"{result['total']} assets registrados.")
+
+    def _vault_verify_selected(self):
+        selected = self.vault_tree.selection()
+        if not selected:
+            return messagebox.showwarning("Vault", "Selecciona un asset para verificar.", parent=self)
+        asset_id = int(selected[0])
+        locations = self.vault_storage.locations_for_asset(asset_id)
+        if not locations:
+            return messagebox.showwarning("Vault", "El asset no tiene ubicaciones registradas.", parent=self)
+        reports = [self.vault_storage.verify_location(location["id"]) for location in locations]
+        self._vault_refresh()
+        self.vault_status.configure(text=" | ".join(f"{report['status']}: {os.path.basename(report['path'])}" for report in reports))
+
+    def _vault_create_family(self):
+        try:
+            result = self.vault_query.create_family(self.vault_family_name.get())
+            self.vault_family_name.delete(0, "end")
+            self.vault_status.configure(text=f"Familia creada: {result['name']}")
+        except Exception as exc:
+            messagebox.showerror("Vault", str(exc), parent=self)
+
+    def _vault_create_collection(self):
+        try:
+            result = self.vault_query.create_collection(self.vault_collection_name.get())
+            self.vault_collection_name.delete(0, "end")
+            self.vault_status.configure(text=f"Colección creada: {result['name']}")
+        except Exception as exc:
+            messagebox.showerror("Vault", str(exc), parent=self)
+
+    def _workflow_id_for_queue_step(self):
+        """Choose an existing workflow without inventing a profile or recipe."""
+        from workflow_store import create_workflow_schema
+
+        create_workflow_schema(self.db.conn)
+        rows = self.db.conn.execute(
+            "SELECT workflow_id, name FROM workflows WHERE active=1 ORDER BY name COLLATE NOCASE"
+        ).fetchall()
+        if not rows:
+            messagebox.showwarning(
+                "Agregar a workflow",
+                "Primero crea y guarda un workflow desde Calendario > Abrir editor modular.",
+                parent=self,
+            )
+            return None
+        current_id = getattr(self, "_calendar_workflow_id", None)
+        if current_id and any(row["workflow_id"] == current_id for row in rows):
+            return current_id
+        choices = "\n".join(f"- {row['name']}" for row in rows)
+        selected = simpledialog.askstring(
+            "Agregar a workflow",
+            f"Escribe el nombre exacto del workflow:\n\n{choices}",
+            parent=self,
+        )
+        selected = str(selected or "").strip()
+        if not selected:
+            return None
+        for row in rows:
+            if selected.casefold() in {str(row["name"]).casefold(), str(row["workflow_id"]).casefold()}:
+                self._calendar_workflow_id = row["workflow_id"]
+                return row["workflow_id"]
+        messagebox.showerror("Agregar a workflow", "No encontré ese workflow.", parent=self)
+        return None
+
+    def _append_form_recipe_to_workflow(
+        self,
+        *,
+        job_type,
+        recipe,
+        input_contract,
+        output_contract,
+        source_job_id=None,
+    ):
+        workflow_id = self._workflow_id_for_queue_step()
+        if not workflow_id:
+            return False
+        from workflow_queue import append_queue_step, get_queue
+
+        queue = get_queue(self.db.conn, workflow_id)
+        previous = queue["steps"][-1] if queue.get("steps") else None
+        binding = None
+        if previous and (input_contract == "Any" or previous["output_contract"] == input_contract):
+            use_previous = messagebox.askyesno(
+                "Entrada del paso",
+                f"¿Usar el output de '{previous['job_type']}' como input de este paso?",
+                parent=self,
+            )
+            if use_previous:
+                binding = {"kind": "previous_output", "step_id": previous["step_id"]}
+        try:
+            step = append_queue_step(
+                self.db.conn,
+                workflow_id,
+                job_type=job_type,
+                recipe=recipe,
+                input_contract=input_contract,
+                output_contract=output_contract,
+                input_binding=binding,
+                source_job_id=source_job_id,
+            )
+        except (KeyError, ValueError) as exc:
+            messagebox.showerror("Agregar a workflow", str(exc), parent=self)
+            return False
+        input_text = "output del paso anterior" if binding else "configuración propia"
+        messagebox.showinfo(
+            "Workflow",
+            f"Paso {step['position']} agregado: {job_type}.\nEntrada: {input_text}",
+            parent=self,
+        )
+        return True
+
+    def _queue_current_forge(self):
+        if not self.forge_meta_assignments:
+            return messagebox.showwarning("Forge", "Generá el preview de metadata antes de agregarlo.", parent=self)
+        import metadata_pool
+        fuerza = self.forge_fuerza_var.get()
+        if fuerza == "Custom":
+            forge_strength = metadata_pool.fuerza_to_strength("Custom", self.forge_strength_slider.get())
+            overrides = metadata_pool.parse_custom_ranges(
+                {key: (low.get(), high.get()) for key, (low, high) in self.forge_range_entries.items()}
+            )
+        else:
+            forge_strength = metadata_pool.fuerza_to_strength(fuerza)
+            overrides = None
+        recipe_builder = __import__("workflow_step_recipes", fromlist=["build_forge_workflow_recipe"])
+        try:
+            recipe = recipe_builder.build_forge_workflow_recipe(
+                video_paths=list(self.forge_video_paths),
+                tanda_name=self.e_forge_tanda.get(),
+                copies=self.e_forge_copies.get(),
+                days=self.e_forge_days.get(),
+                trial_mode=self.forge_trial_mode_var.get(),
+                effects=self.forge_efectos_var.get(),
+                strength=fuerza,
+                fx_enabled={key: var.get() for key, var in self.forge_fx_vars.items()},
+                forge_strength=forge_strength,
+                overrides=overrides,
+                metadata_assignments=list(self.forge_meta_assignments),
+            )
+        except ValueError as exc:
+            messagebox.showwarning("Forge", str(exc), parent=self)
+            return False
+        return self._append_form_recipe_to_workflow(
+            job_type="forge.tanda",
+            recipe=recipe,
+            input_contract="AssetInput",
+            output_contract="TandaOutput",
+        )
+
+    def _queue_current_logistica(self):
+        recipe_builder = __import__("workflow_step_recipes", fromlist=["build_logistica_workflow_recipe"])
+        try:
+            recipe = recipe_builder.build_logistica_workflow_recipe(
+                mode="por_tandas",
+                tanda_name=self.c_tandas.get(),
+                tanda_name_2=self.c_tandas_2.get(),
+                category_dest=self.c_dest.get(),
+                daily_quota=self.e_quota.get(),
+                days=self.e_days.get(),
+                fillup=self.fillup_var.get(),
+            )
+        except ValueError as exc:
+            messagebox.showwarning("Logística", str(exc), parent=self)
+            return False
+        return self._append_form_recipe_to_workflow(
+            job_type="logistica.tanda",
+            recipe=recipe,
+            input_contract="TandaOutput",
+            output_contract="ManifestOutput",
+        )
+
+    def _queue_current_logistica_accounts(self):
+        recipe_builder = __import__("workflow_step_recipes", fromlist=["build_logistica_workflow_recipe"])
+        selected_tandas = self._acct_dist_selected_tandas()
+        period = self.acct_dist_period.get().strip()
+        days = "MAX" if period.upper() == "MAX" else str(self.PERIOD_DAYS.get(period, 7))
+        try:
+            recipe = recipe_builder.build_logistica_workflow_recipe(
+                mode="por_cuentas",
+                tanda_name=selected_tandas[0] if selected_tandas else "",
+                tanda_name_2=selected_tandas[1] if len(selected_tandas) > 1 else "",
+                category_dest="",
+                daily_quota=self.acct_dist_vpd.get(),
+                days=days,
+                fillup=False,
+                account_names=self._acct_dist_accounts(),
+                caption_modes=self._acct_caption_mode_map(),
+            )
+        except ValueError as exc:
+            messagebox.showwarning("Logística por cuentas", str(exc), parent=self)
+            return False
+        return self._append_form_recipe_to_workflow(
+            job_type="logistica.tanda",
+            recipe=recipe,
+            input_contract="TandaOutput",
+            output_contract="ManifestOutput",
+        )
+
+    def _queue_current_telegram(self):
+        recipe_builder = __import__("workflow_step_recipes", fromlist=["build_telegram_workflow_recipe"])
+        try:
+            account_names = self._selected_tg_account_names()
+            recipe = recipe_builder.build_telegram_workflow_recipe(
+                account_names=account_names,
+                date=self.e_date_tg.get(),
+                express=self._tg_express_mode.get(),
+                reset_topics=self._tg_reset_topics.get(),
+                schedule_config=self._telegram_schedule_config_for_accounts(account_names),
+            )
+        except ValueError as exc:
+            messagebox.showwarning("Telegram", str(exc), parent=self)
+            return False
+        return self._append_form_recipe_to_workflow(
+            job_type="telegram.send",
+            recipe=recipe,
+            input_contract="ManifestOutput",
+            output_contract="TelegramOutput",
+        )
+
     def _build_forge_frame(self):
         self.forge_video_paths = []
         self.forge_meta_assignments = []
@@ -6081,6 +6988,10 @@ class InstagramAutoPro(ctk.CTk):
         self.btn_forge_process = PrimaryButton(bot, text="⚡  Procesar Ahora",
                     height=BTN_H_LG, state="disabled", command=self.forge_process)
         self.btn_forge_process.grid(row=0, column=3)
+        GhostButton(
+            bot, text="Agregar a workflow", height=BTN_H_LG,
+            command=self._queue_current_forge,
+        ).grid(row=0, column=4, padx=(8, 0))
 
         prog_wrap = ctk.CTkFrame(bot, fg_color="transparent")
         prog_wrap.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(8, 0))

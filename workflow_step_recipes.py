@@ -95,11 +95,12 @@ def build_telegram_workflow_recipe(
     date: str,
     express: bool,
     reset_topics: bool,
+    schedule_config: dict | None = None,
 ) -> dict:
     accounts = [str(name).strip() for name in (account_names or []) if str(name).strip()]
     if not accounts:
         raise ValueError("Telegram necesita al menos una cuenta seleccionada")
-    return {
+    recipe = {
         "recipe_version": 1,
         "producer": "telegram",
         "account_names": deepcopy(accounts),
@@ -107,3 +108,6 @@ def build_telegram_workflow_recipe(
         "express": bool(express),
         "reset_topics": bool(reset_topics),
     }
+    if schedule_config:
+        recipe["schedule_config"] = deepcopy(dict(schedule_config))
+    return recipe

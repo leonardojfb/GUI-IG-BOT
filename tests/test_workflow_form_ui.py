@@ -15,3 +15,4 @@ def test_real_forms_can_add_forge_logistica_and_telegram_steps_to_a_workflow():
     assert "_queue_current_forge" in source
     assert "_queue_current_logistica" in source
     assert "_queue_current_telegram" in source
+    assert "_telegram_schedule_config_for_accounts" in source

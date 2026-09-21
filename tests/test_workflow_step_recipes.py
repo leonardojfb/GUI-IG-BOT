@@ -97,3 +97,15 @@ def test_telegram_recipe_requires_selected_accounts_and_preserves_delivery_optio
         build_telegram_workflow_recipe(
             account_names=[], date="2026-09-20", express=False, reset_topics=False
         )
+
+
+def test_telegram_recipe_can_capture_the_explicit_schedule_configuration():
+    recipe = build_telegram_workflow_recipe(
+        account_names=["spam_01"],
+        date="2026-09-20",
+        express=False,
+        reset_topics=False,
+        schedule_config={"spam_01": {"lunes": ["09:00", "18:00"]}},
+    )
+
+    assert recipe["schedule_config"] == {"spam_01": {"lunes": ["09:00", "18:00"]}}
