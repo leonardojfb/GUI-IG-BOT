@@ -3003,10 +3003,7 @@ class InstagramAutoPro(ctk.CTk):
         self.calendar_timezone.insert(0, "America/Argentina/Buenos_Aires")
         self.calendar_timezone.grid(row=0, column=3, padx=(0, 8), pady=6, sticky="ew")
         ctk.CTkLabel(body, text="Plantilla de frecuencia", text_color=TEXT_MUTED).grid(row=1, column=0, padx=(8, 6), pady=6, sticky="e")
-        from workflow_presets import list_workflow_presets
-        self.calendar_presets = list_workflow_presets()
         self.calendar_preset_by_label = {"Sin plantilla (configuración manual)": None}
-        self.calendar_preset_by_label.update({preset["label"]: preset["id"] for preset in self.calendar_presets})
         self.calendar_preset_choice = ctk.CTkOptionMenu(body, values=list(self.calendar_preset_by_label), fg_color=BG_INPUT, button_color=BG_CARD2, command=lambda _: self._calendar_apply_preset())
         self.calendar_preset_choice.grid(row=1, column=1, columnspan=3, padx=(0, 8), pady=6, sticky="ew")
         self.calendar_preset_choice.set("Sin plantilla (configuración manual)")

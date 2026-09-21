@@ -28,3 +28,4 @@ def test_desktop_quick_calendar_exposes_a_clean_manual_template():
     source = (ROOT / "gui_premium_v7.py").read_text(encoding="utf-8")
 
     assert "Sin plantilla (configuración manual)" in source
+    assert "self.calendar_presets = list_workflow_presets()" not in source
