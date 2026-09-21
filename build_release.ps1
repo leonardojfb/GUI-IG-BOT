@@ -31,6 +31,13 @@ $ReleaseFiles = @(
     "organizador_simple.py",
     "Organizador.py",
     "database.py",
+    "schema_migrations.py",
+    "workflow_store.py",
+    "identity_settings.py",
+    "publication_templates.py",
+    "publication_workflow.py",
+    "multiplacement_planner.py",
+    "multiplacement_apply.py",
     "airtable_sync.py",
     "organizadortg.py",
     "videos.py",
@@ -48,11 +55,25 @@ $ReleaseFiles = @(
     "job_runner.py",
     "producer_jobs.py",
     "photo_forge.py",
+    "photo_forge_profiles.py",
+    "photo_destination_forge.py",
+    "destination_photo_workflow.py",
+    "destination_video_workflow.py",
+    "workflow_composer.py",
+    "workflow_presets.py",
+    "workflow_production_profiles.py",
+    "workflow_queue.py",
+    "workflow_queue_runner.py",
+    "workflow_step_recipes.py",
+    "workflow_manual_steps.py",
+    "workflow_profiles.py",
     "local_web.py",
     "ios_remote_read.py",
     "ios_remote_adapter.py",
     "destination_forge.py",
     "telegram_ledger.py",
+    "telegram_tasks.py",
+    "telegram_universal_queue.py",
     "confirmation_ledger.py",
     "crm_insights.py",
     "manual_calendar_export.py",
@@ -83,10 +104,15 @@ $ReleaseFiles = @(
     "tools/ffmpeg/bin/ffprobe.exe",
     "styles/colors.py",
     "styles/components.py",
-    "styles/__init__.py"
+    "styles/__init__.py",
+    "web_auth.py",
+    "web_sessions.py",
+    "web/index.html",
+    "web/app.js",
+    "web/styles.css"
 )
 
-# Puente para instalaciones cuyo updater aún no permite copiar módulos nuevos.
+# Puente para instalaciones cuyo updater aun no permite copiar modulos nuevos.
 # Debe publicarse antes de una release que agregue imports locales nuevos.
 $BootstrapReleaseFiles = @(
     "updater.py",
