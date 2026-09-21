@@ -51,7 +51,7 @@ def test_profile_api_filters_by_explicit_module_and_subtype(tmp_path):
     try:
         status, saved = request(
             f"{service.base_url}/api/workflow-profiles", "web-token", method="POST",
-            payload={"module_type": "forge", "subtype": "trials", "name": "Trials real", "recipe": {"trial_mode": "Trials"}},
+            payload={"module_type": "forge", "subtype": "trials", "name": "Trials real", "recipe": {**forge_fields(), "trial_mode": "Trials"}},
         )
         assert status == 201
 
@@ -59,6 +59,21 @@ def test_profile_api_filters_by_explicit_module_and_subtype(tmp_path):
         status, listed = request(f"{service.base_url}/api/workflow-profiles?{query}", "web-token")
         assert status == 200
         assert [item["name"] for item in listed["items"]] == ["Trials real"]
+    finally:
+        service.stop()
+        db.close()
+
+
+def test_profile_api_validates_the_manual_recipe_before_saving(tmp_path):
+    db = database.DatabaseManager(str(tmp_path / "db.sqlite"))
+    service = LocalWebService(db, token="web-token").start()
+    try:
+        status, response = request(
+            f"{service.base_url}/api/workflow-profiles", "web-token", method="POST",
+            payload={"module_type": "forge", "subtype": "trials", "name": "Incompleto", "recipe": {"trial_mode": "Trials"}},
+        )
+        assert status == 400
+        assert "Forge trials" in response["message"] or "video" in response["message"]
     finally:
         service.stop()
         db.close()

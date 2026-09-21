@@ -192,14 +192,20 @@ class LocalWebService:
         if route == "/api/workflow-profiles":
             try:
                 payload = self._json_body(request)
+                from workflow_manual_steps import build_manual_step
                 from workflow_profiles import save_profile
 
-                result = save_profile(
-                    self.db.conn,
+                normalized = build_manual_step(
                     payload.get("module_type"),
                     payload.get("subtype"),
-                    payload.get("name"),
                     payload.get("recipe") or {},
+                )
+                result = save_profile(
+                    self.db.conn,
+                    normalized["module_type"],
+                    normalized["subtype"],
+                    payload.get("name"),
+                    normalized["recipe"],
                 )
                 self._respond(request, 201, {"data": result})
             except (ValueError, KeyError, sqlite3.Error) as exc:
