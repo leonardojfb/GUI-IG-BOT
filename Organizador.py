@@ -18,11 +18,11 @@ source_root = os.path.join(base_dir, "videos_finales")
 output_root = os.path.join(base_dir, "CALENDARIO_POSTEO")
 
 
-def _tanda_video_inventory(tanda_path):
+def _tanda_video_inventory(tanda_path, extensions=(".mp4", ".mov")):
     """Return only published Forge copies; incomplete iPhone batches fail closed."""
     status_path = os.path.join(tanda_path, "forge_batch_status.json")
     videos = [name for name in os.listdir(tanda_path)
-              if name.lower().endswith((".mp4", ".mov"))]
+              if name.lower().endswith(extensions)]
     if not os.path.isfile(status_path):
         return videos, None
     try:

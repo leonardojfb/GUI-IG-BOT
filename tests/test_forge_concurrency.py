@@ -350,6 +350,26 @@ def test_iphone_batch_registers_successes_and_reports_incomplete_on_copy_failure
     assert json.loads(status_path.read_text(encoding="utf-8"))["state"] == "complete"
 
 
+def test_iphone_forge_refuses_reusing_tanda_with_different_profile(monkeypatch, tmp_path):
+    import gui_premium_v7
+
+    app = _forge_app(tmp_path, [])
+    app.forge_profile_var = _Value("iPhone SDR")
+    status_dir = tmp_path / "videos_finales" / "Concurrent"
+    status_dir.mkdir(parents=True)
+    (status_dir / "forge_batch_status.json").write_text(json.dumps({
+        "state": "complete", "profile": "iphone_hlg", "validated": ["old__c01.mov"],
+        "pending": [],
+    }), encoding="utf-8")
+    errors = []
+    monkeypatch.setattr(gui_premium_v7, "__file__", str(tmp_path / "gui_premium_v7.py"))
+    monkeypatch.setattr(gui_premium_v7.messagebox, "showerror",
+                        lambda title, message: errors.append((title, message)))
+    InstagramAutoPro.forge_process(app)
+    assert errors
+    assert "otro perfil" in errors[0][1]
+
+
 def test_forge_preserves_edited_video_identity_in_output_names(monkeypatch, tmp_path):
     import gui_premium_v7
 

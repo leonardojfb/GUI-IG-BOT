@@ -77,6 +77,22 @@ def _safe_file_status(path):
         return False, 0, str(exc)
 
 
+def _acct_inventory_items(folders):
+    """Use the same Forge publication gate for Por Cuentas and Por Tandas."""
+    from Organizador import _tanda_video_inventory
+
+    items = []
+    for source_tanda, source_folder in folders.items():
+        if not os.path.isdir(source_folder):
+            raise FileNotFoundError(f"Carpeta no encontrada: {source_folder}")
+        videos, error = _tanda_video_inventory(
+            source_folder, extensions=(".mp4", ".mov", ".avi"))
+        if error:
+            raise ValueError(f"{source_tanda}: {error}")
+        items.extend({"tanda": source_tanda, "name": name} for name in sorted(videos))
+    return items
+
+
 def _telegram_runtime_diagnostics(db_manager, app_dir=None, version_reader=read_local_version):
     app_path = os.path.abspath(os.fspath(app_dir or _BASE_DIR))
     try:
@@ -3447,17 +3463,7 @@ class InstagramAutoPro(ctk.CTk):
             def forge_vid_id(fname):
                 return source_key_from_filename(fname)
 
-            all_vids = []
-            for source_tanda, source_folder in folders.items():
-                if not os.path.exists(source_folder):
-                    raise FileNotFoundError(f"Carpeta no encontrada: {source_folder}")
-                all_vids.extend(
-                    {"tanda": source_tanda, "name": filename}
-                    for filename in sorted(
-                        f for f in os.listdir(source_folder)
-                        if f.lower().endswith((".mp4", ".mov", ".avi"))
-                    )
-                )
+            all_vids = _acct_inventory_items(folders)
             if not all_vids:
                 raise ValueError("No se encontraron videos en las tandas seleccionadas")
 
@@ -5578,9 +5584,11 @@ class InstagramAutoPro(ctk.CTk):
                 try:
                     with open(status_path, encoding="utf-8") as status_file:
                         status = json.load(status_file)
+                    if status.get("profile") != profile_key:
+                        raise ValueError("La tanda existente usa otro perfil")
+                    if status.get("state") not in ("complete", "incomplete", "processing"):
+                        raise ValueError("Estado Forge desconocido")
                     if status.get("state") in ("incomplete", "processing"):
-                        if status.get("profile") != profile_key:
-                            raise ValueError("La tanda pendiente usa otro perfil")
                         retry_items = status["pending"]
                         if any(item["source_path"] not in self.forge_video_paths
                                for item in retry_items):
@@ -5660,9 +5668,11 @@ class InstagramAutoPro(ctk.CTk):
                 with open(status_path, encoding="utf-8") as status_file:
                     old_status = json.load(status_file)
                 prior_status = old_status
+                if old_status.get("profile") != output_profile:
+                    raise ValueError("La tanda existente usa otro perfil")
+                if old_status.get("state") not in ("complete", "incomplete", "processing"):
+                    raise ValueError("Estado Forge desconocido")
                 if old_status.get("state") in ("incomplete", "processing"):
-                    if old_status.get("profile") != output_profile:
-                        raise ValueError("La tanda incompleta usa otro perfil; termina su reintento primero")
                     pending_retry = old_status
                     selected = set(self.forge_video_paths)
                     if any(item["source_path"] not in selected for item in old_status["pending"]):
@@ -5736,7 +5746,8 @@ class InstagramAutoPro(ctk.CTk):
             import re
             import metadata_pool
             if output_profile:
-                from forge_iphone_profile import next_copy_number, render_validated_copy
+                from forge_iphone_profile import (next_copy_number, render_validated_copy,
+                                                  validate_existing_copy)
             os.makedirs(output_dir, exist_ok=True)
             copy_jobs = []
             meta_idx = 0
@@ -5744,6 +5755,9 @@ class InstagramAutoPro(ctk.CTk):
             if pending_retry:
                 for item in pending_retry["pending"]:
                     vid_path = item["source_path"]
+                    if metadata_pool.get_video_hash(vid_path) != item["video_hash"]:
+                        raise ValueError(
+                            f"La fuente pendiente cambió desde el intento anterior: {os.path.basename(vid_path)}")
                     filename = os.path.basename(vid_path)
                     out_name = item["output_name"]
                     out_path = os.path.join(output_dir, out_name)
@@ -5785,12 +5799,18 @@ class InstagramAutoPro(ctk.CTk):
                 vid_path, out_path, filename, out_name, vh, meta, fingerprint = copy_job
                 try:
                     if output_profile:
-                        params = render_validated_copy(
-                            vid_path, out_path, meta, output_profile,
-                            preflight["sources"][vid_path], enabled=fx_enabled,
-                            strength=forge_strength, overrides=forge_overrides,
-                            threads=performance.ffmpeg_threads,
-                        )
+                        if pending_retry and os.path.isfile(out_path):
+                            params = validate_existing_copy(
+                                vid_path, out_path, meta, output_profile,
+                                preflight["sources"][vid_path])
+                            params["recovered_published_copy"] = True
+                        else:
+                            params = render_validated_copy(
+                                vid_path, out_path, meta, output_profile,
+                                preflight["sources"][vid_path], enabled=fx_enabled,
+                                strength=forge_strength, overrides=forge_overrides,
+                                threads=performance.ffmpeg_threads,
+                            )
                         params.update({"output_profile": output_profile,
                                        "source_color": preflight["sources"][vid_path],
                                        "source_color_assumption": preflight["assumptions"].get(vid_path),
@@ -5874,7 +5894,7 @@ class InstagramAutoPro(ctk.CTk):
                     "state": "incomplete" if failures else "complete",
                     "profile": output_profile,
                     "expected_count": pending_retry.get("expected_count", len(copy_jobs))
-                    if pending_retry else len(copy_jobs),
+                    if pending_retry else len(copy_jobs) + len((prior_status or {}).get("validated", [])),
                     "validated": (((prior_status or {}).get("validated", [])) +
                                   [item[1] for item in completed]),
                     "pending": pending_records,

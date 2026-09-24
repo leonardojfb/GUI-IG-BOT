@@ -2,6 +2,7 @@
 
 import copy
 import importlib
+import json
 import subprocess
 from pathlib import Path
 
@@ -300,6 +301,26 @@ def test_unvalidated_mov_is_not_visible_in_logistics_folder(tmp_path, monkeypatc
     assert output.is_file()
 
 
+def test_por_cuentas_inventory_blocks_incomplete_forge_and_preserves_legacy_avi(tmp_path):
+    from gui_premium_v7 import _acct_inventory_items
+
+    iphone_dir = tmp_path / "IPHONE"
+    iphone_dir.mkdir()
+    (iphone_dir / "clip__c01.mov").touch()
+    (iphone_dir / "forge_batch_status.json").write_text(json.dumps({
+        "state": "incomplete", "profile": "iphone_sdr",
+        "validated": ["clip__c01.mov"], "pending": [{"output_name": "clip__c02.mov"}],
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="incompleta"):
+        _acct_inventory_items({"IPHONE": str(iphone_dir)})
+
+    legacy_dir = tmp_path / "LEGACY"
+    legacy_dir.mkdir()
+    (legacy_dir / "old.avi").touch()
+    assert _acct_inventory_items({"LEGACY": str(legacy_dir)}) == [
+        {"tanda": "LEGACY", "name": "old.avi"}]
+
+
 def test_copy_number_reservation_counts_mp4_and_mov(tmp_path):
     profile = importlib.import_module("forge_iphone_profile")
     (tmp_path / "clip__c01.mp4").touch()
@@ -345,3 +366,21 @@ def test_visual_qc_accepts_iphone_hlg_from_sdr_with_calibrated_midtones(tmp_path
     errors, metrics = profile.assess_visual_change(
         source, output, source_color="sdr", output_color="hlg")
     assert not errors, metrics
+
+
+def test_visual_qc_rejects_damage_only_at_end(tmp_path):
+    if not ffmpeg_tool_exists("ffmpeg"):
+        pytest.skip("FFmpeg not installed")
+    profile = importlib.import_module("forge_iphone_profile")
+    source = tmp_path / "source.mp4"
+    damaged = tmp_path / "damaged.mp4"
+    subprocess.run([ffmpeg_tool_command("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y",
+                    "-f", "lavfi", "-i", "testsrc2=size=128x128:rate=24:duration=4",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source)],
+                   check=True, capture_output=True)
+    subprocess.run([ffmpeg_tool_command("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y",
+                    "-i", str(source), "-vf", "eq=brightness=-0.25:enable='gte(t,2)'",
+                    "-an", "-c:v", "libx264", str(damaged)], check=True, capture_output=True)
+    errors, _ = profile.assess_visual_change(
+        source, damaged, source_color="sdr", output_color="sdr")
+    assert any("segundo" in error for error in errors)

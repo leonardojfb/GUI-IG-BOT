@@ -81,6 +81,13 @@ def test_release_allowlist_includes_local_modules_imported_by_shipped_files():
     assert missing == {}
 
 
+def test_iphone_profile_module_is_allowed_by_builder_and_updater():
+    import updater
+
+    assert "forge_iphone_profile.py" in _release_files_from_build_script()
+    assert "forge_iphone_profile.py" in updater.DEFAULT_UPDATEABLE_FILES
+
+
 def test_release_packages_clean_pc_video_dependencies():
     release_files = _release_files_from_build_script()
     requirements = (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")

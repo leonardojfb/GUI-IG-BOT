@@ -150,11 +150,11 @@ def preflight_batch(
             "assumptions": assumptions}
 
 
-def visual_metrics(path: str | Path, color: str) -> dict[str, float]:
+def _visual_metric_frames(path: str | Path, color: str) -> dict[str, list[float]]:
     """Measure sampled video in one common 8-bit SDR viewing transform."""
     if color not in {"sdr", "hlg"}:
         raise ValueError(f"Color no medible: {color}")
-    filters = ["fps=2"]
+    filters = ["fps=1"]
     if color == "hlg":
         filters += ["zscale=t=linear:npl=100", "format=gbrpf32le",
                     "tonemap=tonemap=hable:desat=0",
@@ -162,7 +162,7 @@ def visual_metrics(path: str | Path, color: str) -> dict[str, float]:
     filters += ["scale=256:-2", "signalstats", "metadata=mode=print"]
     result = subprocess.run([
         ffmpeg_tool_command("ffmpeg"), "-hide_banner", "-loglevel", "info",
-        "-i", str(path), "-t", "2", "-an", "-vf", ",".join(filters),
+        "-i", str(path), "-an", "-vf", ",".join(filters),
         "-f", "null", os.devnull,
     ], capture_output=True, text=True, creationflags=_NO_WINDOW)
     if result.returncode:
@@ -172,20 +172,37 @@ def visual_metrics(path: str | Path, color: str) -> dict[str, float]:
         for field in VISUAL_GATE_LIMITS}
     if any(not numbers for numbers in values.values()):
         raise RuntimeError(f"No hay métricas visuales en {Path(path).name}")
-    return {field: sum(numbers) / len(numbers) for field, numbers in values.items()}
+    return values
+
+
+def visual_metrics(path: str | Path, color: str) -> dict[str, float]:
+    """Summarize samples spanning the full video."""
+    frames = _visual_metric_frames(path, color)
+    return {field: sum(numbers) / len(numbers) for field, numbers in frames.items()}
 
 
 def assess_visual_change(
     source: str | Path, output: str | Path, *, source_color: str, output_color: str,
 ) -> tuple[list[str], dict]:
     """Reject large changes in brightness, contrast distribution or saturation."""
-    before = visual_metrics(source, source_color)
-    after = visual_metrics(output, output_color)
+    before_frames = _visual_metric_frames(source, source_color)
+    after_frames = _visual_metric_frames(output, output_color)
+    before = {field: sum(values) / len(values) for field, values in before_frames.items()}
+    after = {field: sum(values) / len(values) for field, values in after_frames.items()}
     errors = []
     for field, (absolute, relative) in VISUAL_GATE_LIMITS.items():
         gap = abs(after[field] - before[field])
         if gap > max(absolute, before[field] * relative):
             errors.append(f"{field}: fuente {before[field]:.1f}, salida {after[field]:.1f}")
+        source_samples = before_frames[field]
+        output_samples = after_frames[field]
+        if abs(len(source_samples) - len(output_samples)) > 1:
+            errors.append(f"{field}: distinta cantidad de muestras visuales")
+        for index, (source_value, output_value) in enumerate(
+                zip(source_samples, output_samples)):
+            if abs(output_value - source_value) > max(absolute, source_value * relative):
+                errors.append(f"{field}: diferencia en segundo {index}")
+                break
     return errors, {"source": before, "output": after,
                     "limits": VISUAL_GATE_LIMITS, "errors": errors}
 
@@ -299,36 +316,41 @@ def render_validated_copy(
             strength=strength, overrides=overrides, ffmpeg_threads=threads,
             output_profile=profile, source_color=source_color,
         )
-        data = probe_file(temporary)
-        has_audio = any(stream.get("codec_type") == "audio" for stream in
-                        probe_file(input_path).get("streams", []))
-        problems = validate_probe(data, profile, expect_audio=has_audio, expected_meta=meta)
-        boxes = top_level_boxes(temporary)
-        if not boxes or boxes[0] != "ftyp" or "mdat" not in boxes or "moov" not in boxes \
-                or boxes.index("moov") < boxes.index("mdat"):
-            problems.append(f"format.boxes: orden MOV inesperado {boxes}")
-        if problems:
-            raise RuntimeError("Salida iPhone inválida: " + "; ".join(problems))
-        result = subprocess.run([
-            ffmpeg_tool_command("ffmpeg"), "-hide_banner", "-loglevel", "error",
-            "-xerror", "-err_detect", "explode", "-i", str(temporary),
-            "-map", "0:v:0", "-map", "0:a:0?", "-f", "null", os.devnull,
-        ], capture_output=True, creationflags=_NO_WINDOW)
-        if result.returncode:
-            raise RuntimeError("La copia iPhone no se decodifica: " +
-                               result.stderr.decode("utf-8", errors="replace")[-500:])
-        visual_errors, visual_report = assess_visual_change(
-            input_path, temporary, source_color=source_color,
-            output_color="hlg" if profile == "iphone_hlg" else "sdr")
-        params["iphone_visual_qc"] = visual_report
-        if visual_errors:
-            raise RuntimeError("QC visual iPhone rechazó la copia: " + "; ".join(visual_errors))
+        params.update(validate_existing_copy(input_path, temporary, meta, profile, source_color))
         if output.exists():
             raise FileExistsError(output)
         os.rename(temporary, output)
         return params
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def validate_existing_copy(input_path, output_path, meta, profile, source_color):
+    """Revalidate a published pending copy before crash recovery; never overwrite it."""
+    data = probe_file(output_path)
+    has_audio = any(stream.get("codec_type") == "audio" for stream in
+                    probe_file(input_path).get("streams", []))
+    problems = validate_probe(data, profile, expect_audio=has_audio, expected_meta=meta)
+    boxes = top_level_boxes(output_path)
+    if not boxes or boxes[0] != "ftyp" or "mdat" not in boxes or "moov" not in boxes \
+            or boxes.index("moov") < boxes.index("mdat"):
+        problems.append(f"format.boxes: orden MOV inesperado {boxes}")
+    if problems:
+        raise RuntimeError("Salida iPhone inválida: " + "; ".join(problems))
+    result = subprocess.run([
+        ffmpeg_tool_command("ffmpeg"), "-hide_banner", "-loglevel", "error",
+        "-xerror", "-err_detect", "explode", "-i", str(output_path),
+        "-map", "0:v:0", "-map", "0:a:0?", "-f", "null", os.devnull,
+    ], capture_output=True, creationflags=_NO_WINDOW)
+    if result.returncode:
+        raise RuntimeError("La copia iPhone no se decodifica: " +
+                           result.stderr.decode("utf-8", errors="replace")[-500:])
+    visual_errors, visual_report = assess_visual_change(
+        input_path, output_path, source_color=source_color,
+        output_color="hlg" if profile == "iphone_hlg" else "sdr")
+    if visual_errors:
+        raise RuntimeError("QC visual iPhone rechazó la copia: " + "; ".join(visual_errors))
+    return {"iphone_visual_qc": visual_report}
 
 
 def validate_probe(data: dict, profile: str, *, expect_audio: bool,
