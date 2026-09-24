@@ -196,6 +196,160 @@ def test_forge_records_are_saved_after_all_variants_complete(monkeypatch, tmp_pa
     assert app.db.saved_transform_logs[0][1]["tanda_name"] == "Concurrent"
 
 
+def test_iphone_sdr_gui_publishes_mov_and_registers_only_validated_copies(monkeypatch, tmp_path):
+    import subprocess
+    import gui_premium_v7
+    import forge_iphone_profile
+    from console_encoding import ffmpeg_tool_command, ffmpeg_tool_exists
+
+    if not ffmpeg_tool_exists("ffmpeg") or not ffmpeg_tool_exists("ffprobe"):
+        import pytest
+        pytest.skip("FFmpeg tools not installed")
+    completed = []
+    app = _forge_app(tmp_path, completed)
+
+    class ValidatedDatabase(_Database):
+        def save_forge_video(self, _tanda, source, output, _video_hash):
+            assert (tmp_path / "videos_finales" / _tanda / output).is_file()
+            self.saved_forge_rows.append((source, output))
+
+        def save_metadata_fingerprints(self, fingerprints):
+            assert len(self.saved_forge_rows) == len(fingerprints)
+            self.saved_fingerprints = fingerprints
+
+    app.db = ValidatedDatabase(completed)
+    app.forge_profile_var = _Value("iPhone SDR")
+    app.forge_efectos_var = _Value("Custom")
+    app.forge_fx_vars = {key: _Value(False) for key in metadata_pool.DEFAULT_VARIANT_EFFECTS}
+    app.forge_fuerza_var = _Value("Light")
+    for path in app.forge_video_paths:
+        subprocess.run([
+            ffmpeg_tool_command("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc2=size=64x64:rate=24:duration=0.5",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-x264-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709",
+            path,
+        ], check=True, capture_output=True)
+    tasks = []
+
+    class Worker:
+        def __init__(self, _app, _done, task):
+            tasks.append(task)
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(render_performance, "get_render_performance",
+                        lambda: RenderPerformance(2, 2, 2, 2, None))
+    monkeypatch.setattr(gui_premium_v7, "WorkerThread", Worker)
+    monkeypatch.setattr(gui_premium_v7, "__file__", str(tmp_path / "gui_premium_v7.py"))
+    monkeypatch.setattr(gui_premium_v7.messagebox, "askyesno", lambda *_args: True)
+    real_render = forge_iphone_profile.render_validated_copy
+
+    def check_processing_status(*args, **kwargs):
+        status = json.loads((tmp_path / "videos_finales" / "Concurrent" /
+                             "forge_batch_status.json").read_text(encoding="utf-8"))
+        assert status["state"] == "processing"
+        return real_render(*args, **kwargs)
+
+    monkeypatch.setattr(forge_iphone_profile, "render_validated_copy", check_processing_status)
+    InstagramAutoPro.forge_process(app)
+    tasks[0]()
+    assert [row[1] for row in app.db.saved_forge_rows] == ["one__c01.mov", "two__c01.mov"]
+    for _source, name in app.db.saved_forge_rows:
+        assert (tmp_path / "videos_finales" / "Concurrent" / name).is_file()
+
+
+def test_iphone_batch_registers_successes_and_reports_incomplete_on_copy_failure(monkeypatch, tmp_path):
+    import subprocess
+    import gui_premium_v7
+    import forge_iphone_profile
+    from console_encoding import ffmpeg_tool_command, ffmpeg_tool_exists
+
+    if not ffmpeg_tool_exists("ffmpeg") or not ffmpeg_tool_exists("ffprobe"):
+        import pytest
+        pytest.skip("FFmpeg tools not installed")
+    app = _forge_app(tmp_path, [])
+
+    class RecordingDatabase(_Database):
+        def save_forge_video(self, _tanda, source, output, _video_hash):
+            assert (tmp_path / "videos_finales" / _tanda / output).is_file()
+            self.saved_forge_rows.append((source, output))
+
+        def save_metadata_fingerprints(self, fingerprints):
+            self.saved_fingerprints = fingerprints
+
+    app.db = RecordingDatabase([])
+    app.forge_profile_var = _Value("iPhone SDR")
+    app.forge_efectos_var = _Value("Custom")
+    app.forge_fx_vars = {key: _Value(False) for key in metadata_pool.DEFAULT_VARIANT_EFFECTS}
+    app.forge_fuerza_var = _Value("Light")
+    for path in app.forge_video_paths:
+        subprocess.run([
+            ffmpeg_tool_command("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc2=size=64x64:rate=24:duration=0.5",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-x264-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709", path,
+        ], check=True, capture_output=True)
+    real_render = forge_iphone_profile.render_validated_copy
+
+    def fail_second(source, *args, **kwargs):
+        if os.path.basename(source) == "two.mp4":
+            raise RuntimeError("fallo deliberado de la segunda copia")
+        return real_render(source, *args, **kwargs)
+
+    tasks = []
+
+    class Worker:
+        def __init__(self, _app, _done, task):
+            tasks.append(task)
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(forge_iphone_profile, "render_validated_copy", fail_second)
+    monkeypatch.setattr(render_performance, "get_render_performance",
+                        lambda: RenderPerformance(2, 2, 2, 2, None))
+    monkeypatch.setattr(gui_premium_v7, "WorkerThread", Worker)
+    monkeypatch.setattr(gui_premium_v7, "__file__", str(tmp_path / "gui_premium_v7.py"))
+    monkeypatch.setattr(gui_premium_v7.messagebox, "askyesno", lambda *_args: True)
+    InstagramAutoPro.forge_process(app)
+    result = tasks[0]()
+    assert "incompleta" in result.lower()
+    assert app.db.saved_forge_rows == [("one.mp4", "one__c01.mov")]
+    assert not (tmp_path / "videos_finales" / "Concurrent" / "two__c01.mov").exists()
+    status_path = tmp_path / "videos_finales" / "Concurrent" / "forge_batch_status.json"
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+    assert status["state"] == "incomplete"
+    assert [item["output_name"] for item in status["pending"]] == ["two__c01.mov"]
+
+    class PreviewTree:
+        def __init__(self):
+            self.rows = []
+
+        def get_children(self):
+            return []
+
+        def delete(self, *_args):
+            pass
+
+        def insert(self, _parent, _position, **kwargs):
+            self.rows.append(kwargs["values"])
+
+    app.forge_tree = PreviewTree()
+    InstagramAutoPro.forge_preview_metadata(app)
+    assert app.forge_meta_assignments == [status["pending"][0]["meta"]]
+    assert len(app.forge_tree.rows) == 1
+
+    monkeypatch.setattr(forge_iphone_profile, "render_validated_copy", real_render)
+    InstagramAutoPro.forge_process(app)
+    result = tasks[1]()
+    assert "complet" in result.lower()
+    assert app.db.saved_forge_rows == [
+        ("one.mp4", "one__c01.mov"), ("two.mp4", "two__c01.mov")]
+    assert json.loads(status_path.read_text(encoding="utf-8"))["state"] == "complete"
+
+
 def test_forge_preserves_edited_video_identity_in_output_names(monkeypatch, tmp_path):
     import gui_premium_v7
 

@@ -6,6 +6,7 @@ tanda folder, a category with zero accounts, and re-running a distribution
 into a calendar day that already has files from a previous run (collision).
 """
 import shutil
+import json
 
 import pytest
 
@@ -47,6 +48,104 @@ def test_distribute_tanda_missing_folder_returns_graceful_error(isolated_organiz
     assert not (run_root / "CALENDARIO_POSTEO").exists() or not list(
         (run_root / "CALENDARIO_POSTEO").rglob("*.mp4")
     )
+
+
+def test_distribute_tanda_refuses_incomplete_iphone_forge_batch(isolated_organizador):
+    run_root, Organizador, database = isolated_organizador
+    tanda_dir = run_root / "videos_finales" / "IPHONE_INCOMPLETE"
+    tanda_dir.mkdir(parents=True)
+    (tanda_dir / "clip__c01.mov").write_bytes(b"validated-placeholder")
+    (tanda_dir / "forge_batch_status.json").write_text(json.dumps({
+        "state": "incomplete", "profile": "iphone_sdr",
+        "validated": ["clip__c01.mov"],
+        "pending": [{"output_name": "clip__c02.mov"}],
+    }), encoding="utf-8")
+    db = database.DatabaseManager()
+    db.add_category("PRUEBA_IPHONE_INCOMPLETE")
+    db.add_virtual_account("iphone_acc", "PRUEBA_IPHONE_INCOMPLETE")
+    db.close()
+
+    result = Organizador.distribute_tanda(
+        "IPHONE_INCOMPLETE", "PRUEBA_IPHONE_INCOMPLETE", 1, False, "1")
+    assert "incompleta" in result.lower()
+    assert not list((run_root / "CALENDARIO_POSTEO").rglob("*.mov"))
+
+
+def test_distribute_tanda_uses_only_validated_mov_from_complete_forge_batch(isolated_organizador):
+    run_root, Organizador, database = isolated_organizador
+    tanda_dir = run_root / "videos_finales" / "IPHONE_COMPLETE"
+    tanda_dir.mkdir(parents=True)
+    valid = "IPHONE_COMPLETE__P1__P2__c01.mov"
+    stray = "IPHONE_COMPLETE__P3__P4__c02.mov"
+    create_video(tanda_dir / valid, "black", "VALID_MOV")
+    create_video(tanda_dir / stray, "white", "STRAY_MOV")
+    (tanda_dir / "forge_batch_status.json").write_text(json.dumps({
+        "state": "complete", "profile": "iphone_sdr", "validated": [valid], "pending": [],
+    }), encoding="utf-8")
+    db = database.DatabaseManager()
+    db.add_category("PRUEBA_IPHONE_COMPLETE")
+    db.add_virtual_account("iphone_complete_acc", "PRUEBA_IPHONE_COMPLETE")
+    db.close()
+
+    result = Organizador.distribute_tanda(
+        "IPHONE_COMPLETE", "PRUEBA_IPHONE_COMPLETE", 1, False, "1")
+    entries = load_entries(manifest_path(run_root))
+    assert "1 videos procesados" in result
+    assert len(entries) == 1
+    assert entries[0]["source_path"].endswith(valid)
+    assert entries[0]["telegram_filename"].endswith(".mov")
+
+
+def test_iphone_mov_flows_from_forge_through_logistics_to_telegram_upload(
+    isolated_organizador, monkeypatch,
+):
+    import subprocess
+    import forge_iphone_profile
+    import organizadortg
+    from console_encoding import ffmpeg_tool_command
+    from types import SimpleNamespace
+
+    run_root, Organizador, database = isolated_organizador
+    source = run_root / "input_sdr.mp4"
+    subprocess.run([
+        ffmpeg_tool_command("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y",
+        "-f", "lavfi", "-i", "testsrc2=size=128x128:rate=24:duration=1",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        "-x264-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709",
+        str(source),
+    ], check=True, capture_output=True)
+    tanda_dir = run_root / "videos_finales" / "IPHONE_FLOW"
+    output = tanda_dir / "IPHONE_FLOW__P1__P2__c01.mov"
+    forge_iphone_profile.render_validated_copy(source, output, {
+        "iphone_model": "iPhone 14 Pro Max", "ios_version": "26.4",
+    }, "iphone_sdr", "sdr")
+    (tanda_dir / "forge_batch_status.json").write_text(json.dumps({
+        "state": "complete", "profile": "iphone_sdr",
+        "validated": [output.name], "pending": [],
+    }), encoding="utf-8")
+    db = database.DatabaseManager()
+    db.add_category("PRUEBA_IPHONE_FLOW")
+    db.add_virtual_account("iphone_flow_acc", "PRUEBA_IPHONE_FLOW")
+    db.close()
+
+    result = Organizador.distribute_tanda("IPHONE_FLOW", "PRUEBA_IPHONE_FLOW", 1, False, "1")
+    entries = load_entries(manifest_path(run_root))
+    assert "1 videos procesados" in result
+    assert len(entries) == 1
+    assert entries[0]["source_path"] == str(output)
+
+    posted = []
+
+    def fake_post(url, data, files):
+        name, handle, mime = files["video"]
+        posted.append((name, mime, handle.read()))
+        return SimpleNamespace(status_code=200, text="ok")
+
+    monkeypatch.setattr(organizadortg.requests, "post", fake_post)
+    ok, _topic = organizadortg._send_video_to_topic(
+        "-1001", 123, "caption", entries[0]["source_path"], {}, "iphone_flow_acc", "MAIN")
+    assert ok
+    assert posted == [(output.name, "video/quicktime", output.read_bytes())]
 
 
 def test_distribute_tanda_category_without_accounts_returns_graceful_error(isolated_organizador):

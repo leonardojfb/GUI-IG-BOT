@@ -40,6 +40,7 @@ $ReleaseFiles = @(
     "video_editor.py",
     "render_performance.py",
     "metadata_pool.py",
+    "forge_iphone_profile.py",
     "trial_content.py",
     "calendar_manifest.py",
     "social_publishing.py",

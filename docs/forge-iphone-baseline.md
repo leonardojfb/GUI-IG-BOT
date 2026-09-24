@@ -15,4 +15,4 @@ Inspección de solo lectura con `ffprobe -show_format -show_streams -of json` y 
 | Tags de formato | `com.apple.quicktime.make/model/software`, ubicación, fecha | `make/model`, QuickTime `software/model/network`, ubicación | mismos tipos de tags |
 | Valor de software | `26.4` | `iOS 18.1` | `iOS 26.0.1` |
 
-La referencia tiene SHA-256 `FDCEE04FD56A4762AA1534123C524038B54F68B4E4D7C457705A379501E1B35F`. No se copian sus pistas `mebx`, coordenadas ni fecha. El FFmpeg en `PATH` de este entorno anuncia `libx265`, AAC y `zscale`; el binario empaquetado `tools/ffmpeg/bin/ffmpeg.exe` no está presente en el worktree Git y aún requiere verificación en el artefacto de release.
+La referencia tiene SHA-256 `FDCEE04FD56A4762AA1534123C524038B54F68B4E4D7C457705A379501E1B35F`. No se copian sus pistas `mebx`, coordenadas ni fecha. El FFmpeg en `PATH` y el binario local de la app (`tools/ffmpeg/bin/ffmpeg.exe`, versión `2026-04-16-git-5abc240a27`) anuncian `libx265`, AAC, `zscale`, `tonemap` y `signalstats`. El binario está excluido del worktree Git; queda pendiente comprobar el ZIP final de release con el nuevo módulo.

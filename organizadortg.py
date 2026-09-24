@@ -782,11 +782,13 @@ def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, usern
             if caption:
                 payload['caption'] = caption
             upload_name = os.path.basename(os.fspath(video_path)) or os.path.basename(os.fspath(active_path))
+            content_type = ("video/quicktime" if os.path.splitext(active_path)[1].lower() == ".mov"
+                            else "video/mp4")
             with open(active_path, 'rb') as fv:
                 r = requests.post(
                     f"https://api.telegram.org/bot{TOKEN}/sendVideo",
                     data=payload,
-                    files={'video': (upload_name, fv, 'video/mp4')}
+                    files={'video': (upload_name, fv, content_type)}
                 )
             if r.status_code == 200:
                 return True, t_id

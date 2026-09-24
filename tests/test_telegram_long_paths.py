@@ -5,6 +5,23 @@ import tempfile
 import organizadortg
 
 
+def test_send_mov_to_topic_uses_quicktime_mime(tmp_path, monkeypatch):
+    mov = tmp_path / "clip__c01.mov"
+    mov.write_bytes(b"mov-video")
+    uploads = []
+
+    def fake_post(url, data, files):
+        name, handle, content_type = files["video"]
+        uploads.append((name, content_type, handle.read()))
+        return SimpleNamespace(status_code=200, text="ok")
+
+    monkeypatch.setattr(organizadortg.requests, "post", fake_post)
+    ok, _topic_id = organizadortg._send_video_to_topic(
+        "-1001", 123, "caption", str(mov), {}, "eve", "MAIN")
+    assert ok
+    assert uploads == [("clip__c01.mov", "video/quicktime", b"mov-video")]
+
+
 def test_send_video_to_topic_handles_calendar_paths_over_260_chars(tmp_path, monkeypatch):
     long_name = "nested_" + ("x" * 120)
     calendar_dir = tmp_path / long_name / long_name

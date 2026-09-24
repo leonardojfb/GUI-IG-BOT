@@ -5330,6 +5330,20 @@ class InstagramAutoPro(ctk.CTk):
                 widget.grid(row=row_i, column=1, padx=(0, 18), pady=7, sticky="ew")
                 setattr(self, attr, widget)
 
+        self.forge_profile_var = tk.StringVar(value="Legacy MP4")
+        ctk.CTkLabel(card_cfg, text="Perfil de salida:", text_color=TEXT_MUTED,
+                     font=ctk.CTkFont(size=11), anchor="e").grid(
+                         row=5, column=0, padx=(18, 8), pady=7, sticky="e")
+        profile_frame = ctk.CTkFrame(card_cfg, fg_color="transparent")
+        profile_frame.grid(row=5, column=1, padx=(0, 18), pady=7, sticky="ew")
+        SegmentedControl(profile_frame, values=["Legacy MP4", "iPhone SDR", "iPhone HLG"],
+                         default="Legacy MP4", command=self.forge_profile_var.set).pack(fill="x")
+        self.forge_untagged_sdr_var = tk.BooleanVar(value=False)
+        ctk.CTkCheckBox(profile_frame, text="Sin tags: SDR BT.709 ya verificado",
+                        variable=self.forge_untagged_sdr_var,
+                        font=ctk.CTkFont(size=11), text_color=TEXT_MUTED).pack(
+                            anchor="w", pady=(6, 0))
+
         # ── Eje Efectos (qué efectos) ────────────────────────────────────
         ctk.CTkLabel(card_cfg, text="Efectos", text_color=TEXT_MUTED,
                      font=ctk.CTkFont(size=11, weight="bold")).grid(
@@ -5535,29 +5549,76 @@ class InstagramAutoPro(ctk.CTk):
             return messagebox.showwarning("⚠️", "Copias por vídeo debe ser un número >= 1.")
 
         n_total = n_videos * copies
+        selected_profile = getattr(getattr(self, "forge_profile_var", None), "get", lambda: "Legacy MP4")()
+        color_summary = ""
+        retry_items = None
+        if selected_profile != "Legacy MP4":
+            from forge_iphone_profile import preflight_batch, probe_file
+            profile_key = "iphone_hlg" if selected_profile == "iPhone HLG" else "iphone_sdr"
+            assume_untagged = bool(getattr(getattr(self, "forge_untagged_sdr_var", None),
+                                           "get", lambda: False)())
+            try:
+                preflight = preflight_batch(
+                    {path: probe_file(path) for path in self.forge_video_paths}, profile_key,
+                    known_untagged_sdr=set(self.forge_video_paths) if assume_untagged else set())
+            except Exception as error:
+                return messagebox.showerror("Preflight iPhone", str(error))
+            self.forge_iphone_preflight = preflight
+            counts = preflight["counts"]
+            color_summary = (f" · {selected_profile} MOV · SDR {counts['sdr']} / "
+                             f"HLG {counts['hlg']} / desconocidos {counts['unknown']}")
+            if preflight["blocked"]:
+                details = "\n".join(f"{os.path.basename(path)}: {reason}"
+                                    for path, reason in preflight["blocked"].items())
+                return messagebox.showerror("Preflight iPhone: fuentes bloqueadas", details)
+            status_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                       "videos_finales", self.e_forge_tanda.get().strip(),
+                                       "forge_batch_status.json")
+            if os.path.isfile(status_path):
+                try:
+                    with open(status_path, encoding="utf-8") as status_file:
+                        status = json.load(status_file)
+                    if status.get("state") in ("incomplete", "processing"):
+                        if status.get("profile") != profile_key:
+                            raise ValueError("La tanda pendiente usa otro perfil")
+                        retry_items = status["pending"]
+                        if any(item["source_path"] not in self.forge_video_paths
+                               for item in retry_items):
+                            raise ValueError("Incluye todas las fuentes pendientes")
+                        n_total = len(retry_items)
+                        color_summary += f" · reintento de {n_total} copia(s) pendiente(s)"
+                except (OSError, ValueError, KeyError, TypeError) as error:
+                    return messagebox.showerror("Reintento Forge", str(error))
         try:
             import metadata_pool
-            self.forge_meta_assignments = metadata_pool.generate_unique_metadata(self.db, n_total)
+            self.forge_meta_assignments = (
+                [item["meta"] for item in retry_items] if retry_items is not None else
+                metadata_pool.generate_unique_metadata(self.db, n_total))
         except ValueError as e:
             return messagebox.showerror("Sin combinaciones disponibles", str(e))
 
         for item in self.forge_tree.get_children():
             self.forge_tree.delete(item)
-        row_idx = 0
-        for path in self.forge_video_paths:
-            name = os.path.basename(path)
-            for c in range(1, copies + 1):
-                m = self.forge_meta_assignments[row_idx]
-                tag = "even" if row_idx % 2 == 0 else "odd"
-                self.forge_tree.insert("", tk.END, tags=(tag,), values=(
-                    f"{name}  (c{c:02d})", m["iphone_model"], m["city"],
-                    m["carrier"], m["ios_version"]
-                ))
-                row_idx += 1
+        if retry_items is not None:
+            preview_rows = [(item["output_name"], item["meta"]) for item in retry_items]
+        else:
+            preview_rows = [
+                (f"{os.path.basename(path)}  (c{c:02d})",
+                 self.forge_meta_assignments[index * copies + c - 1])
+                for index, path in enumerate(self.forge_video_paths)
+                for c in range(1, copies + 1)
+            ]
+        for row_idx, (label, meta) in enumerate(preview_rows):
+            tag = "even" if row_idx % 2 == 0 else "odd"
+            self.forge_tree.insert("", tk.END, tags=(tag,), values=(
+                label, meta["iphone_model"], meta.get("city", ""),
+                meta.get("carrier", ""), meta["ios_version"]
+            ))
         self.btn_forge_process.configure(state="normal")
         self.btn_forge_reshuffle.configure(state="normal")
         self.forge_pb_lbl.configure(
-            text=f"✅ {n_total} asignaciones generadas ({n_videos} vídeos × {copies} copias). Revisá y presioná Procesar.",
+            text=(f"✅ {n_total} asignaciones {'reservadas' if retry_items is not None else 'generadas'}"
+                  f"{color_summary}. Revisá y presioná Procesar."),
             text_color=SUCCESS
         )
 
@@ -5588,6 +5649,44 @@ class InstagramAutoPro(ctk.CTk):
         # Leer checkboxes de micro-ediciones en el hilo principal (tk vars no
         # son seguras desde el worker).
         import metadata_pool
+        selected_profile = getattr(getattr(self, "forge_profile_var", None), "get", lambda: "Legacy MP4")()
+        output_profile = {"iPhone SDR": "iphone_sdr", "iPhone HLG": "iphone_hlg"}.get(selected_profile)
+        pending_retry = None
+        prior_status = None
+        status_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   "videos_finales", tanda_name, "forge_batch_status.json")
+        if output_profile and os.path.isfile(status_path):
+            try:
+                with open(status_path, encoding="utf-8") as status_file:
+                    old_status = json.load(status_file)
+                prior_status = old_status
+                if old_status.get("state") in ("incomplete", "processing"):
+                    if old_status.get("profile") != output_profile:
+                        raise ValueError("La tanda incompleta usa otro perfil; termina su reintento primero")
+                    pending_retry = old_status
+                    selected = set(self.forge_video_paths)
+                    if any(item["source_path"] not in selected for item in old_status["pending"]):
+                        raise ValueError("Incluye todas las fuentes pendientes para reintentar la tanda")
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                return messagebox.showerror("Reintento Forge", str(error))
+        preflight = None
+        if output_profile:
+            from forge_iphone_profile import preflight_batch, probe_file, runtime_capabilities
+            assume_untagged = bool(getattr(getattr(self, "forge_untagged_sdr_var", None),
+                                           "get", lambda: False)())
+            try:
+                missing = {"libx265", "aac", "zscale"} - runtime_capabilities()
+                if missing:
+                    raise RuntimeError(f"FFmpeg no soporta: {', '.join(sorted(missing))}")
+                preflight = preflight_batch(
+                    {path: probe_file(path) for path in self.forge_video_paths}, output_profile,
+                    known_untagged_sdr=set(self.forge_video_paths) if assume_untagged else set())
+            except Exception as error:
+                return messagebox.showerror("Preflight iPhone", str(error))
+            if preflight["blocked"]:
+                details = "\n".join(f"{os.path.basename(path)}: {reason}"
+                                    for path, reason in preflight["blocked"].items())
+                return messagebox.showerror("Preflight iPhone: fuentes bloqueadas", details)
         fx_vals = {key: var.get() for key, var in self.forge_fx_vars.items()}
         fx_enabled = metadata_pool.efectos_to_enabled(self.forge_efectos_var.get(), fx_vals)
         fuerza_level = self.forge_fuerza_var.get()
@@ -5600,13 +5699,21 @@ class InstagramAutoPro(ctk.CTk):
             forge_strength = metadata_pool.fuerza_to_strength(fuerza_level)
             forge_overrides = None
         active_fx = [lbl for key, lbl in self.FORGE_FX_DEFS if fx_enabled[key]]
-        fx_desc = ", ".join(active_fx) if active_fx else "ninguna (solo metadata, sin re-encode)"
+        fx_desc = ", ".join(active_fx) if active_fx else (
+            "ninguna (HEVC igualmente)" if output_profile else "ninguna (solo metadata, sin re-encode)")
+        profile_desc = f"\nPerfil: {selected_profile} ({'MOV' if output_profile else 'formato original'})"
+        if pending_retry:
+            profile_desc += f"\nReintento: {len(pending_retry['pending'])} copia(s) pendiente(s), mismo número y metadata"
+        if preflight:
+            counts = preflight["counts"]
+            profile_desc += (f"\nFuentes: SDR {counts['sdr']} / HLG {counts['hlg']} / "
+                             f"desconocidas {counts['unknown']}")
 
         if not messagebox.askyesno("Confirmar Forge", (
             f"¿Generar {len(self.forge_video_paths)} vídeos × {copies} copias = {n_total} archivos con metadata iPhone única?\n\n"
             f"Tanda: {tanda_name}{' (TRIALS)' if is_trial_tanda else ''}\n"
             f"Rendimiento: {performance.workers} videos en paralelo\n"
-            f"Micro-ediciones: {fx_desc}"
+            f"Micro-ediciones: {fx_desc}{profile_desc}"
         )):
             return
 
@@ -5628,21 +5735,40 @@ class InstagramAutoPro(ctk.CTk):
         def task():
             import re
             import metadata_pool
+            if output_profile:
+                from forge_iphone_profile import next_copy_number, render_validated_copy
             os.makedirs(output_dir, exist_ok=True)
             copy_jobs = []
             meta_idx = 0
             reserved_max = {}
-            for vid_path in videos:
+            if pending_retry:
+                for item in pending_retry["pending"]:
+                    vid_path = item["source_path"]
+                    filename = os.path.basename(vid_path)
+                    out_name = item["output_name"]
+                    out_path = os.path.join(output_dir, out_name)
+                    meta = item["meta"]
+                    vh = item["video_hash"]
+                    match = re.search(r"__c(\d+)\.mov$", out_name, re.I)
+                    if not match:
+                        raise ValueError(f"Nombre de copia pendiente inválido: {out_name}")
+                    fingerprint = {"video_hash": f"{vh}_{int(match.group(1))}", **meta}
+                    copy_jobs.append((vid_path, out_path, filename, out_name, vh, meta, fingerprint))
+            for vid_path in ([] if pending_retry else videos):
                 filename = os.path.basename(vid_path)
                 base, ext = os.path.splitext(filename)
                 vid_id = forge_output_id_from_filename(filename)
                 vh = metadata_pool.get_video_hash(vid_path)
-                existing_max = 0
-                copy_pattern = re.compile(rf"^{re.escape(vid_id)}__c(\d+){re.escape(ext)}$")
-                for fname in os.listdir(output_dir):
-                    m = copy_pattern.match(fname)
-                    if m:
-                        existing_max = max(existing_max, int(m.group(1)))
+                if output_profile:
+                    ext = ".mov"
+                    existing_max = next_copy_number(output_dir, vid_id) - 1
+                else:
+                    existing_max = 0
+                    copy_pattern = re.compile(rf"^{re.escape(vid_id)}__c(\d+){re.escape(ext)}$")
+                    for fname in os.listdir(output_dir):
+                        m = copy_pattern.match(fname)
+                        if m:
+                            existing_max = max(existing_max, int(m.group(1)))
                 reservation_key = (vid_id, ext)
                 existing_max = max(existing_max, reserved_max.get(reservation_key, 0))
                 for offset in range(1, copies + 1):
@@ -5658,19 +5784,59 @@ class InstagramAutoPro(ctk.CTk):
             def process_copy(copy_job):
                 vid_path, out_path, filename, out_name, vh, meta, fingerprint = copy_job
                 try:
-                    params = metadata_pool.apply_variant_and_metadata(
-                        vid_path, out_path, meta,
-                        enabled=fx_enabled, strength=forge_strength,
-                        overrides=forge_overrides,
-                        ffmpeg_threads=performance.ffmpeg_threads,
-                    )
+                    if output_profile:
+                        params = render_validated_copy(
+                            vid_path, out_path, meta, output_profile,
+                            preflight["sources"][vid_path], enabled=fx_enabled,
+                            strength=forge_strength, overrides=forge_overrides,
+                            threads=performance.ffmpeg_threads,
+                        )
+                        params.update({"output_profile": output_profile,
+                                       "source_color": preflight["sources"][vid_path],
+                                       "source_color_assumption": preflight["assumptions"].get(vid_path),
+                                       "output_color": "hlg" if output_profile == "iphone_hlg" else "sdr",
+                                       "output_codec": "hevc", "output_container": "mov"})
+                    else:
+                        params = metadata_pool.apply_variant_and_metadata(
+                            vid_path, out_path, meta,
+                            enabled=fx_enabled, strength=forge_strength,
+                            overrides=forge_overrides,
+                            ffmpeg_threads=performance.ffmpeg_threads,
+                        )
                 except Exception as error:
                     raise RuntimeError(f"Forge falló en '{filename}': {error}") from error
                 return filename, out_name, vh, fingerprint, vid_path, out_path, meta, params
 
+            if output_profile:
+                processing_status = {
+                    "state": "processing", "profile": output_profile,
+                    "expected_count": (pending_retry.get("expected_count", len(copy_jobs))
+                                       if pending_retry else
+                                       len(copy_jobs) + len((prior_status or {}).get("validated", []))),
+                    "validated": (prior_status or {}).get("validated", []),
+                    "pending": [
+                        {"source_path": job[0], "output_name": job[3],
+                         "video_hash": job[4], "meta": job[5]}
+                        for job in copy_jobs
+                    ],
+                }
+                with open(status_path + ".tmp", "w", encoding="utf-8") as status_file:
+                    json.dump(processing_status, status_file, ensure_ascii=False, indent=2)
+                os.replace(status_path + ".tmp", status_path)
+
             with ThreadPoolExecutor(max_workers=performance.workers) as pool:
                 futures = [pool.submit(process_copy, copy_job) for copy_job in copy_jobs]
-                completed = [future.result() for future in futures]
+                if output_profile:
+                    completed = []
+                    failures = []
+                    for copy_job, future in zip(copy_jobs, futures):
+                        try:
+                            completed.append(future.result())
+                        except Exception as error:
+                            failures.append((copy_job[3], str(error)))
+                else:
+                    completed = [future.result() for future in futures]
+                    failures = []
 
             process_kind = "forge_trial" if is_trial_tanda else "forge"
             for filename, out_name, vh, fingerprint, vid_path, out_path, meta, params in completed:
@@ -5685,17 +5851,46 @@ class InstagramAutoPro(ctk.CTk):
                     params=params,
                     meta=meta,
                 )
-            db_ref.save_metadata_fingerprints([
-                fingerprint for _filename, _out_name, _vh, fingerprint, *_rest in completed
-            ])
-            existing_tanda = db_ref.get_tanda_by_name(tanda_name) or {}
-            db_ref.add_tanda(
-                tanda_name, tanda_name, tanda_name, existing_tanda.get("captions_file_path")
-            )
-            db_ref.set_tanda_trial(tanda_name, is_trial_tanda)
+            if completed:
+                db_ref.save_metadata_fingerprints([
+                    fingerprint for _filename, _out_name, _vh, fingerprint, *_rest in completed
+                ])
+                existing_tanda = db_ref.get_tanda_by_name(tanda_name) or {}
+                db_ref.add_tanda(
+                    tanda_name, tanda_name, tanda_name, existing_tanda.get("captions_file_path")
+                )
+                db_ref.set_tanda_trial(tanda_name, is_trial_tanda)
+
+            if output_profile:
+                failed_names = {name for name, _error in failures}
+                pending_records = [
+                    {"source_path": vid_path, "output_name": out_name,
+                     "video_hash": vh, "meta": meta, "error": next(
+                         error for name, error in failures if name == out_name)}
+                    for vid_path, _out_path, _filename, out_name, vh, meta, _fingerprint in copy_jobs
+                    if out_name in failed_names
+                ]
+                status = {
+                    "state": "incomplete" if failures else "complete",
+                    "profile": output_profile,
+                    "expected_count": pending_retry.get("expected_count", len(copy_jobs))
+                    if pending_retry else len(copy_jobs),
+                    "validated": (((prior_status or {}).get("validated", [])) +
+                                  [item[1] for item in completed]),
+                    "pending": pending_records,
+                }
+                temp_status_path = status_path + ".tmp"
+                with open(temp_status_path, "w", encoding="utf-8") as status_file:
+                    json.dump(status, status_file, ensure_ascii=False, indent=2)
+                os.replace(temp_status_path, status_path)
+
+            if failures:
+                details = "\n".join(f"{name}: {error}" for name, error in failures)
+                return (f"⚠️ Tanda incompleta: {len(completed)}/{len(copy_jobs)} copias validadas y registradas en este intento; "
+                        f"{len(failures)} fallidas. No uses la tanda completa hasta reintentar.\n{details}")
 
             msg = (
-                f"✅ {n_total} archivos generados ({len(videos)} vídeos × {copies} copias).\n"
+                f"✅ Tanda completada: {len(copy_jobs)} archivos generados o reintentados.\n"
                 f"📁 Guardados en: videos_finales/{tanda_name}/\n"
                 f"🔮 Tanda '{tanda_name}' registrada en la DB."
             )
@@ -5707,7 +5902,10 @@ class InstagramAutoPro(ctk.CTk):
             self.forge_pb.stop()
             self.forge_pb.configure(mode="determinate")
             self.forge_pb.set(1 if success else 0)
-            if success:
+            if success and isinstance(result, str) and result.startswith("⚠️ Tanda incompleta"):
+                self.forge_pb_lbl.configure(text="⚠️ Tanda incompleta", text_color=WARNING)
+                messagebox.showwarning("Forge incompleto", result)
+            elif success:
                 self.forge_pb_lbl.configure(text="✅ Completado", text_color=SUCCESS)
                 messagebox.showinfo("✅ Forge completado", result)
                 self.reload_dist_lists()

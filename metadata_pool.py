@@ -225,11 +225,19 @@ def generate_unique_metadata(db_manager, n: int) -> list:
     return result
 
 
-def apply_metadata_to_video(input_path: str, output_path: str, meta: dict) -> None:
+def apply_metadata_to_video(input_path: str, output_path: str, meta: dict,
+                            *, output_profile: "str | None" = None,
+                            source_color: "str | None" = None,
+                            ffmpeg_threads: "int | None" = None) -> None:
     """
     Inyecta metadata de iPhone vía FFmpeg (-c copy, sin re-encodear).
     meta = {iphone_model, lat, lon, carrier, ios_version}
     """
+    if output_profile:
+        from forge_iphone_profile import render_iphone_video
+        render_iphone_video(input_path, output_path, meta, output_profile,
+                            source_color or "unknown", threads=ffmpeg_threads)
+        return
     cmd = [
         _ffmpeg_tool_command("ffmpeg"), "-y", "-i", input_path,
         "-c", "copy",
@@ -461,6 +469,8 @@ def apply_variant_and_metadata(
     strength: float = 1.0,
     overrides: "dict | None" = None,
     ffmpeg_threads: "int | None" = None,
+    output_profile: "str | None" = None,
+    source_color: "str | None" = None,
 ) -> dict:
     """
     Genera una copia realmente distinta a nivel de píxeles (recorte de bordes,
@@ -486,7 +496,33 @@ def apply_variant_and_metadata(
 
     # Sin ninguna edición activa → no hay motivo para reencodear.
     if not vf and not af and start == 0 and end == 0:
-        apply_metadata_to_video(input_path, output_path, meta)
+        apply_metadata_to_video(input_path, output_path, meta,
+                                output_profile=output_profile, source_color=source_color,
+                                ffmpeg_threads=ffmpeg_threads)
+        return params
+
+    if output_profile:
+        from forge_iphone_profile import render_iphone_video
+        if source_color == "hlg":
+            # eq/noise have not passed a 10-bit HLG accuracy check. The
+            # spatial/temporal edits stay active; record every skipped edit.
+            skipped = []
+            if any((abs(params["brightness"]) > 1e-6,
+                    abs(params["contrast"] - 1) > 1e-6,
+                    abs(params["saturation"] - 1) > 1e-6,
+                    abs(params["gamma"] - 1) > 1e-6)):
+                skipped.append("color")
+            if params["noise"]:
+                skipped.append("noise")
+            if skipped:
+                adjusted = dict(params, brightness=0.0, contrast=1.0,
+                                saturation=1.0, gamma=1.0, noise=0)
+                vf = _build_video_filters(adjusted, width, height)
+                params["iphone_effects_skipped"] = skipped
+        render_iphone_video(input_path, output_path, meta, output_profile,
+                            source_color or "unknown", video_filters=vf,
+                            audio_filter=af, start=start, duration=clip_duration,
+                            threads=ffmpeg_threads)
         return params
 
     # libx264/yuv420p exige dimensiones pares: garantizarlo siempre que se

@@ -4,6 +4,7 @@ import sys
 import random
 import string
 import math
+import json
 from collections import defaultdict
 from calendar_manifest import build_entry, manifest_path, replace_entries
 from database import DatabaseManager
@@ -15,6 +16,26 @@ ensure_stdout_utf8()
 base_dir = os.path.dirname(os.path.abspath(__file__))
 source_root = os.path.join(base_dir, "videos_finales")
 output_root = os.path.join(base_dir, "CALENDARIO_POSTEO")
+
+
+def _tanda_video_inventory(tanda_path):
+    """Return only published Forge copies; incomplete iPhone batches fail closed."""
+    status_path = os.path.join(tanda_path, "forge_batch_status.json")
+    videos = [name for name in os.listdir(tanda_path)
+              if name.lower().endswith((".mp4", ".mov"))]
+    if not os.path.isfile(status_path):
+        return videos, None
+    try:
+        with open(status_path, encoding="utf-8") as status_file:
+            status = json.load(status_file)
+        if status.get("state") != "complete":
+            return [], "Tanda Forge incompleta: reintenta las copias pendientes antes de Logística."
+        validated = set(status["validated"])
+        if not validated or not validated.issubset(set(videos)):
+            return [], "Inventario Forge inválido: faltan copias validadas."
+        return [name for name in videos if name in validated], None
+    except (OSError, ValueError, KeyError, TypeError):
+        return [], "Estado Forge ilegible: no se puede distribuir esta tanda."
 
 # Parámetros de distribución diaria
 DAILY_GOAL = 46
@@ -47,7 +68,10 @@ def preview_distribution_tanda(tanda_name, category_dest, daily_quota, use_fillu
         db.close()
         return f"❌ ERROR: No se encuentra la carpeta de la tanda: {tanda_name}"
 
-    videos = [f for f in os.listdir(tanda_path) if f.lower().endswith(('.mp4', '.mov'))]
+    videos, inventory_error = _tanda_video_inventory(tanda_path)
+    if inventory_error:
+        db.close()
+        return f"❌ {inventory_error}"
     total_videos = len(videos)
     
     # --- CÁLCULOS LOGÍSTICOS ---
@@ -930,13 +954,16 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
             db.close()
             return f"❌ Error: No existe la tanda: {tanda_path}"
 
-        for f in os.listdir(tanda_path):
-            if f.lower().endswith((".mp4", ".mov")):
-                video_items.append({
-                    "filename": f,
-                    "tanda": tn,
-                    "path": os.path.join(tanda_path, f)
-                })
+        videos, inventory_error = _tanda_video_inventory(tanda_path)
+        if inventory_error:
+            db.close()
+            return f"❌ {inventory_error}"
+        for f in videos:
+            video_items.append({
+                "filename": f,
+                "tanda": tn,
+                "path": os.path.join(tanda_path, f)
+            })
 
     if not video_items:
         db.close()
