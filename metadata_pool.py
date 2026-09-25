@@ -1,11 +1,6 @@
 """
 🔮 METADATA POOL - Generador de fingerprints iPhone únicos para videos IG
-Rangos iOS por modelo según compatibilidad real de hardware:
-  iPhone 12/13   → 18.7–18.7.9 (legacy) + 26.0–26.5.1 (moderno)
-  iPhone 14      → 16.0–18.7.9 (legacy) + 26.0–26.5.1 (moderno)
-  iPhone 15      → 17.0–18.7.9 (legacy) + 26.0–26.5.1 (moderno)
-  iPhone 16      → 18.0–18.7.9 (legacy) + 26.0–26.5.1 (moderno)
-Apple saltó de iOS 18 → iOS 26 (skip 19-25) para alinear con año calendario 2026.
+ Forge usa únicamente modelos iPhone 16 o superiores y versiones iOS 26 o superiores.
 """
 import hashlib
 import itertools
@@ -13,7 +8,9 @@ import json
 import math
 import os
 import random
+import re
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Windows: the GUI runs windowless (pythonw), so every ffmpeg/ffprobe child would
@@ -21,6 +18,16 @@ from pathlib import Path
 # means hundreds of flashing consoles that freeze the machine. Suppress it.
 # 0 on non-Windows platforms, where CREATE_NO_WINDOW does not exist.
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+FFMPEG_METADATA_CLEAN_ARGS = [
+    "-map_metadata", "-1",
+    "-map_chapters", "-1",
+    "-metadata", "encoder=",
+    "-metadata:s:v:0", "encoder=",
+    "-metadata:s:a:0", "encoder=",
+    "-fflags", "+bitexact",
+    "-flags:v", "+bitexact",
+    "-flags:a", "+bitexact",
+]
 
 
 def _ffmpeg_tool_command(tool_name: str) -> str:
@@ -52,6 +59,9 @@ IPHONE_MODELS = [
     "iPhone 16 Pro",
     "iPhone 16 Pro Max",
 ]
+
+MIN_IPHONE_GENERATION = 16
+MIN_IOS_VERSION = (26, 0)
 
 US_CITIES = [
     ("New York",          "+40.7128", "-074.0060"),
@@ -135,6 +145,52 @@ IOS_VERSIONS = [
 def _v(s: str) -> tuple:
     return tuple(int(x) for x in s.split("."))
 
+
+def _iphone_generation(model: str) -> int:
+    match = re.match(r"^iPhone\s+(\d+)", str(model).strip(), re.IGNORECASE)
+    if not match:
+        raise ValueError(f"Modelo iPhone inválido: {model!r}")
+    return int(match.group(1))
+
+
+def _ios_version(version: str) -> tuple:
+    try:
+        parts = tuple(int(part) for part in str(version).strip().split("."))
+    except (TypeError, ValueError):
+        parts = ()
+    if not parts:
+        raise ValueError(f"Versión iOS inválida: {version!r}")
+    if len(parts) == 1:
+        parts += (0,)
+    return parts
+
+
+def validate_iphone_metadata(meta: dict) -> None:
+    """Reject fingerprints below Forge's current device and iOS floors."""
+    model = meta.get("iphone_model")
+    if _iphone_generation(model) < MIN_IPHONE_GENERATION:
+        raise ValueError(
+            f"Forge solo permite iPhone {MIN_IPHONE_GENERATION} o superior; recibido: {model}"
+        )
+    version = meta.get("ios_version")
+    if _ios_version(version) < MIN_IOS_VERSION:
+        raise ValueError(
+            f"Forge solo permite iOS {MIN_IOS_VERSION[0]} o superior; recibido: {version}"
+        )
+
+
+def current_creation_tags(now: datetime | None = None) -> dict[str, str]:
+    """Return QuickTime creation tags for the instant Forge is processing."""
+    instant = now or datetime.now(timezone.utc)
+    if instant.tzinfo is None:
+        instant = instant.replace(tzinfo=timezone.utc)
+    utc = instant.astimezone(timezone.utc)
+    local = utc.astimezone()
+    return {
+        "creation_time": utc.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+        "com.apple.quicktime.creationdate": local.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
+
 # (min_ios, max_ios) por modelo — límites de hardware reales + reglas de configuración
 _MODEL_IOS_RANGE: dict[str, tuple[str, str]] = {
     # iPhone 12/13: mínimo 18.7 (soportan iOS 18 y iOS 26)
@@ -165,7 +221,8 @@ _MODEL_IOS_RANGE: dict[str, tuple[str, str]] = {
 
 def _ios_pool_for(model: str) -> list[str]:
     lo, hi = _MODEL_IOS_RANGE[model]
-    return [v for v in IOS_VERSIONS if _v(lo) <= _v(v) <= _v(hi)]
+    return [v for v in IOS_VERSIONS
+            if MIN_IOS_VERSION <= _v(v) and _v(lo) <= _v(v) <= _v(hi)]
 
 
 def get_video_hash(file_path: str) -> str:
@@ -186,6 +243,8 @@ def generate_unique_metadata(db_manager, n: int) -> list:
 
     all_combos = []
     for model in IPHONE_MODELS:
+        if _iphone_generation(model) < MIN_IPHONE_GENERATION:
+            continue
         ios_pool = _ios_pool_for(model)
         all_combos.extend(itertools.product([model], US_CITIES, CARRIERS, ios_pool))
     random.shuffle(all_combos)
@@ -194,14 +253,16 @@ def generate_unique_metadata(db_manager, n: int) -> list:
     for model, (city, lat, lon), carrier, ios in all_combos:
         combo_key = (model, city, carrier, ios)
         if combo_key not in used:
-            result.append({
+            metadata = {
                 "iphone_model": model,
                 "city": city,
                 "lat": lat,
                 "lon": lon,
                 "carrier": carrier,
                 "ios_version": ios,
-            })
+            }
+            validate_iphone_metadata(metadata)
+            result.append(metadata)
             used.add(combo_key)
             if len(result) == n:
                 break
@@ -215,14 +276,25 @@ def generate_unique_metadata(db_manager, n: int) -> list:
     return result
 
 
-def apply_metadata_to_video(input_path: str, output_path: str, meta: dict) -> None:
+def apply_metadata_to_video(input_path: str, output_path: str, meta: dict,
+                            *, output_profile: "str | None" = None,
+                            source_color: "str | None" = None,
+                            ffmpeg_threads: "int | None" = None) -> None:
     """
     Inyecta metadata de iPhone vía FFmpeg (-c copy, sin re-encodear).
     meta = {iphone_model, lat, lon, carrier, ios_version}
     """
+    validate_iphone_metadata(meta)
+    if output_profile:
+        from forge_iphone_profile import render_iphone_video
+        render_iphone_video(input_path, output_path, meta, output_profile,
+                            source_color or "unknown", threads=ffmpeg_threads)
+        return
+    creation_tags = current_creation_tags()
     cmd = [
         _ffmpeg_tool_command("ffmpeg"), "-y", "-i", input_path,
         "-c", "copy",
+        *FFMPEG_METADATA_CLEAN_ARGS,
         "-movflags", "use_metadata_tags",
         "-metadata", "make=Apple",
         "-metadata", f"model={meta['iphone_model']}",
@@ -230,6 +302,8 @@ def apply_metadata_to_video(input_path: str, output_path: str, meta: dict) -> No
         "-metadata", f"com.apple.quicktime.software=iOS {meta['ios_version']}",
         "-metadata", f"com.apple.quicktime.model={meta['iphone_model']}",
         "-metadata", f"com.apple.quicktime.network={meta['carrier']}",
+        "-metadata", f"creation_time={creation_tags['creation_time']}",
+        "-metadata", f"com.apple.quicktime.creationdate={creation_tags['com.apple.quicktime.creationdate']}",
         output_path,
     ]
     result = subprocess.run(cmd, capture_output=True, creationflags=_NO_WINDOW)
@@ -450,6 +524,8 @@ def apply_variant_and_metadata(
     strength: float = 1.0,
     overrides: "dict | None" = None,
     ffmpeg_threads: "int | None" = None,
+    output_profile: "str | None" = None,
+    source_color: "str | None" = None,
 ) -> dict:
     """
     Genera una copia realmente distinta a nivel de píxeles (recorte de bordes,
@@ -460,6 +536,7 @@ def apply_variant_and_metadata(
     caso cae al camino rápido -c copy (solo metadata, sin re-encode).
     Devuelve los parámetros usados (útil para logging/depuración).
     """
+    validate_iphone_metadata(meta)
     width, height, duration, has_audio = _probe_video_info(input_path)
     params = generate_variant_params(rng, enabled, strength, overrides)
 
@@ -475,7 +552,33 @@ def apply_variant_and_metadata(
 
     # Sin ninguna edición activa → no hay motivo para reencodear.
     if not vf and not af and start == 0 and end == 0:
-        apply_metadata_to_video(input_path, output_path, meta)
+        apply_metadata_to_video(input_path, output_path, meta,
+                                output_profile=output_profile, source_color=source_color,
+                                ffmpeg_threads=ffmpeg_threads)
+        return params
+
+    if output_profile:
+        from forge_iphone_profile import render_iphone_video
+        if source_color == "hlg":
+            # eq/noise have not passed a 10-bit HLG accuracy check. The
+            # spatial/temporal edits stay active; record every skipped edit.
+            skipped = []
+            if any((abs(params["brightness"]) > 1e-6,
+                    abs(params["contrast"] - 1) > 1e-6,
+                    abs(params["saturation"] - 1) > 1e-6,
+                    abs(params["gamma"] - 1) > 1e-6)):
+                skipped.append("color")
+            if params["noise"]:
+                skipped.append("noise")
+            if skipped:
+                adjusted = dict(params, brightness=0.0, contrast=1.0,
+                                saturation=1.0, gamma=1.0, noise=0)
+                vf = _build_video_filters(adjusted, width, height)
+                params["iphone_effects_skipped"] = skipped
+        render_iphone_video(input_path, output_path, meta, output_profile,
+                            source_color or "unknown", video_filters=vf,
+                            audio_filter=af, start=start, duration=clip_duration,
+                            threads=ffmpeg_threads)
         return params
 
     # libx264/yuv420p exige dimensiones pares: garantizarlo siempre que se
@@ -498,6 +601,7 @@ def apply_variant_and_metadata(
         common_args += ["-af", af]
     metadata_args = [
         "-c:a", "aac", "-b:a", "128k",
+        *FFMPEG_METADATA_CLEAN_ARGS,
         "-movflags", "use_metadata_tags",
         "-metadata", "make=Apple",
         "-metadata", f"model={meta['iphone_model']}",
@@ -508,8 +612,7 @@ def apply_variant_and_metadata(
         output_path,
     ]
     encoder_attempts = [
-        ["-c:v", "h264_nvenc", "-preset", "p4", "-cq:v", "20", "-pix_fmt", "yuv420p"],
-        ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"],
+        ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-profile:v", "high", "-pix_fmt", "yuv420p"],
     ]
     last_stderr = b""
     for encoder_args in encoder_attempts:
