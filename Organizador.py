@@ -4,6 +4,7 @@ import sys
 import random
 import string
 import math
+import json
 from collections import defaultdict
 from calendar_manifest import build_entry, manifest_path, replace_entries
 from database import DatabaseManager
@@ -15,6 +16,43 @@ ensure_stdout_utf8()
 base_dir = os.path.dirname(os.path.abspath(__file__))
 source_root = os.path.join(base_dir, "videos_finales")
 output_root = os.path.join(base_dir, "CALENDARIO_POSTEO")
+
+
+def _tanda_video_inventory(tanda_path, extensions=(".mp4", ".mov")):
+    """Return only published Forge copies; incomplete iPhone batches fail closed."""
+    status_path = os.path.join(tanda_path, "forge_batch_status.json")
+    videos = [name for name in os.listdir(tanda_path)
+              if name.lower().endswith(extensions)]
+    if not os.path.isfile(status_path):
+        return videos, None
+    try:
+        with open(status_path, encoding="utf-8") as status_file:
+            status = json.load(status_file)
+        pending_names = {
+            item["output_name"] for item in status["pending"]
+            if isinstance(item, dict) and item.get("output_name")
+        }
+        if status.get("state") == "processing":
+            published = sorted(name for name in videos if name in pending_names)
+            if published:
+                pending_count = len(pending_names - set(published))
+                return published, (
+                    f"Tanda Forge parcial: usando {len(published)} copias publicadas; "
+                    f"{pending_count} pendientes."
+                )
+        if status.get("state") != "complete":
+            return [], "Tanda Forge incompleta: reintenta las copias pendientes antes de Logística."
+        validated = set(status["validated"])
+        if not validated or not validated.issubset(set(videos)):
+            return [], "Inventario Forge inválido: faltan copias validadas."
+        return [name for name in videos if name in validated], None
+    except (OSError, ValueError, KeyError, TypeError):
+        return [], "Estado Forge ilegible: no se puede distribuir esta tanda."
+
+
+def _is_partial_inventory_notice(message):
+    return isinstance(message, str) and message.startswith("Tanda Forge parcial:")
+
 
 # Parámetros de distribución diaria
 DAILY_GOAL = 46
@@ -47,7 +85,10 @@ def preview_distribution_tanda(tanda_name, category_dest, daily_quota, use_fillu
         db.close()
         return f"❌ ERROR: No se encuentra la carpeta de la tanda: {tanda_name}"
 
-    videos = [f for f in os.listdir(tanda_path) if f.lower().endswith(('.mp4', '.mov'))]
+    videos, inventory_notice = _tanda_video_inventory(tanda_path)
+    if inventory_notice and not _is_partial_inventory_notice(inventory_notice):
+        db.close()
+        return f"❌ {inventory_notice}"
     total_videos = len(videos)
     
     # --- CÁLCULOS LOGÍSTICOS ---
@@ -105,6 +146,9 @@ def preview_distribution_tanda(tanda_name, category_dest, daily_quota, use_fillu
 
     resumen += f"\n{'='*68}\n"
     resumen += f"💡 EL CONTENIDO ALCANZA PARA QUE TODO EL EQUIPO PUBLIQUE POR {target_days} DÍAS.\n"
+
+    if inventory_notice:
+        resumen = f"⚠️ {inventory_notice}\n\n" + resumen
     
     db.close()
     return resumen
@@ -922,6 +966,7 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
         tanda_names.append(tanda_name_2)
 
     video_items = []
+    partial_notices = []
 
     for tn in tanda_names:
         tanda_path = os.path.join(source_root, tn)
@@ -930,13 +975,18 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
             db.close()
             return f"❌ Error: No existe la tanda: {tanda_path}"
 
-        for f in os.listdir(tanda_path):
-            if f.lower().endswith((".mp4", ".mov")):
-                video_items.append({
-                    "filename": f,
-                    "tanda": tn,
-                    "path": os.path.join(tanda_path, f)
-                })
+        videos, inventory_notice = _tanda_video_inventory(tanda_path)
+        if inventory_notice and not _is_partial_inventory_notice(inventory_notice):
+            db.close()
+            return f"❌ {inventory_notice}"
+        if inventory_notice:
+            partial_notices.append(f"{tn}: {inventory_notice}")
+        for f in videos:
+            video_items.append({
+                "filename": f,
+                "tanda": tn,
+                "path": os.path.join(tanda_path, f)
+            })
 
     if not video_items:
         db.close()
@@ -1090,6 +1140,10 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
     finally:
         db.close()
 
+    partial_message = (
+        "\n" + "\n".join(f"⚠️ {notice}" for notice in partial_notices)
+        if partial_notices else ""
+    )
     return (
         f"✅ Logística terminada.\n"
         f"{total_movidos} videos procesados.\n"
@@ -1097,6 +1151,7 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
         f"Categoría destino: {category_dest}\n"
         f"Regla aplicada: no repetir PT1 en la misma cuenta el mismo día.\n"
         f"Shuffle aplicado entre tandas + día + slot + cuenta."
+        f"{partial_message}"
     )
 if __name__ == "__main__":
     print("--- INICIANDO ORGANIZACION CON ANTI-CHOQUE GLOBAL ---")

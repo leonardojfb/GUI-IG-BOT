@@ -200,8 +200,7 @@ def test_editor_accepts_zero_size_as_an_invisible_overlay_and_keeps_100_percent(
     full = config(100)
 
     assert zero["size"] == 0
-    assert "colorchannelmixer=aa=0" in video_editor._overlay_filter(
-        {"width": 1080, "height": 1920, "fps": 30}, zero, 1)
+    assert video_editor._overlay_geometry({"width": 1080, "height": 1920, "fps": 30}, zero)["opacity"] == 0
     assert full["size"] == 100
 
 
@@ -378,17 +377,26 @@ def test_editor_rows_reindex_labels_and_grid_rows_after_middle_remove_then_add()
     assert [item["frame"].grid_calls[-1]["row"] for item in fake.editor_rows] == [2, 3, 4]
 
 
-def test_render_video_error_names_render_paths_and_bounded_stderr():
+def test_render_video_error_names_render_paths_and_bounded_stderr(tmp_path, monkeypatch):
     stderr = "discard-this-prefix-" + "x" * 1900 + "render-tail"
     result = SimpleNamespace(returncode=1, stderr=stderr)
+    photo = tmp_path / "photo.png"
+    photo.write_bytes(b"fake image")
+    monkeypatch.setattr(video_editor, "_OVERLAY_CACHE_DIR", tmp_path / "cache")
+
+    def run(command):
+        if "-frames:v" in command:
+            Path(command[-1]).write_bytes(b"prepared")
+            return SimpleNamespace(returncode=0, stderr="")
+        return result
 
     with patch("video_editor.probe_video", return_value={"width": 100, "height": 100, "fps": 30, "duration": 1}), patch(
-        "video_editor._run", return_value=result
+        "video_editor._run", side_effect=run
     ):
         with pytest.raises(RuntimeError) as error:
-            render_video("source.mp4", "rendered.mp4", [{"photo": "photo.png", "frame": 0, "duration_ms": 100,
-                                                             "size": 25, "ratio": "1:1", "position": "Centro",
-                                                             "x": 50, "y": 50, "opacity": 100}])
+            render_video("source.mp4", "rendered.mp4", [{"photo": str(photo), "frame": 0, "duration_ms": 100,
+                                                         "size": 25, "ratio": "1:1", "position": "Centro",
+                                                         "x": 50, "y": 50, "opacity": 100}])
 
     text = str(error.value)
     assert "render" in text.lower()
@@ -473,6 +481,51 @@ def test_pairs_are_photo_major():
         ("v1.mp4", "a.png", 1), ("v2.mp4", "a.png", 1),
         ("v1.mp4", "b.png", 2), ("v2.mp4", "b.png", 2),
     ]
+
+
+def test_render_reuses_prepared_overlay_for_same_photo_config_and_resolution(monkeypatch, tmp_path):
+    photo = tmp_path / "photo.png"
+    photo.write_bytes(b"fake image")
+    monkeypatch.setattr(video_editor, "_OVERLAY_CACHE_DIR", tmp_path / "cache", raising=False)
+    monkeypatch.setattr(
+        video_editor,
+        "probe_video",
+        lambda _path: {"duration": 1.0, "width": 1080, "height": 1920, "fps": 30},
+    )
+    commands = []
+
+    def run(command):
+        commands.append(command)
+        if "-frames:v" in command:
+            Path(command[-1]).write_bytes(b"prepared")
+        return SimpleNamespace(returncode=0, stderr="")
+
+    overlay = {
+        "photo": str(photo),
+        "frame": 0,
+        "duration_ms": 250,
+        "size": 25,
+        "x": 50,
+        "y": 50,
+        "opacity": 80,
+        "ratio": "9:16",
+        "position": "Manual X/Y",
+    }
+    monkeypatch.setattr(video_editor, "_run", run)
+
+    render_video("source-a.mp4", str(tmp_path / "a.mp4"), [overlay])
+    render_video("source-b.mp4", str(tmp_path / "b.mp4"), [overlay])
+
+    prepare_commands = [command for command in commands if "-frames:v" in command]
+    render_commands = [command for command in commands if "-filter_complex" in command]
+    prepared_inputs = [
+        command[command.index("-loop") + 3]
+        for command in render_commands
+    ]
+    assert len(prepare_commands) == 1
+    assert len(render_commands) == 2
+    assert prepared_inputs[0] == prepared_inputs[1]
+    assert prepared_inputs[0] != str(photo)
 
 
 def test_run_bounds_timeout_and_reports_external_process_timeout():

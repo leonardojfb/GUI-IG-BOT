@@ -31,6 +31,7 @@ def build_entry(
     source_path: str,
     telegram_filename: str,
     transform_log_id: int | None = None,
+    caption_mode: str | None = None,
     created_at: str | None = None,
     *,
     publication_target: str | None = None,
@@ -49,7 +50,7 @@ def build_entry(
         story_announcement_text,
         platform_payload,
     )
-    return {
+    entry = {
         "id": str(uuid.uuid4()),
         "username": str(username),
         "account_id": account_id,
@@ -68,6 +69,9 @@ def build_entry(
         "platform_payload": metadata["platform_payload"],
         "manual_status": str(manual_status or "planned"),
     }
+    if caption_mode:
+        entry["caption_mode"] = str(caption_mode)
+    return entry
 
 
 def _read_payload(path: Path) -> dict:

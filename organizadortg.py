@@ -85,6 +85,7 @@ def _compress_video_for_tg(video_path: str, target_bytes: int = TG_COMPRESS_TARG
             tmp.close()
             result = subprocess.run(
                 [_ffmpeg_tool_command("ffmpeg"), "-y", "-i", video_path,
+                 "-map_metadata", "0", "-movflags", "+use_metadata_tags",
                  "-b:v", f"{target_kbps}k", "-b:a", "128k"]
                 + codec_args
                 + ["-acodec", "aac", tmp.name],
@@ -112,12 +113,27 @@ STATE_FILE = "telegram_state_v11.json"
 HISTORY_FILE = "fingerprint_history.json"
 ADMIN_TOPIC_NAME = "Admin"
 TRIAL_TOPIC_PREFIX = "TRIALS - "
+PUBLISH_CALLBACK_DATA = "pub"
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
 input_root = os.path.join(base_dir, "CALENDARIO_POSTEO")
 trial_input_root = os.path.join(base_dir, "CALENDARIO_TRIALS")
 
 db = DatabaseManager()
+
+
+def _publish_button_markup(caption=None):
+    buttons = [{"text": "✅ Publicado", "callback_data": PUBLISH_CALLBACK_DATA}]
+    caption_text = str(caption or "")
+    if caption_text and len(caption_text) <= 256:
+        buttons.append({"text": "📋 Copiar caption", "copy_text": {"text": caption_text}})
+    return {"inline_keyboard": [buttons]}
+
+
+def normalize_telegram_chat_id(value):
+    text = str(value or "").strip()
+    match = re.search(r"-?\d+", text)
+    return match.group(0) if match else text
 
 
 def _calendar_manifest_file():
@@ -152,6 +168,7 @@ def _scan_manifest_calendar_structure(manifest_file=None):
             "publication_target": publication_target,
             "account_id": entry.get("account_id"),
             "transform_log_id": entry.get("transform_log_id"),
+            "caption_mode": entry.get("caption_mode"),
         })
     rows.sort(key=lambda row: (int(str(row["day"]).split("_")[1]), row.get("slot", 0), row["username"], row["filename"]))
     return rows
@@ -381,12 +398,36 @@ def convert_et_to_va_tz(time_str: str, va_tz_str: str) -> tuple:
 
 # --- 2. GESTIÓN DE PERSISTENCIA ---
 def load_json(path):
+    path = os.fspath(path)
     if os.path.exists(path):
-        with open(path, 'r', encoding='utf-8') as f: return json.load(f)
+        try:
+            with open(path, 'r', encoding='utf-8') as f: return json.load(f)
+        except (json.JSONDecodeError, OSError) as exc:
+            backup = f"{path}.corrupt_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            try:
+                os.replace(path, backup)
+                print(f"⚠️ Estado JSON corrupto movido a {backup}: {exc}")
+            except OSError as backup_exc:
+                print(f"⚠️ Estado JSON corrupto en {path}; no se pudo respaldar: {backup_exc}")
+            return {}
     return {}
 
 def save_json(path, data):
-    with open(path, 'w', encoding='utf-8') as f: json.dump(data, f, indent=4)
+    path = os.fspath(path)
+    directory = os.path.dirname(os.path.abspath(path)) or "."
+    os.makedirs(directory, exist_ok=True)
+    temp_path = os.path.join(directory, f".{os.path.basename(path)}.{threading.get_ident()}.tmp")
+    try:
+        with open(temp_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=4)
+            f.write("\n")
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
 
 def load_clean_captions(path=None):
     if not path or not os.path.exists(path):
@@ -490,6 +531,18 @@ def load_normal_individual_caption_maps():
         if (captions := db.get_normal_source_captions(tanda["tanda_name"]))
     }
 
+
+def caption_for_normal_calendar_video(filename, caption_mode, normal_map, caption_pools, caption_indexes):
+    """Resolve normal captions with manifest mode, falling back to legacy auto mode."""
+    mode = str(caption_mode or "").strip().lower()
+    if mode == "individual":
+        return caption_for_normal_individual_video(filename, normal_map or {})
+    if mode == "general":
+        return caption_for_calendar_video(filename, caption_pools, caption_indexes)
+    if normal_map:
+        return caption_for_normal_individual_video(filename, normal_map)
+    return caption_for_calendar_video(filename, caption_pools, caption_indexes)
+
 history_db = load_json(os.path.join(base_dir, HISTORY_FILE))
 
 # --- 3. BASE DE DATOS Y ENRUTAMIENTO ---
@@ -506,7 +559,7 @@ def get_accounts_with_va_info():
             cur.execute("SELECT tg_group_id, timezone FROM virtual_assistants WHERE name = ?", (va_name,))
             row = cur.fetchone()
             if row:
-                if row['tg_group_id']: tg_group_id = row['tg_group_id']
+                if row['tg_group_id']: tg_group_id = normalize_telegram_chat_id(row['tg_group_id'])
                 if 'timezone' in row.keys() and row['timezone']:
                     va_timezone = row['timezone']
         result.append({
@@ -610,7 +663,15 @@ def _topic_state_chat_id(state_key):
 def _topic_state_account_name(state_key):
     if not isinstance(state_key, str) or "_" not in state_key:
         return None
-    return state_key.split("_", 1)[1]
+    account_name = state_key.split("_", 1)[1]
+    if account_name.endswith("_trials"):
+        return account_name[:-len("_trials")]
+    return account_name
+
+def _topic_state_delivery_kind(state_key):
+    if isinstance(state_key, str) and state_key.endswith("_trials"):
+        return "trial"
+    return "normal"
 
 def _normalize_account_name(name):
     return str(name or "").strip().lstrip("@").lower()
@@ -648,7 +709,8 @@ def _delete_known_topics_from_state(topics_state, should_delete):
     for state_key, topic_value in list(topics_state.items()):
         chat_id = _topic_state_chat_id(state_key)
         account_name = _topic_state_account_name(state_key)
-        if not chat_id or not account_name or not should_delete(chat_id, account_name, topic_value):
+        delivery_kind = _topic_state_delivery_kind(state_key)
+        if not chat_id or not account_name or not should_delete(chat_id, account_name, topic_value, delivery_kind):
             continue
 
         topic_id = _topic_id_from_state_value(topic_value)
@@ -680,18 +742,22 @@ def delete_known_topics_for_chats(chat_ids, topics_state):
     target_chat_ids = {str(chat_id) for chat_id in chat_ids if chat_id not in (None, "")}
     return _delete_known_topics_from_state(
         topics_state,
-        lambda chat_id, _account_name, _topic_value: chat_id in target_chat_ids,
+        lambda chat_id, _account_name, _topic_value, _delivery_kind: chat_id in target_chat_ids,
     )
 
 def delete_known_topics_for_accounts(account_names, topics_state):
     target_accounts = {_normalize_account_name(name) for name in account_names if _normalize_account_name(name)}
     trial_targets = {_normalize_account_name(name) for name in account_names if _is_trials_subaccount(name)}
 
-    def should_delete(_chat_id, account_name, topic_value):
+    def should_delete(_chat_id, account_name, topic_value, delivery_kind):
         normalized_name = _normalize_account_name(account_name)
         if normalized_name not in target_accounts:
             return False
-        if _topic_has_trials_prefix(topic_value) and normalized_name not in trial_targets:
+        if (
+            _topic_has_trials_prefix(topic_value)
+            and delivery_kind != "trial"
+            and normalized_name not in trial_targets
+        ):
             return False
         return True
 
@@ -718,14 +784,22 @@ def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, usern
 
     try:
         for attempt in range(5):
-            payload = {'chat_id': chat_id, 'message_thread_id': t_id}
+            payload = {
+                'chat_id': chat_id,
+                'message_thread_id': t_id,
+                'supports_streaming': 'true',
+                'reply_markup': json.dumps(_publish_button_markup(caption), ensure_ascii=False),
+            }
             if caption:
                 payload['caption'] = caption
+            upload_name = os.path.basename(os.fspath(video_path)) or os.path.basename(os.fspath(active_path))
+            content_type = ("video/quicktime" if os.path.splitext(active_path)[1].lower() == ".mov"
+                            else "video/mp4")
             with open(active_path, 'rb') as fv:
                 r = requests.post(
                     f"https://api.telegram.org/bot{TOKEN}/sendVideo",
                     data=payload,
-                    files={'video': fv}
+                    files={'video': (upload_name, fv, content_type)}
                 )
             if r.status_code == 200:
                 return True, t_id
@@ -872,7 +946,22 @@ def _account_tag(acc_info):
         return "SUICIDE"
     return category.upper() if category else "GENERAL"
 
-def execute_telegram_plan(start_date, selected_accounts=None, controller=None, reset_topics=False, express_mode=False):
+def execute_telegram_plan(start_date, selected_accounts=None, controller=None, reset_topics=False, express_mode=False, db_manager=None):
+    if db_manager is not None:
+        global db
+        previous_db = db
+        db = db_manager
+        try:
+            return execute_telegram_plan(
+                start_date,
+                selected_accounts,
+                controller,
+                reset_topics=reset_topics,
+                express_mode=express_mode,
+            )
+        finally:
+            db = previous_db
+
     caption_pools = load_tanda_caption_pools()
     trial_caption_maps = load_trial_caption_maps()
     normal_individual_caption_maps = load_normal_individual_caption_maps()
@@ -1007,9 +1096,12 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     normal_map = normal_individual_caption_maps.get(
                         extract_tanda_tag_from_calendar_filename(vid["filename"]), {}
                     )
-                    cap = (
-                        caption_for_normal_individual_video(vid["filename"], normal_map)
-                        if normal_map else caption_for_calendar_video(vid['filename'], caption_pools, caption_indexes)
+                    cap = caption_for_normal_calendar_video(
+                        vid["filename"],
+                        vid.get("caption_mode"),
+                        normal_map,
+                        caption_pools,
+                        caption_indexes,
                     )
 
                 jobs_by_chat[chat_id].append({
@@ -1104,11 +1196,12 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
 
 # --- 4. CONTROLADOR DE HILOS Y MOTOR DE EJECUCIÓN ---
 class TelegramBotController:
-    def __init__(self, start_date_str, selected_accounts=None, reset_topics=False, express_mode=False):
+    def __init__(self, start_date_str, selected_accounts=None, reset_topics=False, express_mode=False, db_manager=None):
         self.start_date_str = start_date_str
         self.selected_accounts = selected_accounts
         self.reset_topics = reset_topics
         self.express_mode = express_mode
+        self.db_manager = db_manager
         self._paused = threading.Event()
         self._paused.set()
         self._stopped = False
@@ -1128,12 +1221,17 @@ class TelegramBotController:
         self._stopped = False
         try:
             start_date = datetime.strptime(self.start_date_str, "%Y-%m-%d")
+            execute_kwargs = {
+                "reset_topics": self.reset_topics,
+                "express_mode": self.express_mode,
+            }
+            if self.db_manager is not None:
+                execute_kwargs["db_manager"] = self.db_manager
             result = execute_telegram_plan(
                 start_date,
                 self.selected_accounts,
                 self,
-                reset_topics=self.reset_topics,
-                express_mode=self.express_mode,
+                **execute_kwargs,
             )
             print(result)
         finally:

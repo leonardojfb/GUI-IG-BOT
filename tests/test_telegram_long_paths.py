@@ -5,6 +5,13 @@ import tempfile
 import organizadortg
 
 
+def test_publish_button_markup_omits_copy_button_for_long_caption():
+    markup = organizadortg._publish_button_markup("x" * 257)
+    buttons = markup["inline_keyboard"][0]
+
+    assert buttons == [{"text": "✅ Publicado", "callback_data": organizadortg.PUBLISH_CALLBACK_DATA}]
+
+
 def test_send_video_to_topic_handles_calendar_paths_over_260_chars(tmp_path, monkeypatch):
     long_name = "nested_" + ("x" * 120)
     calendar_dir = tmp_path / long_name / long_name
@@ -24,7 +31,14 @@ def test_send_video_to_topic_handles_calendar_paths_over_260_chars(tmp_path, mon
     posted = []
 
     def fake_post(url, data, files):
-        assert files["video"].read() == b"fake-video"
+        video_upload = files["video"]
+        if isinstance(video_upload, tuple):
+            assert video_upload[0] == os.path.basename(normal_path)
+            assert video_upload[2] == "video/mp4"
+            video_file = video_upload[1]
+        else:
+            video_file = video_upload
+        assert video_file.read() == b"fake-video"
         posted.append((url, dict(data)))
         return SimpleNamespace(status_code=200, text="ok")
 

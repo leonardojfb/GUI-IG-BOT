@@ -84,6 +84,10 @@ def build_trial_account_plan(assignments, files_by_tanda, videos_per_day, days):
         tanda: _interleave_trial_files(list(files_by_tanda.get(tanda, ())))
         for tanda in set(assignments.values()) if tanda
     }
+    requested_by_tanda = {
+        tanda: len(pool) if max_mode else per_account
+        for tanda, pool in remaining.items()
+    }
     assigned, shortfalls = {}, {}
     stats = {
         tanda: {"accounts": [], "available": len(pool), "requested": 0, "assigned": 0, "shortfall": 0}
@@ -95,19 +99,18 @@ def build_trial_account_plan(assignments, files_by_tanda, videos_per_day, days):
         pool = remaining.setdefault(tanda, [])
         detail = stats.setdefault(tanda, {"accounts": [], "available": len(pool), "requested": 0, "assigned": 0, "shortfall": 0})
         detail["accounts"].append(username)
+        requested = requested_by_tanda.get(tanda, 0)
+        detail["requested"] += requested
         if max_mode:
-            detail["requested"] += len(pool)
-            chosen, remaining[tanda] = pool, []
+            chosen, remaining[tanda] = pool[:requested], pool[requested:]
         else:
-            detail["requested"] += per_account
             chosen, remaining[tanda] = pool[:per_account], pool[per_account:]
         assigned[username] = chosen
         detail["assigned"] += len(chosen)
-        if not max_mode:
-            missing = per_account - len(chosen)
-            if missing:
-                shortfalls[username] = missing
-                detail["shortfall"] += missing
+        missing = requested - len(chosen)
+        if missing:
+            shortfalls[username] = missing
+            detail["shortfall"] += missing
     return TrialPlan(assigned=assigned, shortfalls=shortfalls, tanda_stats=stats)
 
 
