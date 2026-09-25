@@ -119,27 +119,40 @@ def classify_color(data: dict) -> str:
     return "unknown"
 
 
-def preflight_batch(
-    probes: dict[str, dict], profile: str, *,
-    known_untagged_sdr: set[str] | None = None,
-) -> dict:
+def _recognized_wavespeed_sdr(name: str, data: dict) -> bool:
+    if not re.fullmatch(r"wavespeed_[0-9a-f]{32}\.mp4", Path(name).name, re.I):
+        return False
+    format_info = data.get("format") or {}
+    tags = format_info.get("tags") or {}
+    if tags.get("major_brand") != "isom":
+        return False
+    video = next((stream for stream in data.get("streams", [])
+                  if stream.get("codec_type") == "video"), {})
+    if video.get("codec_name") != "h264" or video.get("pix_fmt") != "yuv420p":
+        return False
+    if any(video.get(field) for field in
+           ("color_primaries", "color_transfer", "color_space")):
+        return False
+    aigc = tags.get("AIGC")
+    try:
+        return isinstance(json.loads(aigc), dict)
+    except (TypeError, ValueError):
+        return False
+
+
+def preflight_batch(probes: dict[str, dict], profile: str) -> dict:
     """Classify every source; never silently infer color from an unknown file."""
     if profile not in PROFILES:
         raise ValueError(f"Perfil de Forge desconocido: {profile}")
-    known_untagged_sdr = known_untagged_sdr or set()
     counts = {"sdr": 0, "hlg": 0, "unknown": 0}
     blocked: dict[str, str] = {}
     assumptions: dict[str, str] = {}
     sources: dict[str, str] = {}
     for name, data in probes.items():
         color = classify_color(data)
-        if color == "unknown" and name in known_untagged_sdr:
-            video = next((stream for stream in data.get("streams", [])
-                          if stream.get("codec_type") == "video"), {})
-            if not any(video.get(field) for field in
-                       ("color_primaries", "color_transfer", "color_space")):
-                color = "sdr"
-                assumptions[name] = "SDR BT.709 sin tags (calibrado)"
+        if color == "unknown" and _recognized_wavespeed_sdr(name, data):
+            color = "sdr"
+            assumptions[name] = "SDR BT.709 asumido por perfil WaveSpeed conocido"
         counts[color] += 1
         sources[name] = color
         if color == "unknown":

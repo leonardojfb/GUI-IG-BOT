@@ -8,7 +8,7 @@ Retirar de Forge la casilla «Sin tags: SDR BT.709 ya verificado». El usuario e
 
 Una fuente sin ninguno de los tres campos `color_primaries`, `color_transfer` y `color_space` se puede tratar como SDR BT.709 sólo si **todas** estas señales coinciden:
 
-- archivo MP4 cuyo nombre sigue el patrón de salida conocido `wavespeed_<identificador>.mp4`;
+- archivo MP4 con marca `isom` cuyo nombre sigue el patrón de salida conocido `wavespeed_<identificador>.mp4`;
 - stream de vídeo H.264, `yuv420p` de 8 bits;
 - tag de formato `AIGC` presente y estructuralmente legible como JSON (sin registrar ni mostrar su contenido privado).
 

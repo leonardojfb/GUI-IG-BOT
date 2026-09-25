@@ -370,6 +370,28 @@ def test_iphone_forge_refuses_reusing_tanda_with_different_profile(monkeypatch, 
     assert "otro perfil" in errors[0][1]
 
 
+def test_iphone_preview_and_process_both_block_ambiguous_color(monkeypatch, tmp_path):
+    import gui_premium_v7
+    import forge_iphone_profile
+
+    app = _forge_app(tmp_path, [])
+    app.forge_profile_var = _Value("iPhone SDR")
+    ambiguous = {
+        "format": {"tags": {"major_brand": "isom"}},
+        "streams": [{"codec_type": "video", "codec_name": "h264",
+                     "pix_fmt": "yuv420p", "color_primaries": "bt709"}],
+    }
+    errors = []
+    monkeypatch.setattr(forge_iphone_profile, "probe_file", lambda _path: ambiguous)
+    monkeypatch.setattr(gui_premium_v7.messagebox, "showerror",
+                        lambda title, message: errors.append((title, message)))
+    monkeypatch.setattr(gui_premium_v7, "__file__", str(tmp_path / "gui_premium_v7.py"))
+    InstagramAutoPro.forge_preview_metadata(app)
+    InstagramAutoPro.forge_process(app)
+    assert len(errors) == 2
+    assert all("fuentes bloqueadas" in title.lower() for title, _message in errors)
+
+
 def test_forge_preserves_edited_video_identity_in_output_names(monkeypatch, tmp_path):
     import gui_premium_v7
 

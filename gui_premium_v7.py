@@ -5344,11 +5344,6 @@ class InstagramAutoPro(ctk.CTk):
         profile_frame.grid(row=5, column=1, padx=(0, 18), pady=7, sticky="ew")
         SegmentedControl(profile_frame, values=["Legacy MP4", "iPhone SDR", "iPhone HLG"],
                          default="Legacy MP4", command=self.forge_profile_var.set).pack(fill="x")
-        self.forge_untagged_sdr_var = tk.BooleanVar(value=False)
-        ctk.CTkCheckBox(profile_frame, text="Sin tags: SDR BT.709 ya verificado",
-                        variable=self.forge_untagged_sdr_var,
-                        font=ctk.CTkFont(size=11), text_color=TEXT_MUTED).pack(
-                            anchor="w", pady=(6, 0))
 
         # ── Eje Efectos (qué efectos) ────────────────────────────────────
         ctk.CTkLabel(card_cfg, text="Efectos", text_color=TEXT_MUTED,
@@ -5561,18 +5556,17 @@ class InstagramAutoPro(ctk.CTk):
         if selected_profile != "Legacy MP4":
             from forge_iphone_profile import preflight_batch, probe_file
             profile_key = "iphone_hlg" if selected_profile == "iPhone HLG" else "iphone_sdr"
-            assume_untagged = bool(getattr(getattr(self, "forge_untagged_sdr_var", None),
-                                           "get", lambda: False)())
             try:
                 preflight = preflight_batch(
-                    {path: probe_file(path) for path in self.forge_video_paths}, profile_key,
-                    known_untagged_sdr=set(self.forge_video_paths) if assume_untagged else set())
+                    {path: probe_file(path) for path in self.forge_video_paths}, profile_key)
             except Exception as error:
                 return messagebox.showerror("Preflight iPhone", str(error))
             self.forge_iphone_preflight = preflight
             counts = preflight["counts"]
             color_summary = (f" · {selected_profile} MOV · SDR {counts['sdr']} / "
                              f"HLG {counts['hlg']} / desconocidos {counts['unknown']}")
+            if preflight["assumptions"]:
+                color_summary += f" · WaveSpeed sin tags asumidos SDR {len(preflight['assumptions'])}"
             if preflight["blocked"]:
                 details = "\n".join(f"{os.path.basename(path)}: {reason}"
                                     for path, reason in preflight["blocked"].items())
@@ -5682,15 +5676,12 @@ class InstagramAutoPro(ctk.CTk):
         preflight = None
         if output_profile:
             from forge_iphone_profile import preflight_batch, probe_file, runtime_capabilities
-            assume_untagged = bool(getattr(getattr(self, "forge_untagged_sdr_var", None),
-                                           "get", lambda: False)())
             try:
                 missing = {"libx265", "aac", "zscale"} - runtime_capabilities()
                 if missing:
                     raise RuntimeError(f"FFmpeg no soporta: {', '.join(sorted(missing))}")
                 preflight = preflight_batch(
-                    {path: probe_file(path) for path in self.forge_video_paths}, output_profile,
-                    known_untagged_sdr=set(self.forge_video_paths) if assume_untagged else set())
+                    {path: probe_file(path) for path in self.forge_video_paths}, output_profile)
             except Exception as error:
                 return messagebox.showerror("Preflight iPhone", str(error))
             if preflight["blocked"]:
@@ -5718,6 +5709,9 @@ class InstagramAutoPro(ctk.CTk):
             counts = preflight["counts"]
             profile_desc += (f"\nFuentes: SDR {counts['sdr']} / HLG {counts['hlg']} / "
                              f"desconocidas {counts['unknown']}")
+            if preflight["assumptions"]:
+                profile_desc += (f"\nWaveSpeed sin tags asumidos SDR: "
+                                 f"{len(preflight['assumptions'])}")
 
         if not messagebox.askyesno("Confirmar Forge", (
             f"¿Generar {len(self.forge_video_paths)} vídeos × {copies} copias = {n_total} archivos con metadata iPhone única?\n\n"

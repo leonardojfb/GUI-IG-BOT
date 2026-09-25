@@ -6,6 +6,14 @@ def test_forge_exposes_an_explicit_trials_mode_without_distribution():
     assert "set_tanda_trial" in forge
 
 
+def test_forge_does_not_expose_untagged_color_checkbox():
+    forge = _forge_source()
+    assert "Sin tags: SDR BT.709 ya verificado" not in forge
+    assert "forge_untagged_sdr_var" not in forge
+    assert "known_untagged_sdr" not in forge
+    assert forge.count("preflight_batch(") == 2
+
+
 from pathlib import Path
 
 

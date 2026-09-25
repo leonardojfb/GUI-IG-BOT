@@ -177,10 +177,55 @@ def test_preflight_classifies_and_blocks_unknown_color():
                                         "unknown.mp4": untagged}, "iphone_hlg")
     assert findings["counts"] == {"sdr": 1, "hlg": 1, "unknown": 1}
     assert "unknown.mp4" in findings["blocked"]
-    findings = profile.preflight_batch({"known-generator.mp4": untagged},
-                                        "iphone_sdr", known_untagged_sdr={"known-generator.mp4"})
-    assert findings["counts"] == {"sdr": 1, "hlg": 0, "unknown": 0}
-    assert findings["assumptions"] == {"known-generator.mp4": "SDR BT.709 sin tags (calibrado)"}
+    findings = profile.preflight_batch({"known-generator.mp4": untagged}, "iphone_sdr")
+    assert "known-generator.mp4" in findings["blocked"]
+
+
+@pytest.mark.parametrize("output_profile", ["iphone_sdr", "iphone_hlg"])
+def test_wavespeed_without_color_tags_is_classified_automatically(output_profile):
+    profile = importlib.import_module("forge_iphone_profile")
+    probe = _probe(hdr=False)
+    video = probe["streams"][0]
+    video["codec_name"] = "h264"
+    for field in ("color_primaries", "color_transfer", "color_space"):
+        del video[field]
+    probe["format"]["tags"]["AIGC"] = '{"Label":"1"}'
+    probe["format"]["tags"]["major_brand"] = "isom"
+    name = "wavespeed_223c4e71308a474a8834c39de5acccc5.mp4"
+    findings = profile.preflight_batch({name: probe}, output_profile)
+    assert findings["sources"][name] == "sdr"
+    assert findings["blocked"] == {}
+    assert name in findings["assumptions"]
+
+
+@pytest.mark.parametrize("change", ["name", "container", "aigc", "malformed_aigc", "codec",
+                                    "pixel_format", "partial_color"])
+def test_wavespeed_auto_color_rejects_missing_evidence(change):
+    profile = importlib.import_module("forge_iphone_profile")
+    probe = _probe(hdr=False)
+    video = probe["streams"][0]
+    video["codec_name"] = "h264"
+    for field in ("color_primaries", "color_transfer", "color_space"):
+        del video[field]
+    probe["format"]["tags"]["AIGC"] = '{"Label":"1"}'
+    probe["format"]["tags"]["major_brand"] = "isom"
+    name = "wavespeed_223c4e71308a474a8834c39de5acccc5.mp4"
+    if change == "name":
+        name = "unknown.mp4"
+    elif change == "container":
+        probe["format"]["tags"]["major_brand"] = "qt  "
+    elif change == "aigc":
+        del probe["format"]["tags"]["AIGC"]
+    elif change == "malformed_aigc":
+        probe["format"]["tags"]["AIGC"] = "not-json"
+    elif change == "codec":
+        video["codec_name"] = "hevc"
+    elif change == "pixel_format":
+        video["pix_fmt"] = "yuv420p10le"
+    elif change == "partial_color":
+        video["color_primaries"] = "bt709"
+    findings = profile.preflight_batch({name: probe}, "iphone_sdr")
+    assert name in findings["blocked"]
 
 
 def test_variant_engine_transcodes_iphone_even_without_effects(tmp_path):
