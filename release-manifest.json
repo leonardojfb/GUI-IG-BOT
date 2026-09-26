@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.44",
+    "version":  "1.0.48",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.44",
-    "asset_name":  "MetodoIG-v1.0.44.zip",
-    "sha256":  "935aa0aa7d571da1291b6efd606d6af939404d3fb6ea47bfc011c5e0b71ecbd6",
-    "notes":  "Forge iPhone: color WaveSpeed sin tags se clasifica automáticamente; se elimina el check manual. Se añade Forge MOV HEVC iPhone SDR/HLG con preflight, validación y manejo de tandas.",
+    "github_release_tag":  "v1.0.48",
+    "asset_name":  "MetodoIG-v1.0.48.zip",
+    "sha256":  "2ec408057eb543d6bbbb4838edf4fbbf488bb289bc2d89369eabba99e847a38e",
+    "notes":  "Logistica permite distribuir copias Forge validadas aunque haya pendientes y muestra el aviso de conteos.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",
