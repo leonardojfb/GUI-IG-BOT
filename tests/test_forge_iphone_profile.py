@@ -496,6 +496,22 @@ def test_por_cuentas_inventory_blocks_incomplete_forge_and_preserves_legacy_avi(
         {"tanda": "LEGACY", "name": "old.avi"}]
 
 
+def test_forge_retry_resolves_relocated_source_by_persisted_hash(tmp_path):
+    from gui_premium_v7 import _resolve_forge_retry_sources
+    import metadata_pool
+
+    original = tmp_path / "original" / "clip.mp4"
+    relocated = tmp_path / "relocated" / "clip.mp4"
+    original.parent.mkdir()
+    relocated.parent.mkdir()
+    original.write_bytes(b"same video content")
+    relocated.write_bytes(b"same video content")
+    pending = [{"source_path": str(original),
+                "video_hash": metadata_pool.get_video_hash(str(original))}]
+
+    assert _resolve_forge_retry_sources(pending, [str(relocated)]) == [str(relocated)]
+
+
 def test_copy_number_reservation_counts_mp4_and_mov(tmp_path):
     profile = importlib.import_module("forge_iphone_profile")
     (tmp_path / "clip__c01.mp4").touch()

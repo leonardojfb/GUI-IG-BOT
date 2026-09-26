@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.46",
+    "version":  "1.0.47",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.46",
-    "asset_name":  "MetodoIG-v1.0.46.zip",
-    "sha256":  "ccb9d7221b6b2833b1e78e4fef2812b95abdacf354614eecdabac53ba345a995",
-    "notes":  "Forge: metadata limitada exclusivamente a iPhone 17 o superior.",
+    "github_release_tag":  "v1.0.47",
+    "asset_name":  "MetodoIG-v1.0.47.zip",
+    "sha256":  "f4fe5587e4b362c7676bfc1d075e856b00e630b892803f69b24b8155ef9d88a3",
+    "notes":  "Forge: un reintento acepta fuentes reubicadas cuando su contenido coincide con el hash persistido.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",

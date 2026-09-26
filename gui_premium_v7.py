@@ -93,6 +93,24 @@ def _acct_inventory_items(folders):
     return items
 
 
+def _resolve_forge_retry_sources(pending_items, selected_paths):
+    """Map persisted retry items to the currently selected byte-identical sources."""
+    import metadata_pool
+
+    selected_by_hash = {}
+    for path in selected_paths:
+        try:
+            selected_by_hash.setdefault(metadata_pool.get_video_hash(path), path)
+        except OSError as error:
+            raise ValueError(f"No se pudo leer la fuente seleccionada: {os.path.basename(path)}") from error
+
+    resolved = [selected_by_hash.get(item["video_hash"]) for item in pending_items]
+    missing = sum(path is None for path in resolved)
+    if missing:
+        raise ValueError(f"Incluye todas las fuentes pendientes ({missing} no coinciden por contenido)")
+    return resolved
+
+
 def _telegram_runtime_diagnostics(db_manager, app_dir=None, version_reader=read_local_version):
     app_path = os.path.abspath(os.fspath(app_dir or _BASE_DIR))
     try:
@@ -5613,9 +5631,8 @@ class InstagramAutoPro(ctk.CTk):
                         raise ValueError("Estado Forge desconocido")
                     if status.get("state") in ("incomplete", "processing"):
                         retry_items = status["pending"]
-                        if any(item["source_path"] not in self.forge_video_paths
-                               for item in retry_items):
-                            raise ValueError("Incluye todas las fuentes pendientes")
+                        _resolve_forge_retry_sources(
+                            retry_items, self.forge_video_paths)
                         n_total = len(retry_items)
                         color_summary += f" · reintento de {n_total} copia(s) pendiente(s)"
                 except (OSError, ValueError, KeyError, TypeError) as error:
@@ -5683,6 +5700,7 @@ class InstagramAutoPro(ctk.CTk):
         selected_profile = getattr(getattr(self, "forge_profile_var", None), "get", lambda: "Legacy MP4")()
         output_profile = {"iPhone SDR": "iphone_sdr", "iPhone HLG": "iphone_hlg"}.get(selected_profile)
         pending_retry = None
+        retry_source_paths = None
         prior_status = None
         status_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                    "videos_finales", tanda_name, "forge_batch_status.json")
@@ -5697,9 +5715,8 @@ class InstagramAutoPro(ctk.CTk):
                     raise ValueError("Estado Forge desconocido")
                 if old_status.get("state") in ("incomplete", "processing"):
                     pending_retry = old_status
-                    selected = set(self.forge_video_paths)
-                    if any(item["source_path"] not in selected for item in old_status["pending"]):
-                        raise ValueError("Incluye todas las fuentes pendientes para reintentar la tanda")
+                    retry_source_paths = _resolve_forge_retry_sources(
+                        old_status["pending"], self.forge_video_paths)
             except (OSError, ValueError, KeyError, TypeError) as error:
                 return messagebox.showerror("Reintento Forge", str(error))
         preflight = None
@@ -5781,8 +5798,7 @@ class InstagramAutoPro(ctk.CTk):
             meta_idx = 0
             reserved_max = {}
             if pending_retry:
-                for item in pending_retry["pending"]:
-                    vid_path = item["source_path"]
+                for item, vid_path in zip(pending_retry["pending"], retry_source_paths):
                     if metadata_pool.get_video_hash(vid_path) != item["video_hash"]:
                         raise ValueError(
                             f"La fuente pendiente cambió desde el intento anterior: {os.path.basename(vid_path)}")
