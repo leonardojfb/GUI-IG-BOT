@@ -1,4 +1,6 @@
 import os
+import base64
+import hashlib
 import threading
 import requests
 import time
@@ -22,6 +24,11 @@ from calendar_manifest import (
 from database import DatabaseManager
 from social_publishing import is_telegram_publication_target
 from trial_content import source_key_from_filename
+from airtable_sync import (
+    AirtableSyncError,
+    fetch_published_video_hashes,
+    load_airtable_config,
+)
 from console_encoding import ensure_stdout_utf8
 
 ensure_stdout_utf8()
@@ -122,8 +129,26 @@ trial_input_root = os.path.join(base_dir, "CALENDARIO_TRIALS")
 db = DatabaseManager()
 
 
-def _publish_button_markup(caption=None):
-    buttons = [{"text": "✅ Publicado", "callback_data": PUBLISH_CALLBACK_DATA}]
+def _source_sha256(path):
+    digest = hashlib.sha256()
+    with open(_windows_long_path(path), "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _published_callback_data(source_hash):
+    return "pub:" + base64.urlsafe_b64encode(
+        bytes.fromhex(source_hash)
+    ).decode("ascii").rstrip("=")
+
+
+def _publish_button_markup(caption=None, source_hash=None):
+    callback_data = (
+        _published_callback_data(source_hash)
+        if source_hash else PUBLISH_CALLBACK_DATA
+    )
+    buttons = [{"text": "✅ Publicado", "callback_data": callback_data}]
     caption_text = str(caption or "")
     if caption_text and len(caption_text) <= 256:
         buttons.append({"text": "📋 Copiar caption", "copy_text": {"text": caption_text}})
@@ -766,7 +791,7 @@ def delete_known_topics_for_accounts(account_names, topics_state):
         should_delete,
     )
 
-def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, username, tag):
+def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, username, tag, source_hash=None):
     readable_video_path = _windows_long_path(video_path)
     active_path = readable_video_path
     compressed_tmp = None
@@ -788,7 +813,9 @@ def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, usern
                 'chat_id': chat_id,
                 'message_thread_id': t_id,
                 'supports_streaming': 'true',
-                'reply_markup': json.dumps(_publish_button_markup(caption), ensure_ascii=False),
+                'reply_markup': json.dumps(
+                    _publish_button_markup(caption, source_hash), ensure_ascii=False
+                ),
             }
             if caption:
                 payload['caption'] = caption
@@ -971,6 +998,26 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
 
     if not all_videos: return "❌ No se encontraron videos en CALENDARIO_POSTEO. Revisa que las carpetas se llamen 'Dia_X'."
 
+    try:
+        published_hashes = fetch_published_video_hashes(load_airtable_config())
+        eligible_videos = []
+        omitted_published = 0
+        for video in all_videos:
+            source_hash = _source_sha256(video["path"])
+            if source_hash in published_hashes:
+                if not selected_accounts or video["username"] in selected_accounts:
+                    omitted_published += 1
+                continue
+            video["source_hash"] = source_hash
+            eligible_videos.append(video)
+    except (AirtableSyncError, OSError, ValueError) as exc:
+        print(f"⚠️ No se pudo verificar Airtable: {exc}")
+        return "❌ No se pudo verificar Airtable; no se enviaron videos."
+
+    all_videos = eligible_videos
+    if not all_videos:
+        return f"✨ PROCESO TERMINADO. Se enviaron 0 videos. Omitidos publicados: {omitted_published}."
+
     topics_state = load_json(os.path.join(base_dir, STATE_FILE))
     from collections import defaultdict
     day_account_videos = defaultdict(lambda: defaultdict(list))
@@ -1115,6 +1162,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     "meta": meta,
                     "hora_et": hora_et,
                     "dia_str": dia_str,
+                    "source_hash": vid["source_hash"],
                 })
 
         fecha_envio += timedelta(days=1)
@@ -1169,7 +1217,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     continue
                 ok, _topic_id = _send_video_to_topic(
                     job["chat_id"], topic_id, job["caption"], job["path"],
-                    topics_state, job["username"], job["tag"],
+                    topics_state, job["username"], job["tag"], job["source_hash"],
                 )
                 if ok:
                     sent += 1
@@ -1192,7 +1240,10 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     return f"🛑 Abortado. Enviados: {global_sent}"
 
     save_json(os.path.join(base_dir, STATE_FILE), topics_state)
-    return f"✨ PROCESO TERMINADO. Se enviaron {global_sent} videos."
+    return (
+        f"✨ PROCESO TERMINADO. Se enviaron {global_sent} videos. "
+        f"Omitidos publicados: {omitted_published}."
+    )
 
 # --- 4. CONTROLADOR DE HILOS Y MOTOR DE EJECUCIÓN ---
 class TelegramBotController:

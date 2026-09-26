@@ -400,11 +400,15 @@ def _run_telegram(organizadortg, selected_accounts):
         "call_tg": organizadortg.call_tg,
         "get_or_create_topic": organizadortg.get_or_create_topic,
         "_send_video_to_topic": organizadortg._send_video_to_topic,
+        "load_airtable_config": organizadortg.load_airtable_config,
+        "fetch_published_video_hashes": organizadortg.fetch_published_video_hashes,
         "sleep": organizadortg.time.sleep,
     }
     organizadortg.call_tg = fake.fake_call
     organizadortg.get_or_create_topic = fake.fake_get_or_create_topic
     organizadortg._send_video_to_topic = fake.fake_send_video
+    organizadortg.load_airtable_config = lambda: object()
+    organizadortg.fetch_published_video_hashes = lambda _config: set()
     organizadortg.time.sleep = lambda seconds: None
     try:
         result = organizadortg.execute_telegram_plan(datetime(2026, 7, 26), selected_accounts=selected_accounts)
@@ -412,6 +416,8 @@ def _run_telegram(organizadortg, selected_accounts):
         organizadortg.call_tg = saved["call_tg"]
         organizadortg.get_or_create_topic = saved["get_or_create_topic"]
         organizadortg._send_video_to_topic = saved["_send_video_to_topic"]
+        organizadortg.load_airtable_config = saved["load_airtable_config"]
+        organizadortg.fetch_published_video_hashes = saved["fetch_published_video_hashes"]
         organizadortg.time.sleep = saved["sleep"]
     return result, fake.events
 
