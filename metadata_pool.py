@@ -1,6 +1,6 @@
 """
 🔮 METADATA POOL - Generador de fingerprints iPhone únicos para videos IG
- Forge usa únicamente modelos iPhone 16 o superiores y versiones iOS 26 o superiores.
+ Forge usa únicamente modelos iPhone 17 o superiores y versiones iOS 26 o superiores.
 """
 import hashlib
 import itertools
@@ -38,29 +38,12 @@ def _ffmpeg_tool_command(tool_name: str) -> str:
     return tool_name
 
 IPHONE_MODELS = [
-    "iPhone 12",
-    "iPhone 12 Mini",
-    "iPhone 12 Pro",
-    "iPhone 12 Pro Max",
-    "iPhone 13",
-    "iPhone 13 Mini",
-    "iPhone 13 Pro",
-    "iPhone 13 Pro Max",
-    "iPhone 14",
-    "iPhone 14 Plus",
-    "iPhone 14 Pro",
-    "iPhone 14 Pro Max",
-    "iPhone 15",
-    "iPhone 15 Plus",
-    "iPhone 15 Pro",
-    "iPhone 15 Pro Max",
-    "iPhone 16",
-    "iPhone 16 Plus",
-    "iPhone 16 Pro",
-    "iPhone 16 Pro Max",
+    "iPhone 17",
+    "iPhone 17 Pro",
+    "iPhone 17 Pro Max",
 ]
 
-MIN_IPHONE_GENERATION = 16
+MIN_IPHONE_GENERATION = 17
 MIN_IOS_VERSION = (26, 0)
 
 US_CITIES = [
@@ -193,30 +176,9 @@ def current_creation_tags(now: datetime | None = None) -> dict[str, str]:
 
 # (min_ios, max_ios) por modelo — límites de hardware reales + reglas de configuración
 _MODEL_IOS_RANGE: dict[str, tuple[str, str]] = {
-    # iPhone 12/13: mínimo 18.7 (soportan iOS 18 y iOS 26)
-    "iPhone 12":         ("18.7", "26.5.1"),
-    "iPhone 12 Mini":    ("18.7", "26.5.1"),
-    "iPhone 12 Pro":     ("18.7", "26.5.1"),
-    "iPhone 12 Pro Max": ("18.7", "26.5.1"),
-    "iPhone 13":         ("18.7", "26.5.1"),
-    "iPhone 13 Mini":    ("18.7", "26.5.1"),
-    "iPhone 13 Pro":     ("18.7", "26.5.1"),
-    "iPhone 13 Pro Max": ("18.7", "26.5.1"),
-    # iPhone 14: lanzado con iOS 16
-    "iPhone 14":         ("16.0", "26.5.1"),
-    "iPhone 14 Plus":    ("16.0", "26.5.1"),
-    "iPhone 14 Pro":     ("16.0", "26.5.1"),
-    "iPhone 14 Pro Max": ("16.0", "26.5.1"),
-    # iPhone 15: lanzado con iOS 17
-    "iPhone 15":         ("17.0", "26.5.1"),
-    "iPhone 15 Plus":    ("17.0", "26.5.1"),
-    "iPhone 15 Pro":     ("17.0", "26.5.1"),
-    "iPhone 15 Pro Max": ("17.0", "26.5.1"),
-    # iPhone 16: lanzado con iOS 18
-    "iPhone 16":         ("18.0", "26.5.1"),
-    "iPhone 16 Plus":    ("18.0", "26.5.1"),
-    "iPhone 16 Pro":     ("18.0", "26.5.1"),
-    "iPhone 16 Pro Max": ("18.0", "26.5.1"),
+    "iPhone 17":         ("26.0", "26.5.1"),
+    "iPhone 17 Pro":     ("26.0", "26.5.1"),
+    "iPhone 17 Pro Max": ("26.0", "26.5.1"),
 }
 
 def _ios_pool_for(model: str) -> list[str]:

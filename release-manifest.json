@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.45",
+    "version":  "1.0.46",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.45",
-    "asset_name":  "MetodoIG-v1.0.45.zip",
-    "sha256":  "a4d769be55a64034e278f46a7467bfd201c7a8c148aaf359aa1106a2b7570579",
-    "notes":  "Forge iPhone SDR/HLG y preflight; Forge parcial y Logistica Por Cuentas; mezcla de tandas con captions por origen; Telegram y render; GUI adaptable.",
+    "github_release_tag":  "v1.0.46",
+    "asset_name":  "MetodoIG-v1.0.46.zip",
+    "sha256":  "ccb9d7221b6b2833b1e78e4fef2812b95abdacf354614eecdabac53ba345a995",
+    "notes":  "Forge: metadata limitada exclusivamente a iPhone 17 o superior.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",

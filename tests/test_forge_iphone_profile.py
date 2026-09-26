@@ -104,28 +104,28 @@ def test_contract_checks_quicktime_identity_when_expected():
     assert any("quicktime.network" in problem for problem in problems)
 
 
-def test_metadata_floor_accepts_iphone_16_and_ios_26():
+def test_metadata_floor_accepts_iphone_17_and_ios_26():
     pool = importlib.import_module("metadata_pool")
     assert pool.validate_iphone_metadata({
-        "iphone_model": "iPhone 16 Pro Max", "ios_version": "26.0.1",
+        "iphone_model": "iPhone 17 Pro Max", "ios_version": "26.0.1",
     }) is None
 
 
-def test_metadata_floor_rejects_older_model_or_ios():
+def test_metadata_floor_rejects_iphone_16_and_older_or_old_ios():
     pool = importlib.import_module("metadata_pool")
-    with pytest.raises(ValueError, match="iPhone 16"):
+    with pytest.raises(ValueError, match="iPhone 17"):
         pool.validate_iphone_metadata({
-            "iphone_model": "iPhone 15 Pro Max", "ios_version": "26.0",
+            "iphone_model": "iPhone 16 Pro Max", "ios_version": "26.0",
         })
     with pytest.raises(ValueError, match="iOS 26"):
         pool.validate_iphone_metadata({
-            "iphone_model": "iPhone 16", "ios_version": "18.7.9",
+            "iphone_model": "iPhone 17", "ios_version": "18.7.9",
         })
 
 
 def test_variant_engine_rejects_old_fingerprint_before_render():
     pool = importlib.import_module("metadata_pool")
-    with pytest.raises(ValueError, match="iPhone 16"):
+    with pytest.raises(ValueError, match="iPhone 17"):
         pool.apply_variant_and_metadata(
             "missing-source.mp4", "output.mp4",
             {"iphone_model": "iPhone 15 Pro", "ios_version": "26.0"},
@@ -141,9 +141,16 @@ def test_metadata_generator_only_returns_current_floor():
 
     result = pool.generate_unique_metadata(EmptyDb(), 20)
     assert result
-    assert all(int(item["iphone_model"].split()[1]) >= 16 for item in result)
+    assert all(int(item["iphone_model"].split()[1]) >= 17 for item in result)
     assert all(tuple(int(part) for part in item["ios_version"].split(".")) >= (26, 0)
                for item in result)
+
+
+def test_metadata_model_tables_do_not_include_iphone_16_or_older():
+    pool = importlib.import_module("metadata_pool")
+    assert pool.IPHONE_MODELS
+    assert all(pool._iphone_generation(model) >= 17 for model in pool.IPHONE_MODELS)
+    assert set(pool._MODEL_IOS_RANGE) == set(pool.IPHONE_MODELS)
 
 
 def test_creation_tags_format_same_instant_in_utc_and_local_offset():
