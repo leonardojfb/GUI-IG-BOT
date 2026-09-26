@@ -28,8 +28,10 @@ The table has these fields:
 ## Delivery flow
 
 1. The desktop sender calculates a SHA-256 for every planned source video
-   before delivery and includes the hash plus its delivery identifiers in the
-   Telegram message callback payload or an equivalent signed lookup token.
+   before delivery and includes its URL-safe base64 form in the Telegram
+   callback payload. This compact representation fits Telegram's callback
+   limit and identifies the original source even if the delivery path needed
+   temporary compression.
 2. The Railway Telegram webhook receives the `Publicado` callback and upserts
    the corresponding hash in Airtable. Repeated callbacks are idempotent: they
    keep one record for the hash.
@@ -51,11 +53,12 @@ tokens or Airtable response bodies.
 
 ## Compatibility and security
 
-Existing Telegram messages without a new identity token retain their current
-visual-only behavior. New messages use a signed, short-lived opaque callback
-token so a Telegram callback cannot claim an arbitrary hash. Airtable
-credentials remain server-side: Railway owns write credentials, and the desktop
-application reads using its existing locally configured Airtable credentials.
+Existing Telegram messages with the legacy `pub` callback retain their current
+visual-only behavior. New messages use a strictly validated `pub:<hash>`
+callback emitted by the bot; Telegram supplies callback queries only for the
+button embedded in its message. Airtable credentials remain server-side:
+Railway owns write credentials, and the desktop application reads using its
+existing locally configured Airtable credentials.
 
 ## Tests and verification
 
