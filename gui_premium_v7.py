@@ -79,18 +79,27 @@ def _safe_file_status(path):
 
 def _acct_inventory_items(folders):
     """Use the same Forge publication gate for Por Cuentas and Por Tandas."""
+    items, _notices = _acct_inventory_summary(folders)
+    return items
+
+
+def _acct_inventory_summary(folders):
+    """Return distributable Forge outputs and non-blocking partial-batch notices."""
     from Organizador import _tanda_video_inventory
 
     items = []
+    notices = []
     for source_tanda, source_folder in folders.items():
         if not os.path.isdir(source_folder):
             raise FileNotFoundError(f"Carpeta no encontrada: {source_folder}")
-        videos, error = _tanda_video_inventory(
+        videos, notice = _tanda_video_inventory(
             source_folder, extensions=(".mp4", ".mov", ".avi"))
-        if error and not error.startswith("Tanda Forge parcial:"):
-            raise ValueError(f"{source_tanda}: {error}")
+        if notice and not notice.startswith("Tanda Forge parcial:"):
+            raise ValueError(f"{source_tanda}: {notice}")
+        if notice:
+            notices.append(f"{source_tanda}: {notice}")
         items.extend({"tanda": source_tanda, "name": name} for name in sorted(videos))
-    return items
+    return items, notices
 
 
 def _resolve_forge_retry_sources(pending_items, selected_paths):
@@ -3481,7 +3490,7 @@ class InstagramAutoPro(ctk.CTk):
             def forge_vid_id(fname):
                 return source_key_from_filename(fname)
 
-            all_vids = _acct_inventory_items(folders)
+            all_vids, partial_notices = _acct_inventory_summary(folders)
             if not all_vids:
                 raise ValueError("No se encontraron videos en las tandas seleccionadas")
 
@@ -3586,6 +3595,10 @@ class InstagramAutoPro(ctk.CTk):
                         slot_vid_ids_used.add(vid_id)
 
             lines = []
+            if partial_notices:
+                lines += ["⚠️  AVISO FORGE"]
+                lines += [f"⚠️  {notice}" for notice in partial_notices]
+                lines.append("")
             label = "👁️  PREVISUALIZACIÓN" if preview_only else "🚀  EJECUTANDO"
             total_per_acc = n
             period_detail = f"{days} días × {vpd} videos/día = {total_per_acc}/cuenta"
