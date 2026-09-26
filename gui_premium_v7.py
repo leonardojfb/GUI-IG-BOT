@@ -3503,6 +3503,18 @@ class InstagramAutoPro(ctk.CTk):
                 acc: db_account_ids.get(acc) or idx + 1
                 for idx, acc in enumerate(accounts)
             }
+            account_categories = {
+                str(row.get("username")): str(row.get("account_type") or "GENERAL").strip()
+                for row in self.db.get_all_accounts()
+            }
+
+            def category_key(acc):
+                return account_categories.get(acc, "GENERAL").casefold() or "general"
+
+            category_labels = {
+                category_key(acc): account_categories.get(acc, "GENERAL") or "GENERAL"
+                for acc in accounts
+            }
 
             pool = all_vids[:]
             random.shuffle(pool)
@@ -3514,10 +3526,12 @@ class InstagramAutoPro(ctk.CTk):
             plan = {acc: [[] for _ in range(days)] for acc in accounts}
             assigned = set()
             acc_lifetime_vid_ids = {acc: set() for acc in accounts}
+            fillup_counts = {}
 
             for day_idx in range(days):
                 day_vid_ids_used = set()
                 slots_today = min(vpd, max(0, n - (day_idx * vpd)))
+                day_category_origin_usage = {}
 
                 for slot in range(slots_today):
                     slot_vid_ids_used = set()
@@ -3533,6 +3547,7 @@ class InstagramAutoPro(ctk.CTk):
                             vid_id = forge_vid_id(item_name(v))
                             if vid_id in acc_today_vid_ids:
                                 continue  # regla dura: no repetir vid_id mismo día/cuenta
+                            origin_usage = day_category_origin_usage.get((category_key(acc), vid_id), 0)
                             score = 0
                             if vid_id in acc_lifetime_vid_ids[acc]:
                                 score += 200  # penalizar reutilización en misma cuenta
@@ -3541,7 +3556,7 @@ class InstagramAutoPro(ctk.CTk):
                             if vid_id in slot_vid_ids_used:
                                 score += 50   # penalizar mismo slot entre cuentas
                             score += random.random()
-                            candidates.append((score, v))
+                            candidates.append((origin_usage, score, v))
 
                         if not candidates:
                             raise ValueError(
@@ -3549,14 +3564,20 @@ class InstagramAutoPro(ctk.CTk):
                                 f"Reducí cuentas, días o videos/día."
                             )
 
-                        candidates.sort(key=lambda x: x[0])
-                        chosen = candidates[0][1]
+                        candidates.sort(key=lambda x: (x[0], x[1]))
+                        chosen = candidates[0][2]
                         vid_id = forge_vid_id(item_name(chosen))
+                        usage_key = (category_key(acc), vid_id)
+                        was_fillup = day_category_origin_usage.get(usage_key, 0) > 0
 
                         plan[acc][day_idx].append(chosen)
                         assigned.add(item_key(chosen))
                         acc_lifetime_vid_ids[acc].add(vid_id)
                         day_vid_ids_used.add(vid_id)
+                        day_category_origin_usage[usage_key] = day_category_origin_usage.get(usage_key, 0) + 1
+                        if was_fillup:
+                            fillup_key = (category_key(acc), day_idx + 1)
+                            fillup_counts[fillup_key] = fillup_counts.get(fillup_key, 0) + 1
                         slot_vid_ids_used.add(vid_id)
 
             lines = []
@@ -3571,6 +3592,13 @@ class InstagramAutoPro(ctk.CTk):
                       f"📅  Período     : {period_str}  ({period_detail})",
                       f"🛡️  Antichoque  : vid_id único por cuenta/día activo",
                       f"👥  Cuentas    : {len(plan)}", ""]
+
+            for (category, day), repeats in sorted(fillup_counts.items(), key=lambda item: (item[0][1], item[0][0])):
+                lines.append(
+                    f"⚠️ Fill-up {category_labels[category]} / Día {day}: {repeats} repetición(es) inevitables"
+                )
+            if fillup_counts:
+                lines.append("")
 
             for acc, day_lists in plan.items():
                 total = sum(len(d) for d in day_lists)

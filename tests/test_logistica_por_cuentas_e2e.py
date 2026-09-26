@@ -11,6 +11,7 @@ it never actually ran the algorithm. This test drives the real bound method (sam
 pattern as tests/test_dashboard_refresh.py) so the file counts, tanda tag, and caption
 routing get checked against real output instead of a string match.
 """
+import collections
 import json
 import os
 import tempfile
@@ -379,8 +380,8 @@ def test_por_cuentas_reuses_copy_sets_across_accounts_without_daily_origin_colli
         app.acct_dist_tanda.set(tanda_name)
         app.acct_dist_list.delete("1.0", "end")
         app.acct_dist_list.insert("end", "\n".join(usernames) + "\n")
-        app.acct_dist_vpd.set(3)
-        app.acct_dist_period.set("MAX")
+        app.acct_dist_vpd.set(1)
+        app.acct_dist_period.set("1 semana")
 
         app._acct_dist_run(preview_only=False)
 
@@ -393,22 +394,134 @@ def test_por_cuentas_reuses_copy_sets_across_accounts_without_daily_origin_colli
             for row in payload["entries"]
             if row["delivery_kind"] == "normal" and row["username"] in set(usernames)
         ]
-        assert len(produced) == 20 * 30
+        assert len(produced) == 20 * 7
         assert {row["username"] for row in produced} == set(usernames)
 
         for username in usernames:
             rows = [row for row in produced if row["username"] == username]
-            assert len(rows) == 30
-            assert len({source_key_from_filename(row["source_path"]) for row in rows}) == 30
+            assert len(rows) == 7
+            assert len({source_key_from_filename(row["source_path"]) for row in rows}) == 7
             for day in {row["day"] for row in rows}:
                 day_rows = [row for row in rows if row["day"] == day]
                 origins = [source_key_from_filename(row["source_path"]) for row in day_rows]
                 assert len(origins) == len(set(origins))
 
         day_one_rows = [row for row in produced if row["day"] == 1]
-        assert len(day_one_rows) == 20 * 3
-        assert len({source_key_from_filename(row["source_path"]) for row in day_one_rows}) < len(
+        assert len(day_one_rows) == 20
+        assert len({source_key_from_filename(row["source_path"]) for row in day_one_rows}) == len(
             day_one_rows
         )
+    finally:
+        cleanup()
+
+
+def test_por_cuentas_fills_up_same_category_day_with_least_used_origins(tmp_path, monkeypatch):
+    app, cleanup = _make_app()
+    try:
+        import Organizador
+        import gui_premium_v7 as gui
+
+        base_dir = str(tmp_path)
+        monkeypatch.setattr(Organizador, "output_root", os.path.join(base_dir, "CALENDARIO_POSTEO"))
+        monkeypatch.setattr(gui, "_BASE_DIR", base_dir)
+        monkeypatch.setattr(gui, "_ACCT_HIST_FILE", os.path.join(base_dir, "acct_hist.json"))
+        monkeypatch.setattr(gui, "WorkerThread", _SyncWorkerThread)
+        monkeypatch.setattr(gui.messagebox, "showinfo", lambda *a, **k: None)
+        monkeypatch.setattr(gui.messagebox, "showerror", lambda *a, **k: None)
+        monkeypatch.setattr(gui.messagebox, "showwarning", lambda *a, **k: None)
+        monkeypatch.setattr(gui.messagebox, "askyesno", lambda *a, **k: True)
+
+        app.db.add_category("TALKING")
+        app.db.add_va("TALKING_VA")
+        usernames = [f"talking_{index:02d}" for index in range(1, 41)]
+        for username in usernames:
+            app.db.add_virtual_account(username, "TALKING")
+            app.db.update_account(username, assigned_va="TALKING_VA")
+
+        tanda_name = "TALKING_COPY_SET"
+        tanda_dir = os.path.join(base_dir, "videos_finales", tanda_name)
+        os.makedirs(tanda_dir, exist_ok=True)
+        for origin_number in range(1, 36):
+            for copy_number in range(1, 41):
+                with open(
+                    os.path.join(
+                        tanda_dir,
+                        f"TALKING__ORIGIN{origin_number:02d}__P2__c{copy_number:02d}.mp4",
+                    ),
+                    "wb",
+                ) as fh:
+                    fh.write(f"origin-{origin_number}-copy-{copy_number}".encode())
+        app.db.add_tanda(tanda_name, tanda_name, tanda_name, "")
+
+        app.reload_dist_lists()
+        app.acct_dist_tanda.set(tanda_name)
+        app.acct_dist_list.delete("1.0", "end")
+        app.acct_dist_list.insert("end", "\n".join(usernames) + "\n")
+        app.acct_dist_vpd.set(1)
+        app.acct_dist_period.set("1 semana")
+
+        app._acct_dist_run(preview_only=False)
+
+        result_text = app.acct_dist_result.get("1.0", "end")
+        assert "❌" not in result_text, result_text
+        assert "Fill-up TALKING / Día 1: 5 repetición(es) inevitables" in result_text
+        entries = json.loads((Path(base_dir) / "calendar_manifest.json").read_text(encoding="utf-8"))["entries"]
+        assert len(entries) == 40 * 7
+        for day in range(1, 8):
+            day_entries = [entry for entry in entries if entry["day"] == day]
+            origins = [entry["source_path"].split("__P2__c", 1)[0] for entry in day_entries]
+            counts = sorted(collections.Counter(origins).values())
+            assert counts == [1] * 30 + [2] * 5
+    finally:
+        cleanup()
+
+
+def test_por_cuentas_allows_same_origin_in_different_categories(tmp_path, monkeypatch):
+    app, cleanup = _make_app()
+    try:
+        import Organizador
+        import gui_premium_v7 as gui
+        from trial_content import source_key_from_filename
+
+        base_dir = str(tmp_path)
+        monkeypatch.setattr(Organizador, "output_root", os.path.join(base_dir, "CALENDARIO_POSTEO"))
+        monkeypatch.setattr(gui, "_BASE_DIR", base_dir)
+        monkeypatch.setattr(gui, "_ACCT_HIST_FILE", os.path.join(base_dir, "acct_hist.json"))
+        monkeypatch.setattr(gui, "WorkerThread", _SyncWorkerThread)
+        monkeypatch.setattr(gui.messagebox, "showinfo", lambda *a, **k: None)
+        monkeypatch.setattr(gui.messagebox, "showerror", lambda *a, **k: None)
+        monkeypatch.setattr(gui.messagebox, "showwarning", lambda *a, **k: None)
+        monkeypatch.setattr(gui.messagebox, "askyesno", lambda *a, **k: True)
+
+        app.db.add_category("CATEGORY_A")
+        app.db.add_category("CATEGORY_B")
+        app.db.add_va("CATEGORY_VA")
+        for username, category in (("category_a", "CATEGORY_A"), ("category_b", "CATEGORY_B")):
+            app.db.add_virtual_account(username, category)
+            app.db.update_account(username, assigned_va="CATEGORY_VA")
+
+        tanda_name = "CATEGORY_BOUNDARY"
+        tanda_dir = os.path.join(base_dir, "videos_finales", tanda_name)
+        os.makedirs(tanda_dir, exist_ok=True)
+        for copy_number in range(1, 3):
+            with open(
+                os.path.join(tanda_dir, f"BOUNDARY__ORIGIN01__P2__c{copy_number:02d}.mp4"),
+                "wb",
+            ) as fh:
+                fh.write(f"copy-{copy_number}".encode())
+        app.db.add_tanda(tanda_name, tanda_name, tanda_name, "")
+
+        app.reload_dist_lists()
+        app.acct_dist_tanda.set(tanda_name)
+        app.acct_dist_list.delete("1.0", "end")
+        app.acct_dist_list.insert("end", "category_a\ncategory_b\n")
+        app.acct_dist_vpd.set(1)
+        app.acct_dist_period.set("MAX")
+        app._acct_dist_run(preview_only=False)
+
+        assert "❌" not in app.acct_dist_result.get("1.0", "end")
+        entries = json.loads((Path(base_dir) / "calendar_manifest.json").read_text(encoding="utf-8"))["entries"]
+        assert len(entries) == 2
+        assert {source_key_from_filename(row["source_path"]) for row in entries} == {"ORIGIN01"}
     finally:
         cleanup()
