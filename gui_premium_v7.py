@@ -6009,6 +6009,12 @@ class InstagramAutoPro(ctk.CTk):
                 )
                 self.acct_lane_root.delete(0, "end")
                 self.acct_lane_root.insert(0, result["batch_dir"])
+                self.acct_dist_list.delete("1.0", "end")
+                self.acct_dist_list.insert(
+                    "end",
+                    "\n".join(str(account.get("username", "")) for account in account_rows)
+                    + "\n",
+                )
                 self.show_frame("Logistica")
                 messagebox.showinfo(
                     "Photo Forge",

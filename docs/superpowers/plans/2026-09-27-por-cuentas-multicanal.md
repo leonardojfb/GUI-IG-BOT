@@ -84,6 +84,8 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   pantalla Calendario con filtros, detalles y preview de imagen.
 - Implementado: Photo Forge con una salida por identidad, manifiesto de
   procedencia, copia sin cambios por defecto y espejo horizontal opcional.
+  Al terminar, Logistica abre con la carpeta de salida y las mismas identidades
+  seleccionadas en Photo Forge; la seleccion sigue editable.
 - Implementado: entrega de imagen/video por Telegram, topics por identidad o
   separados por destino, entrega ordenada y estados `planned`, `sent_telegram`
   y `published`. La confirmacion `published` se reconcilia con Airtable.
