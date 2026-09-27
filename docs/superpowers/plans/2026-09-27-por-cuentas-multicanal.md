@@ -89,6 +89,12 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   procedencia, copia sin cambios por defecto y espejo horizontal opcional.
   Al terminar, Logistica abre con la carpeta de salida y las mismas identidades
   seleccionadas en Photo Forge; la seleccion sigue editable.
+- Si la raiz de carril contiene `photo_forge_manifest.json`, Logistica toma
+  solo las salidas registradas para cada identidad y verifica `output_sha256`
+  antes de calendarizar. Se conserva el orden del manifiesto; faltantes,
+  cambios de bytes y rutas fuera de la carpeta de identidad se bloquean. Las
+  rutas se resuelven por nombre dentro de la raiz actual para admitir lotes
+  movidos sin confiar en sus rutas absolutas antiguas.
 - Implementado: entrega de imagen/video por Telegram, topics por identidad o
   separados por destino, entrega ordenada y estados `planned`, `sent_telegram`
   y `published`. La confirmacion `published` se reconcilia con Airtable.
@@ -116,8 +122,10 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   dentro de la tanda candidata, aunque la nueva fecha/destino no choque.
 - Verificacion realizada hasta ahora: `py_compile`, smoke de imports para GUI,
   Telegram y Photo Forge, y `git diff --check`. No se ejecutaron tests
-  automatizados; la ventana no quedo accesible en las superficies de escritorio
-  disponibles, asi que no hay validacion visual ni envio real a Telegram.
+  automatizados. La GUI arranco desde el worktree sin traceback, pero las
+  superficies de escritorio no expusieron su ventana; no hay validacion visual
+  ni envio real a Telegram. `docs/GUIA_LOGISTICA_MULTICANAL.md` documenta el
+  flujo de usuario confirmado en el codigo.
 - Pendiente antes de release: ejecutar las validaciones del plan, revisar el
   flujo en la GUI instalada y hacer un envio controlado a Telegram.
 - Actualizador: como la release agrega modulos locales, publicar primero una
