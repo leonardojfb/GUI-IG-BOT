@@ -1119,6 +1119,13 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
     accounts = get_accounts_with_va_info()
     all_videos = scan_calendar_structure()
     topic_mode = topic_mode if topic_mode in {"account_by_day", "separate_by_type"} else "account_by_day"
+    for video in all_videos:
+        if video.get("media_kind") not in {"video", "image"}:
+            video["media_kind"] = (
+                "video"
+                if Path(video.get("path", "")).suffix.lower() in {".mp4", ".mov", ".m4v"}
+                else "image"
+            )
 
     if not all_videos: return "❌ No se encontraron publicaciones en el calendario."
 
@@ -1265,6 +1272,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
     state_lock = threading.Lock()
     accounts_by_username = {account["username"]: account for account in accounts}
     jobs_by_chat = defaultdict(list)
+    schedule_resolution_cache = {}
 
     for dia in sorted_days:
         day_index = max(0, int(str(dia).split("_")[-1]) - 1)
@@ -1291,7 +1299,9 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
             from por_cuentas_lanes import resolve_legacy_reel_schedule
             for video in videos:
                 if not (video.get("scheduled_date") and video.get("scheduled_time") and video.get("slot")):
-                    schedule = resolve_legacy_reel_schedule(video, anchor_date.isoformat(), db)
+                    schedule = resolve_legacy_reel_schedule(
+                        video, anchor_date.isoformat(), db, schedule_resolution_cache
+                    )
                     if schedule:
                         video.update(schedule)
                         video["_legacy_resolved_schedule"] = True

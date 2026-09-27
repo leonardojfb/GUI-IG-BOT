@@ -87,7 +87,12 @@ def build_lane_entries(request: LaneRequest, final_paths: list[str | Path]) -> l
     return entries
 
 
-def resolve_legacy_reel_schedule(entry: dict, start_date: str, db_manager) -> dict:
+def resolve_legacy_reel_schedule(
+    entry: dict,
+    start_date: str,
+    db_manager,
+    resolution_cache: dict | None = None,
+) -> dict:
     """Resolve day/slot-only Reel rows using the existing VA/category schedule."""
     if entry.get("scheduled_date") and entry.get("scheduled_time"):
         return {}
@@ -100,7 +105,11 @@ def resolve_legacy_reel_schedule(entry: dict, start_date: str, db_manager) -> di
         if day_number < 1 or slot_number < 1:
             raise ValueError("La entrada legacy no tiene dia/slot resoluble.")
         local_date = date.fromisoformat(start_date) + timedelta(days=day_number - 1)
-        accounts = {row["username"]: row for row in db_manager.get_all_accounts()}
+        cache = resolution_cache if resolution_cache is not None else {}
+        accounts = cache.get("accounts")
+        if accounts is None:
+            accounts = {row["username"]: row for row in db_manager.get_all_accounts()}
+            cache["accounts"] = accounts
         account = accounts.get(entry.get("username"))
         if not account:
             raise ValueError(f"No existe la cuenta @{entry.get('username')} para resolver el horario.")
@@ -108,12 +117,23 @@ def resolve_legacy_reel_schedule(entry: dict, start_date: str, db_manager) -> di
         category = (account.get("account_type") or "general").strip().lower()
         import organizadortg
 
-        configured = organizadortg.get_slots_for_set(va_name, category, local_date.weekday(), db_manager)
+        schedules = cache.setdefault("schedules", {})
+        schedule_key = (va_name, category, local_date.weekday())
+        configured = schedules.get(schedule_key)
+        if configured is None:
+            configured = organizadortg.get_slots_for_set(
+                va_name, category, local_date.weekday(), db_manager
+            )
+            schedules[schedule_key] = configured
         raw_time = configured[slot_number - 1]
         source_time = datetime.strptime(raw_time.strip(), "%I:%M %p").time()
         from zoneinfo import ZoneInfo
 
-        timezone = db_manager.get_va_timezone(va_name)
+        timezones = cache.setdefault("timezones", {})
+        timezone = timezones.get(va_name)
+        if timezone is None:
+            timezone = db_manager.get_va_timezone(va_name)
+            timezones[va_name] = timezone
         eastern = ZoneInfo("America/New_York")
         local_zone = ZoneInfo(timezone)
         eastern_datetime = datetime.combine(local_date, source_time, tzinfo=eastern)

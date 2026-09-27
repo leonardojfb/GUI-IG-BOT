@@ -3686,11 +3686,15 @@ class InstagramAutoPro(ctk.CTk):
                 candidates.extend(entries)
 
             manifest_file = manifest_path(_BASE_DIR)
+            schedule_resolution_cache = {}
+            selected_account_names = set(accounts)
 
             def schedule_resolver(entry):
-                if entry.get("username") not in set(accounts):
+                if entry.get("username") not in selected_account_names:
                     return {}
-                return resolve_legacy_reel_schedule(entry, start_date, self.db)
+                return resolve_legacy_reel_schedule(
+                    entry, start_date, self.db, schedule_resolution_cache
+                )
 
             current_entries = load_entries(manifest_file, require_source=False)
             resolved_entries = []
@@ -4112,6 +4116,7 @@ class InstagramAutoPro(ctk.CTk):
         self.calendar_view_entries = {}
         end = start + timedelta(days=days - 1)
         rows = []
+        schedule_resolution_cache = {}
         for entry in entries:
             username = entry.get("username", "")
             if account_filter != "Todas" and username != account_filter:
@@ -4119,7 +4124,9 @@ class InstagramAutoPro(ctk.CTk):
             resolved = dict(entry)
             if not (resolved.get("scheduled_date") and resolved.get("scheduled_time")):
                 try:
-                    schedule = resolve_legacy_reel_schedule(resolved, start.isoformat(), self.db)
+                    schedule = resolve_legacy_reel_schedule(
+                        resolved, start.isoformat(), self.db, schedule_resolution_cache
+                    )
                     resolved.update(schedule)
                 except ValueError:
                     pass
