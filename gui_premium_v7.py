@@ -3213,6 +3213,10 @@ class InstagramAutoPro(ctk.CTk):
             lane_buttons, text="Previsualizar carril",
             command=lambda: self._acct_multichannel_run(preview_only=True),
         ).pack(side="left", padx=6)
+        GhostButton(
+            lane_buttons, text="Ver calendario",
+            command=lambda: self.show_frame("Calendario"),
+        ).pack(side="left", padx=6)
         PrimaryButton(
             lane_buttons, text="Agregar al calendario",
             command=lambda: self._acct_multichannel_run(preview_only=False),
@@ -4021,6 +4025,12 @@ class InstagramAutoPro(ctk.CTk):
     def _refresh_calendar_view(self):
         if not hasattr(self, "calendar_tree"):
             return
+        account_names = [row.get("username", "") for row in self.db.get_all_accounts() if row.get("username")]
+        account_values = ["Todas", *sorted(account_names)]
+        selected_account = self.calendar_account.get().strip()
+        self.calendar_account.configure(values=account_values)
+        if selected_account not in account_values:
+            self.calendar_account.set("Todas")
         try:
             start = date.fromisoformat(self.calendar_start.get().strip())
             days = int(self.calendar_days.get().strip())
