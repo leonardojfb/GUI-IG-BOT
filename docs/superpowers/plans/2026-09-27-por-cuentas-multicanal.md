@@ -111,9 +111,10 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   tambien se conserva visible en los metadatos enviados al topic.
 - Los carriles rechazan finales que ya esten en el manifiesto o repetidos
   dentro de la tanda candidata, aunque la nueva fecha/destino no choque.
-- Verificacion realizada hasta ahora: compilacion sintactica de modulos Python
-  y `git diff --check`. No se ejecutaron tests automatizados ni se hizo una
-  prueba visual/live de GUI o Telegram.
+- Verificacion realizada hasta ahora: `py_compile`, smoke de imports para GUI,
+  Telegram y Photo Forge, y `git diff --check`. No se ejecutaron tests
+  automatizados; la ventana no quedo accesible en las superficies de escritorio
+  disponibles, asi que no hay validacion visual ni envio real a Telegram.
 - Pendiente antes de release: ejecutar las validaciones del plan, revisar el
   flujo en la GUI instalada y hacer un envio controlado a Telegram.
 - Actualizador: como la release agrega modulos locales, publicar primero una
