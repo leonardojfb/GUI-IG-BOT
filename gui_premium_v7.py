@@ -3733,7 +3733,11 @@ class InstagramAutoPro(ctk.CTk):
                 if notice:
                     partial_notices.append(f"@{username}: {notice}")
                 allowed_videos = set(videos)
-                account_finals = [path for path in account_finals if path.name in allowed_videos]
+                validated_root = account_dir.resolve()
+                account_finals = [
+                    path for path in account_finals
+                    if path.name in allowed_videos and path.resolve().parent == validated_root
+                ]
             finals_by_account[username] = account_finals
             if len(finals_by_account[username]) < len(slots):
                 messagebox.showwarning(

@@ -103,7 +103,9 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   o estados no distribuibles siguen bloqueadas.
 - Los carriles de video aplican el mismo gate de inventario por cuenta antes
   de calendarizar: solo aceptan finales presentes y validados, con warning y
-  conteo de pendientes para tandas `incomplete`.
+  conteo de pendientes para tandas `incomplete`. La ruta aceptada debe ser un
+  archivo directo de la raiz de identidad que aparece en el inventario Forge;
+  un homonimo dentro de una subcarpeta no sustituye a la copia validada.
 - Telegram omite en ejecuciones posteriores las filas ya confirmadas como
   `sent_telegram` o `published`, sin ocultarlas del calendario ni del conteo
   historico de publicaciones.
