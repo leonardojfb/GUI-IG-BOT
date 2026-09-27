@@ -4030,6 +4030,7 @@ class InstagramAutoPro(ctk.CTk):
         self.calendar_account.set("Todas")
         self.calendar_account.pack(side="left", padx=(0, 12))
         GhostButton(filters, text="Actualizar", command=self._refresh_calendar_view).pack(side="left")
+        GhostButton(filters, text="Sincronizar publicados", command=self._sync_calendar_published).pack(side="left", padx=(8, 0))
 
         content = ctk.CTkFrame(f, fg_color="transparent")
         content.grid(row=2, column=0, sticky="nsew", padx=24, pady=(0, 18))
@@ -4202,6 +4203,47 @@ class InstagramAutoPro(ctk.CTk):
             except Exception:
                 pass
         self.calendar_preview.configure(image=None, text="Vista previa no disponible para este archivo")
+
+    def _sync_calendar_published(self):
+        entries = list(self.calendar_view_entries.values())
+        manifest = manifest_path(_BASE_DIR)
+        if not entries:
+            return messagebox.showinfo("Calendario", "No hay publicaciones en el rango actual.", parent=self)
+
+        def task():
+            import organizadortg
+            from airtable_sync import fetch_published_video_hashes, load_airtable_config
+            from calendar_manifest import update_entries_status
+
+            published = fetch_published_video_hashes(load_airtable_config())
+            statuses = {}
+            for entry in entries:
+                entry_id = entry.get("id")
+                path = entry.get("source_path") or entry.get("path")
+                if not entry_id or not path or not Path(path).is_file():
+                    continue
+                content_hash = organizadortg._source_sha256(path)
+                if entry.get("media_kind") == "video":
+                    publication_hash = content_hash
+                else:
+                    publication_hash = organizadortg._account_publication_hash(
+                        entry.get("username", ""),
+                        entry.get("publication_target") or "instagram_reel",
+                        content_hash,
+                    )
+                if publication_hash in published:
+                    statuses[str(entry_id)] = "published"
+            updated = update_entries_status(manifest, statuses) if statuses else set()
+            return len(updated)
+
+        def done(success, result):
+            if not success:
+                messagebox.showerror("Sincronización", str(result), parent=self)
+                return
+            self._refresh_calendar_view()
+            messagebox.showinfo("Sincronización", f"Marcadas como publicadas: {result}", parent=self)
+
+        WorkerThread(self, done, task).start()
 
     def _build_tg_frame(self):
         """TAREA 6 — Bot Telegram."""

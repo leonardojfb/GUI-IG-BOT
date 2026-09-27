@@ -20,6 +20,8 @@ from calendar_manifest import (
     manifest_path,
     publication_target_for_entry,
     remove_entries_for_accounts,
+    update_entry_status,
+    update_entries_status,
 )
 from database import DatabaseManager
 from social_publishing import is_telegram_publication_target
@@ -188,6 +190,7 @@ def _scan_manifest_calendar_structure(manifest_file=None):
         if not media_kind:
             media_kind = "video" if Path(entry["source_path"]).suffix.lower() in {".mp4", ".mov", ".m4v"} else "image"
         rows.append({
+            "id": entry.get("id"),
             "path": entry["source_path"],
             "filename": entry["telegram_filename"],
             "category": account_type_map.get(entry["username"], entry.get("tanda") or "unknown"),
@@ -1150,6 +1153,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
         )
         eligible_videos = []
         omitted_published = 0
+        published_entry_statuses = {}
         for video in all_videos:
             source_hash = _source_sha256(video["path"])
             publication_hash = (
@@ -1162,12 +1166,16 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                 )
             )
             if publication_hash in published_hashes:
+                if video.get("id"):
+                    published_entry_statuses[str(video["id"])] = "published"
                 if not selected_accounts or video["username"] in selected_accounts:
                     omitted_published += 1
                 continue
             video["source_hash"] = source_hash
             video["publication_hash"] = publication_hash
             eligible_videos.append(video)
+        if published_entry_statuses:
+            update_entries_status(manifest_path(base_dir), published_entry_statuses)
     except (AirtableSyncError, OSError, ValueError) as exc:
         print(f"⚠️ No se pudo verificar Airtable: {exc}")
         return "❌ No se pudo verificar Airtable; no se enviaron publicaciones."
@@ -1393,6 +1401,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     "hora_et": hora_et,
                     "dia_str": dia_str,
                     "source_hash": vid["publication_hash"],
+                    "entry_id": vid.get("id"),
                 })
 
     def send_metadata(job):
@@ -1459,6 +1468,13 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                 if ok:
                     sent += 1
                 with state_lock:
+                    if ok and job.get("entry_id"):
+                        try:
+                            update_entry_status(
+                                manifest_path(base_dir), job["entry_id"], "sent_telegram"
+                            )
+                        except (OSError, ValueError) as error:
+                            print(f"No se pudo actualizar estado local de @{job['username']}: {error}")
                     save_json(os.path.join(base_dir, STATE_FILE), topics_state)
                 time.sleep(2)
             except Exception as e:

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
+from functools import wraps
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +14,15 @@ from publication_schedule import ScheduleMergeResult, merge_scheduled_entries, v
 
 MANIFEST_VERSION = 1
 MANIFEST_FILENAME = "calendar_manifest.json"
+_MANIFEST_LOCK = threading.RLock()
+
+
+def _serialized_manifest_mutation(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        with _MANIFEST_LOCK:
+            return function(*args, **kwargs)
+    return wrapped
 
 
 def manifest_path(base_dir: str | os.PathLike) -> Path:
@@ -134,6 +145,7 @@ def publication_target_for_entry(entry: dict) -> str:
     )
 
 
+@_serialized_manifest_mutation
 def replace_entries(
     path: str | os.PathLike,
     entries: list[dict],
@@ -161,6 +173,7 @@ def replace_entries(
     return merged
 
 
+@_serialized_manifest_mutation
 def append_scheduled_entries(
     path: str | os.PathLike,
     entries: list[dict],
@@ -181,6 +194,48 @@ def append_scheduled_entries(
     return result
 
 
+@_serialized_manifest_mutation
+def update_entries_status(path: str | os.PathLike, statuses: dict[str, str]) -> set[str]:
+    allowed = {"planned", "sent_telegram", "published"}
+    invalid = set(statuses.values()) - allowed
+    if invalid:
+        raise ValueError(f"Estado de publicación no soportado: {sorted(invalid)[0]}")
+    manifest = Path(path)
+    payload = _read_payload(manifest)
+    entries = list(payload["entries"])
+    updates = {str(entry_id): status for entry_id, status in statuses.items()}
+    updated = set()
+    matched = set()
+    for entry in entries:
+        entry_id = str(entry.get("id") or "")
+        status = updates.get(entry_id)
+        if status is None:
+            continue
+        matched.add(entry_id)
+        if entry.get("manual_status") == status:
+            continue
+        entry["manual_status"] = status
+        timestamp_fields = {
+            "sent_telegram": "sent_telegram_at",
+            "published": "published_at",
+        }
+        timestamp_field = timestamp_fields.get(status)
+        for field in timestamp_fields.values():
+            if field != timestamp_field:
+                entry.pop(field, None)
+        if timestamp_field:
+            entry[timestamp_field] = _now_utc()
+        updated.add(entry_id)
+    if updated:
+        _write_payload(manifest, entries)
+    return matched
+
+
+def update_entry_status(path: str | os.PathLike, entry_id: str, status: str) -> bool:
+    return str(entry_id) in update_entries_status(path, {str(entry_id): status})
+
+
+@_serialized_manifest_mutation
 def remove_entries_for_accounts(path: str | os.PathLike, usernames: set[str]) -> int:
     manifest = Path(path)
     current = list(_read_payload(manifest)["entries"])
