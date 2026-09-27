@@ -1197,7 +1197,12 @@ class InstagramAutoPro(ctk.CTk):
         """Re-apply mode-correct colors to the ttk Treeview style and the
         raw Tk Listboxes (CustomTkinter widgets recolor themselves)."""
         self._setup_treeview_style()
-        for lb in (getattr(self, "list_tg", None), getattr(self, "forge_lst", None)):
+        for lb in (
+            getattr(self, "list_tg", None),
+            getattr(self, "forge_lst", None),
+            getattr(self, "photo_forge_sources", None),
+            getattr(self, "photo_forge_accounts", None),
+        ):
             if lb is not None:
                 lb.configure(
                     bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
@@ -5880,7 +5885,7 @@ class InstagramAutoPro(ctk.CTk):
             f"Imágenes: {source_count} · Identidades: {len(accounts)} · Finales: {source_count * len(accounts)}\n"
             f"Salida: {os.path.join(self.photo_forge_output.get().strip(), self.photo_forge_batch.get().strip())}\n"
             + (
-                "Se aplicará espejo horizontal a los finales, conservando el formato y el original."
+                "Se aplicará espejo horizontal. JPEG se re-codifica en calidad 100; el original no cambia."
                 if self.photo_forge_mirror_var.get()
                 else "Se preservan los bytes del archivo. No hay conversión ni modificación del original."
             ),
@@ -5896,16 +5901,25 @@ class InstagramAutoPro(ctk.CTk):
         if not source_paths or not accounts or not output_root or not batch_name:
             return messagebox.showwarning("Photo Forge", "Completa imágenes, identidades, lote y salida.", parent=self)
         total = len(source_paths) * len(accounts)
-        if not messagebox.askyesno(
-            "Generar Photo Forge",
+        confirmation = (
             f"Se crearán hasta {total} archivos finales en carpetas separadas por identidad.\n"
             f"Espejo horizontal: {'sí' if mirror_horizontal else 'no'}.\n"
-            "Las imágenes fuente se conservarán sin modificar.\n\n¿Continuar?",
+        )
+        if mirror_horizontal:
+            confirmation += "JPEG se re-codifica en calidad 100.\n"
+        confirmation += "Las imágenes fuente se conservarán sin modificar.\n\n¿Continuar?"
+        if not messagebox.askyesno(
+            "Generar Photo Forge",
+            confirmation,
             parent=self,
         ):
             return
         account_rows = [dict(row) for row in accounts]
         self.photo_forge_run_button.configure(state="disabled")
+        self.photo_forge_result.configure(state="normal")
+        self.photo_forge_result.delete("1.0", "end")
+        self.photo_forge_result.insert("end", f"Validando fuentes y generando {total} finales...")
+        self.photo_forge_result.configure(state="disabled")
 
         def task():
             import photo_forge
