@@ -38,6 +38,8 @@ ensure_stdout_utf8()
 TG_MAX_BYTES = 49 * 1024 * 1024  # 49MB para dejar margen
 TG_COMPRESS_TARGET_BYTES = 45 * 1024 * 1024
 TG_RECOMPRESS_TARGET_BYTES = 40 * 1024 * 1024
+TG_API_TIMEOUT = (10, 30)
+TG_MEDIA_TIMEOUT = (10, 180)
 
 # Windows: suppress the console window each ffmpeg/ffprobe child would otherwise
 # pop when the GUI runs windowless. 0 on non-Windows (flag doesn't exist there).
@@ -651,7 +653,7 @@ def call_tg(method, data, silent=False):
     url = f"https://api.telegram.org/bot{TOKEN}/{method}"
     for attempt in range(4):
         try:
-            res = requests.post(url, json=data).json()
+            res = requests.post(url, json=data, timeout=TG_API_TIMEOUT).json()
             if not res.get("ok"):
                 retry_after = res.get("parameters", {}).get("retry_after")
                 if retry_after:
@@ -900,7 +902,8 @@ def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, usern
                 r = requests.post(
                     f"https://api.telegram.org/bot{TOKEN}/sendVideo",
                     data=payload,
-                    files={'video': (upload_name, fv, content_type)}
+                    files={'video': (upload_name, fv, content_type)},
+                    timeout=TG_MEDIA_TIMEOUT,
                 )
             if r.status_code == 200:
                 return True, t_id
@@ -972,6 +975,7 @@ def _send_image_to_topic(chat_id, topic_id, caption, image_path, topics_state, u
                 f"https://api.telegram.org/bot{TOKEN}/{method}",
                 data=payload,
                 files={field: (os.path.basename(readable_path), media_file, content_type)},
+                timeout=TG_MEDIA_TIMEOUT,
             )
         if response.status_code == 200:
             return True, topic_id
