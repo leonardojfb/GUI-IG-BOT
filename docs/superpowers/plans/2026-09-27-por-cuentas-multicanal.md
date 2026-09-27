@@ -105,6 +105,7 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   recalcula el offset DST con la fecha actual.
 - Las solicitudes Telegram tienen timeout distinto para API JSON y carga de
   medios; una conexión colgada no deja el worker indefinidamente en espera.
+  Los errores de red del sender ocultan el token del bot antes de registrarlos.
 - Logistica Por Cuentas muestra un aviso en la previsualizacion si incluye
   salidas validadas de tandas Forge parciales; tandas con inventario invalido
   o estados no distribuibles siguen bloqueadas.

@@ -649,6 +649,12 @@ def get_accounts_with_va_info():
         })
     return result
 
+def _redact_telegram_token(value) -> str:
+    message = str(value)
+    token = str(TOKEN or "").strip()
+    return message.replace(token, "[redacted]") if token else message
+
+
 def call_tg(method, data, silent=False):
     url = f"https://api.telegram.org/bot{TOKEN}/{method}"
     for attempt in range(4):
@@ -668,7 +674,7 @@ def call_tg(method, data, silent=False):
                     print(f"⚠️ Error en Telegram API ({method}): {res}")
             return res
         except Exception as e:
-            print(f"⚠️ Error de red al llamar a {method}: {e}")
+            print(f"⚠️ Error de red al llamar a {method}: {_redact_telegram_token(e)}")
             return {"ok": False}
     return {"ok": False}
 def is_video_already_sent(video_path):
@@ -1538,7 +1544,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     save_json(os.path.join(base_dir, STATE_FILE), topics_state)
                 time.sleep(2)
             except Exception as e:
-                print(f"❌ Error físico: {e}")
+                print(f"❌ Error físico: {_redact_telegram_token(e)}")
         return sent, aborted
 
     if jobs_by_chat:
