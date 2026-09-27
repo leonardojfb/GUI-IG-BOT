@@ -5740,6 +5740,9 @@ class InstagramAutoPro(ctk.CTk):
         self.photo_forge_output.grid(row=0, column=3, padx=6, pady=12, sticky="ew")
         GhostButton(form, text="Elegir", width=74, command=self._photo_forge_choose_output).grid(
             row=0, column=4, padx=(4, 14), pady=12)
+        self.photo_forge_mirror_var = tk.BooleanVar(value=False)
+        ToggleRow(form, "Espejo horizontal", variable=self.photo_forge_mirror_var).grid(
+            row=1, column=1, padx=6, pady=(0, 10), sticky="w")
 
         content = ctk.CTkFrame(f, fg_color="transparent")
         content.grid(row=2, column=0, sticky="nsew", padx=24, pady=(0, 10))
@@ -5869,7 +5872,11 @@ class InstagramAutoPro(ctk.CTk):
             f"Lote: {self.photo_forge_batch.get().strip()}\n"
             f"Imágenes: {source_count} · Identidades: {len(accounts)} · Finales: {source_count * len(accounts)}\n"
             f"Salida: {os.path.join(self.photo_forge_output.get().strip(), self.photo_forge_batch.get().strip())}\n"
-            "Se preservan los bytes del archivo. No hay conversión ni modificación del original.",
+            + (
+                "Se aplicará espejo horizontal a los finales, conservando el formato y el original."
+                if self.photo_forge_mirror_var.get()
+                else "Se preservan los bytes del archivo. No hay conversión ni modificación del original."
+            ),
         )
         self.photo_forge_result.configure(state="disabled")
 
@@ -5878,12 +5885,14 @@ class InstagramAutoPro(ctk.CTk):
         accounts = self._photo_forge_selected_accounts()
         output_root = self.photo_forge_output.get().strip()
         batch_name = self.photo_forge_batch.get().strip()
+        mirror_horizontal = bool(self.photo_forge_mirror_var.get())
         if not source_paths or not accounts or not output_root or not batch_name:
             return messagebox.showwarning("Photo Forge", "Completa imágenes, identidades, lote y salida.", parent=self)
         total = len(source_paths) * len(accounts)
         if not messagebox.askyesno(
             "Generar Photo Forge",
             f"Se crearán hasta {total} archivos finales en carpetas separadas por identidad.\n"
+            f"Espejo horizontal: {'sí' if mirror_horizontal else 'no'}.\n"
             "Las imágenes fuente se conservarán sin modificar.\n\n¿Continuar?",
             parent=self,
         ):
@@ -5893,7 +5902,9 @@ class InstagramAutoPro(ctk.CTk):
 
         def task():
             import photo_forge
-            plan = photo_forge.plan_photo_copies(source_paths, account_rows, output_root, batch_name)
+            plan = photo_forge.plan_photo_copies(
+                source_paths, account_rows, output_root, batch_name, mirror_horizontal
+            )
             return photo_forge.create_photo_copies(plan, output_root, batch_name)
 
         def done(success, result):

@@ -9,7 +9,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"}
@@ -31,7 +31,7 @@ def _safe_name(value: str) -> str:
     return cleaned[:80]
 
 
-def validate_sources(source_paths: list[str | os.PathLike]) -> list[Path]:
+def validate_sources(source_paths: list[str | os.PathLike], mirror_horizontal: bool = False) -> list[Path]:
     if not source_paths:
         raise ValueError("Agrega al menos una imagen.")
     paths = [Path(path).resolve() for path in source_paths]
@@ -45,6 +45,10 @@ def validate_sources(source_paths: list[str | os.PathLike]) -> list[Path]:
                 image.verify()
         except Exception as error:
             raise ValueError(f"Imagen inválida o dañada: {path.name}") from error
+        if mirror_horizontal:
+            with Image.open(path) as image:
+                if getattr(image, "n_frames", 1) > 1:
+                    raise ValueError(f"No se admite una imagen animada para espejo: {path.name}")
     return paths
 
 
@@ -53,8 +57,9 @@ def plan_photo_copies(
     accounts: list[dict],
     output_root: str | os.PathLike,
     batch_name: str,
+    mirror_horizontal: bool = False,
 ) -> list[dict]:
-    sources = validate_sources(source_paths)
+    sources = validate_sources(source_paths, mirror_horizontal=mirror_horizontal)
     if not accounts:
         raise ValueError("Selecciona al menos una identidad.")
     if len({str(source).casefold() for source in sources}) != len(sources):
@@ -69,7 +74,8 @@ def plan_photo_copies(
         account_dir = root / username
         for source in sources:
             digest = source_hashes[source]
-            filename = f"{source.stem[:100]}__ACC{account_id or 0}_{username}__{digest[:10]}{source.suffix.lower()}"
+            mirror_suffix = "__MIRROR" if mirror_horizontal else ""
+            filename = f"{source.stem[:100]}__ACC{account_id or 0}_{username}__{digest[:10]}{mirror_suffix}{source.suffix.lower()}"
             destination = account_dir / filename
             key = str(destination).casefold()
             if key in destinations:
@@ -80,13 +86,14 @@ def plan_photo_copies(
                 "account_id": account_id,
                 "source_path": str(source),
                 "source_sha256": digest,
+                "mirror_horizontal": bool(mirror_horizontal),
                 "output_path": str(destination),
             })
     return rows
 
 
 def create_photo_copies(plan: list[dict], output_root: str | os.PathLike, batch_name: str) -> dict:
-    """Create byte-preserving per-account image files and an atomic provenance manifest."""
+    """Create account-specific copies/variants and atomically record their lineage."""
     root = Path(output_root).resolve() / _safe_name(batch_name)
     manifest_path = root / MANIFEST_NAME
     previous_entries = []
@@ -96,6 +103,7 @@ def create_photo_copies(plan: list[dict], output_root: str | os.PathLike, batch_
         if not isinstance(previous, dict) or previous.get("version") != 1 or not isinstance(previous.get("entries"), list):
             raise ValueError("El manifiesto existente de Photo Forge no es válido.")
         previous_entries = previous["entries"]
+    previous_by_path = {row.get("output_path"): row for row in previous_entries if isinstance(row, dict)}
     created = []
     existing = []
     try:
@@ -104,15 +112,33 @@ def create_photo_copies(plan: list[dict], output_root: str | os.PathLike, batch_
             destination = Path(row["output_path"])
             destination.parent.mkdir(parents=True, exist_ok=True)
             if destination.exists():
-                if _sha256(destination) != row["source_sha256"]:
+                prior = previous_by_path.get(str(destination))
+                output_hash = _sha256(destination)
+                if (
+                    prior
+                    and prior.get("source_sha256") == row["source_sha256"]
+                    and bool(prior.get("mirror_horizontal")) == bool(row.get("mirror_horizontal"))
+                    and prior.get("output_sha256") == output_hash
+                ):
+                    existing.append(prior)
+                    continue
+                if not row.get("mirror_horizontal") and output_hash == row["source_sha256"]:
+                    copied = {**row, "output_sha256": output_hash}
+                    existing.append(copied)
+                    continue
+                else:
                     raise FileExistsError(f"La salida ya existe con otro contenido: {destination}")
-                existing.append(row)
-                continue
             fd, temp_name = tempfile.mkstemp(prefix=f".{destination.name}.", suffix=".part", dir=destination.parent)
             os.close(fd)
             try:
-                shutil.copy2(source, temp_name)
-                if _sha256(Path(temp_name)) != row["source_sha256"]:
+                if row.get("mirror_horizontal"):
+                    if _sha256(source) != row["source_sha256"]:
+                        raise OSError(f"La imagen fuente cambió desde la previsualización: {source.name}")
+                    _render_mirrored_image(source, Path(temp_name))
+                else:
+                    shutil.copy2(source, temp_name)
+                output_hash = _sha256(Path(temp_name))
+                if not row.get("mirror_horizontal") and output_hash != row["source_sha256"]:
                     raise OSError(f"La copia no coincide con la imagen fuente: {source.name}")
                 if destination.exists():
                     raise FileExistsError(f"La salida apareció durante la generación: {destination}")
@@ -120,7 +146,7 @@ def create_photo_copies(plan: list[dict], output_root: str | os.PathLike, batch_
             finally:
                 if os.path.exists(temp_name):
                     os.unlink(temp_name)
-            created.append(row)
+            created.append({**row, "output_sha256": output_hash})
     except Exception:
         for row in created:
             Path(row["output_path"]).unlink(missing_ok=True)
@@ -153,3 +179,25 @@ def create_photo_copies(plan: list[dict], output_root: str | os.PathLike, batch_
         "manifest_path": str(manifest_path),
         "batch_dir": str(root),
     }
+
+
+def _render_mirrored_image(source_path: Path, output_path: Path) -> None:
+    with Image.open(source_path) as source:
+        image_format = source.format
+        image = ImageOps.mirror(ImageOps.exif_transpose(source))
+        if image_format == "PNG" and source.mode == "P" and "transparency" in source.info:
+            image = image.convert("RGBA")
+        exif = source.getexif()
+        if 274 in exif:
+            exif[274] = 1
+        save_options = {}
+        if exif:
+            save_options["exif"] = exif.tobytes()
+        if source.info.get("icc_profile"):
+            save_options["icc_profile"] = source.info["icc_profile"]
+        if image_format == "JPEG":
+            image = image.convert("RGB")
+            save_options.update(quality=100, subsampling=0, optimize=True)
+        elif image_format == "WEBP":
+            save_options.update(lossless=True, method=6)
+        image.save(output_path, format=image_format, **save_options)
