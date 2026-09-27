@@ -3553,13 +3553,13 @@ class InstagramAutoPro(ctk.CTk):
             return
 
     def _save_lane_defaults(self):
-        values = {
-            "target": self.acct_lane_target.get().strip(),
-            "horizon_days": int(self.acct_lane_horizon.get()),
-            "every_days": int(self.acct_lane_every_days.get()),
-            "times": self.acct_lane_times.get().strip(),
-        }
         try:
+            values = {
+                "target": self.acct_lane_target.get().strip(),
+                "horizon_days": int(self.acct_lane_horizon.get()),
+                "every_days": int(self.acct_lane_every_days.get()),
+                "times": self.acct_lane_times.get().strip(),
+            }
             expand_lane_slots(
                 self.acct_lane_start_date.get().strip(),
                 values["horizon_days"],
