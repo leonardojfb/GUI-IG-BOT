@@ -1269,8 +1269,8 @@ class InstagramAutoPro(ctk.CTk):
         nav_groups = [
             ("Edición",       [("🖼️   Edición de video", "VideoEditor")]),
             ("Contenido",    [("🔮   Forge", "Forge"), ("🎬   Tandas", "Tandas")]),
-            ("Distribución", [("🚀   Logística", "Logistica"), ("📡   Cuentas", "Cuentas"),
-                              ("📲   Telegram", "Telegram")]),
+            ("Distribución", [("🚀   Logística", "Logistica"), ("🗓️   Calendario", "Calendario"),
+                              ("📡   Cuentas", "Cuentas"), ("📲   Telegram", "Telegram")]),
             ("Control",      [("📊   Dashboard", "Dashboard")]),
             ("Sistema",      [("⚙️   Admin", "Equipo"), ("🔍   Verify Legacy", "VerifyLegacy"),
                               ("⬇   Actualizaciones", "Actualizaciones")]),
@@ -1326,7 +1326,7 @@ class InstagramAutoPro(ctk.CTk):
         container.grid_columnconfigure(0, weight=1)
         self._container = container
 
-        for name in ["Dashboard", "Equipo", "Tandas", "Logistica", "Telegram", "Cuentas", "VerifyLegacy", "AIAdvisor", "Forge", "VideoEditor", "Actualizaciones"]:
+        for name in ["Dashboard", "Equipo", "Tandas", "Logistica", "Calendario", "Telegram", "Cuentas", "VerifyLegacy", "AIAdvisor", "Forge", "VideoEditor", "Actualizaciones"]:
             f = ctk.CTkFrame(container, fg_color=BG_APP, corner_radius=0)
             f.grid(row=0, column=0, sticky="nsew")
             f.grid_columnconfigure(0, weight=1)
@@ -1337,6 +1337,7 @@ class InstagramAutoPro(ctk.CTk):
         self._build_team_frame()
         self._build_mix_frame()
         self._build_dist_frame()
+        self._build_calendar_frame()
         self._build_tg_frame()
         self._build_cuentas_frame()
         self._build_verify_legacy_frame()
@@ -1377,6 +1378,8 @@ class InstagramAutoPro(ctk.CTk):
             elif fr.winfo_manager():
                 fr.grid_remove()
         self._frames[name].tkraise()
+        if name == "Calendario":
+            self._refresh_calendar_view()
         # Nota: NO recargar listas acá. Cada panel (Cuentas, VerifyLegacy,
         # Tandas) reconstruye todas sus filas (CTkOptionMenu/CTkEntry por
         # cuenta) destruyendo y recreando widgets — hacerlo en cada cambio de
@@ -3949,6 +3952,188 @@ class InstagramAutoPro(ctk.CTk):
                 messagebox.showerror("Error en distribución", result)
 
         WorkerThread(self, done, task).start()
+
+    def _build_calendar_frame(self):
+        f = self._frames["Calendario"]
+        f.grid_rowconfigure(2, weight=1)
+        f.grid_columnconfigure(0, weight=1)
+        PageHeader(f, "DISTRIBUCIÓN", "Calendario", "Agenda manual por cuenta y hora local.").grid(
+            row=0, column=0, sticky="ew", padx=24, pady=(20, 10))
+
+        filters = ctk.CTkFrame(f, fg_color="transparent")
+        filters.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 8))
+        ctk.CTkLabel(filters, text="Desde:", text_color=TEXT_MUTED).pack(side="left", padx=(0, 6))
+        self.calendar_start = ctk.CTkEntry(filters, width=125, fg_color=BG_INPUT, border_color=BORDER)
+        self.calendar_start.insert(0, datetime.now().strftime("%Y-%m-%d"))
+        self.calendar_start.pack(side="left", padx=(0, 12))
+        ctk.CTkLabel(filters, text="Días:", text_color=TEXT_MUTED).pack(side="left", padx=(0, 6))
+        self.calendar_days = ctk.CTkEntry(filters, width=65, fg_color=BG_INPUT, border_color=BORDER)
+        self.calendar_days.insert(0, "30")
+        self.calendar_days.pack(side="left", padx=(0, 12))
+        ctk.CTkLabel(filters, text="Cuenta:", text_color=TEXT_MUTED).pack(side="left", padx=(0, 6))
+        account_names = [row.get("username", "") for row in self.db.get_all_accounts() if row.get("username")]
+        self.calendar_account = ctk.CTkComboBox(
+            filters, values=["Todas", *sorted(account_names)], width=190,
+            fg_color=BG_INPUT, border_color=BORDER,
+        )
+        self.calendar_account.set("Todas")
+        self.calendar_account.pack(side="left", padx=(0, 12))
+        GhostButton(filters, text="Actualizar", command=self._refresh_calendar_view).pack(side="left")
+
+        content = ctk.CTkFrame(f, fg_color="transparent")
+        content.grid(row=2, column=0, sticky="nsew", padx=24, pady=(0, 18))
+        content.grid_rowconfigure(0, weight=1)
+        content.grid_columnconfigure(0, weight=3)
+        content.grid_columnconfigure(1, weight=2)
+        table_card = Card(content, title="Publicaciones calendarizadas")
+        table_card.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        table = table_card.body
+        table.grid_rowconfigure(0, weight=1)
+        table.grid_columnconfigure(0, weight=1)
+        columns = ("Fecha", "Hora", "Cuenta", "Destino", "Medio", "Estado")
+        self.calendar_tree = ttk.Treeview(
+            table, columns=columns, show="headings", style="Premium.Treeview", selectmode="browse"
+        )
+        widths = {"Fecha": 100, "Hora": 65, "Cuenta": 120, "Destino": 185, "Medio": 70, "Estado": 90}
+        for column in columns:
+            self.calendar_tree.heading(column, text=column)
+            self.calendar_tree.column(column, width=widths[column], anchor="w" if column in {"Destino", "Cuenta"} else "center")
+        self.calendar_tree.bind("<<TreeviewSelect>>", self._show_calendar_entry)
+        tree_scroll = ttk.Scrollbar(table, orient="vertical", command=self.calendar_tree.yview)
+        self.calendar_tree.configure(yscrollcommand=tree_scroll.set)
+        self.calendar_tree.grid(row=0, column=0, sticky="nsew", padx=(8, 0), pady=8)
+        tree_scroll.grid(row=0, column=1, sticky="ns", pady=8, padx=(0, 6))
+
+        detail_card = Card(content, title="Detalle y vista previa")
+        detail_card.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        detail = detail_card.body
+        detail.grid_rowconfigure(0, weight=1)
+        detail.grid_columnconfigure(0, weight=1)
+        self.calendar_detail = ctk.CTkTextbox(detail, height=210, fg_color=BG_CARD2, text_color=TEXT_BODY)
+        self.calendar_detail.grid(row=0, column=0, sticky="nsew", padx=10, pady=(10, 6))
+        self.calendar_preview = ctk.CTkLabel(
+            detail, text="Selecciona una publicación", text_color=TEXT_MUTED,
+            fg_color=BG_CARD2, corner_radius=4, height=250,
+        )
+        self.calendar_preview.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        self.calendar_view_entries = {}
+
+    def _refresh_calendar_view(self):
+        if not hasattr(self, "calendar_tree"):
+            return
+        try:
+            start = date.fromisoformat(self.calendar_start.get().strip())
+            days = int(self.calendar_days.get().strip())
+            if days < 1 or days > 366:
+                raise ValueError
+        except ValueError:
+            messagebox.showwarning("Calendario", "Usa una fecha YYYY-MM-DD y un rango de 1 a 366 días.", parent=self)
+            return
+        account_filter = self.calendar_account.get().strip()
+        from calendar_manifest import load_entries, manifest_path, publication_target_for_entry
+        from por_cuentas_lanes import resolve_legacy_reel_schedule
+
+        manifest = manifest_path(_BASE_DIR)
+        try:
+            entries = load_entries(manifest, require_source=True)
+        except (OSError, ValueError) as error:
+            messagebox.showerror("Calendario", f"No se pudo leer el manifiesto: {error}", parent=self)
+            return
+        self.calendar_tree.delete(*self.calendar_tree.get_children())
+        self.calendar_view_entries = {}
+        end = start + timedelta(days=days - 1)
+        rows = []
+        for entry in entries:
+            username = entry.get("username", "")
+            if account_filter != "Todas" and username != account_filter:
+                continue
+            resolved = dict(entry)
+            if not (resolved.get("scheduled_date") and resolved.get("scheduled_time")):
+                try:
+                    schedule = resolve_legacy_reel_schedule(resolved, start.isoformat(), self.db)
+                    resolved.update(schedule)
+                except ValueError:
+                    pass
+            scheduled_date = resolved.get("scheduled_date") or ""
+            if scheduled_date:
+                try:
+                    local_date = date.fromisoformat(scheduled_date)
+                except ValueError:
+                    continue
+                if local_date < start or local_date > end:
+                    continue
+                shown_date = local_date.isoformat()
+            else:
+                day_number = int(resolved.get("day") or 1)
+                local_date = start + timedelta(days=max(0, day_number - 1))
+                if local_date > end:
+                    continue
+                shown_date = f"Dia {day_number}"
+            rows.append((
+                local_date,
+                resolved.get("scheduled_time") or "--:--",
+                username,
+                publication_target_for_entry(resolved),
+                resolved.get("media_kind") or "video",
+                resolved.get("manual_status") or "planned",
+                resolved,
+                shown_date,
+            ))
+        rows.sort(key=lambda row: (row[0], row[1], row[2], row[3], row[6].get("slot", 0)))
+        for index, row in enumerate(rows):
+            iid = str(index)
+            self.calendar_view_entries[iid] = row[6]
+            self.calendar_tree.insert("", "end", iid=iid, values=(row[7], row[1], "@" + row[2], row[3], row[4], row[5]))
+        self.calendar_detail.configure(state="normal")
+        self.calendar_detail.delete("1.0", "end")
+        self.calendar_detail.insert("end", f"{len(rows)} publicaciones en el periodo")
+        self.calendar_detail.configure(state="disabled")
+        self.calendar_preview.configure(image=None, text="Selecciona una publicación")
+        self.calendar_image_ref = None
+
+    def _show_calendar_entry(self, _event=None):
+        selection = self.calendar_tree.selection()
+        if not selection:
+            return
+        entry = self.calendar_view_entries.get(selection[0])
+        if not entry:
+            return
+        target = entry.get("publication_target") or "instagram_reel"
+        details = [
+            f"Cuenta: @{entry.get('username', '')}",
+            f"Destino: {target}",
+            f"Fecha: {entry.get('scheduled_date') or 'según día legacy'} {entry.get('scheduled_time') or ''} {entry.get('timezone') or ''}",
+            f"Estado: {entry.get('manual_status') or 'planned'}",
+            f"Archivo: {entry.get('source_path', '')}",
+        ]
+        if entry.get("caption"):
+            details.extend(["", "Caption:", entry["caption"]])
+        if entry.get("story_link_url"):
+            details.extend(["", f"Enlace Story: {entry['story_link_url']}"])
+        if entry.get("story_announcement_text"):
+            details.extend(["", f"Texto Story: {entry['story_announcement_text']}"])
+        for label, key in (("Título", "title"), ("Precio", "price"), ("Condición", "condition"), ("Descripción", "description")):
+            value = (entry.get("platform_payload") or {}).get(key)
+            if value:
+                details.append(f"{label}: {value}")
+        self.calendar_detail.configure(state="normal")
+        self.calendar_detail.delete("1.0", "end")
+        self.calendar_detail.insert("end", "\n".join(details))
+        self.calendar_detail.configure(state="disabled")
+        self.calendar_image_ref = None
+        path = entry.get("source_path", "")
+        if Path(path).suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}:
+            try:
+                from PIL import Image, ImageOps
+                with Image.open(path) as source:
+                    image = ImageOps.exif_transpose(source).convert("RGB")
+                    image.thumbnail((460, 290), Image.Resampling.LANCZOS)
+                    self.calendar_image_ref = ctk.CTkImage(light_image=image, dark_image=image, size=image.size)
+                self.calendar_preview.configure(image=self.calendar_image_ref, text="")
+                return
+            except Exception:
+                pass
+        self.calendar_preview.configure(image=None, text="Vista previa no disponible para este archivo")
 
     def _build_tg_frame(self):
         """TAREA 6 — Bot Telegram."""
