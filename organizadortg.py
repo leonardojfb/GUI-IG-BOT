@@ -1308,7 +1308,9 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
 
                 if vid.get("scheduled_time") and not vid.get("_legacy_resolved_schedule") and cap:
                     meta += f"\nCaption: {cap}"
-                attachment_caption = cap if len(cap) <= 1000 else ""
+                attachment_caption = cap
+                if len(attachment_caption) > 850:
+                    attachment_caption = attachment_caption[:800].rstrip() + "\n[Caption completa en el mensaje anterior]"
 
                 jobs_by_chat[chat_id].append({
                     "chat_id": chat_id,
@@ -1378,7 +1380,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                 if job["media_kind"] == "image":
                     ok, _topic_id = _send_image_to_topic(
                         job["chat_id"], topic_id, job["attachment_caption"], job["path"],
-                        topics_state, job["username"], job["tag"], job["source_hash"],
+                        topics_state, job["username"], job["tag"],
                     )
                 else:
                     ok, _topic_id = _send_video_to_topic(
