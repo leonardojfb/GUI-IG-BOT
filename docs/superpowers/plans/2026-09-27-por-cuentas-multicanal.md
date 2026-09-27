@@ -73,3 +73,26 @@ correcto y no-publicacion Meta.
 Migracion aditiva, prueba con una copia de manifest real, release code-only y
 prueba manual en la GUI instalada. La actualizacion no incluye DB, manifests
 ni media.
+
+## Estado de Implementacion
+
+Rama de trabajo: `feature/por-cuentas-multicanal`.
+
+- Implementado: planificador y deteccion de choques por identidad/fecha/hora;
+  insercion atomica al manifiesto; carriles manuales Instagram/Facebook desde
+  Logistica > Por Cuentas; defaults locales editables; links por identidad;
+  pantalla Calendario con filtros, detalles y preview de imagen.
+- Implementado: Photo Forge con una salida por identidad, manifiesto de
+  procedencia, copia sin cambios por defecto y espejo horizontal opcional.
+- Implementado: entrega de imagen/video por Telegram, topics por identidad o
+  separados por destino, entrega ordenada y estados `planned`, `sent_telegram`
+  y `published`. La confirmacion `published` se reconcilia con Airtable.
+- Verificacion realizada hasta ahora: compilacion sintactica de modulos Python
+  y `git diff --check`. No se ejecutaron tests automatizados ni se hizo una
+  prueba visual/live de GUI o Telegram.
+- Pendiente antes de release: ejecutar las validaciones del plan, revisar el
+  flujo en la GUI instalada y hacer un envio controlado a Telegram.
+- Actualizador: como la release agrega modulos locales, publicar primero una
+  release bootstrap solo con `updater.py` y `version.json`; publicar el codigo
+  de la funcion en una version posterior para que instalaciones antiguas
+  acepten `publication_schedule.py`, `por_cuentas_lanes.py` y `photo_forge.py`.
