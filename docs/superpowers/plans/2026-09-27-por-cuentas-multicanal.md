@@ -100,6 +100,9 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   y `published`. La confirmacion `published` se reconcilia con Airtable.
 - Los jobs con `lane_id` siempre envian su mensaje de contexto aunque este
   activo **Envío express**; fecha, destino y metadatos Marketplace no se omiten.
+- Los Reels legacy sin fecha explícita resuelven su hora local usando la fecha
+  programada; Telegram reutiliza esa resolución para mostrar la hora y no
+  recalcula el offset DST con la fecha actual.
 - Logistica Por Cuentas muestra un aviso en la previsualizacion si incluye
   salidas validadas de tandas Forge parciales; tandas con inventario invalido
   o estados no distribuibles siguen bloqueadas.

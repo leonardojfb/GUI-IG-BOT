@@ -1378,7 +1378,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     print(f"Topic no encontrado para @{username}; se omite la publicacion.")
                     continue
 
-                if vid.get("scheduled_time") and not vid.get("_legacy_resolved_schedule"):
+                if vid.get("scheduled_time"):
                     hora_et = ""
                     local_label = f"{vid['scheduled_time']} {vid.get('timezone') or va_tz}"
                     target = vid.get("publication_target") or publication_target_for_entry(vid)
