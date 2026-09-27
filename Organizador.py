@@ -40,11 +40,17 @@ def _tanda_video_inventory(tanda_path, extensions=(".mp4", ".mov")):
                     f"Tanda Forge parcial: usando {len(published)} copias publicadas; "
                     f"{pending_count} pendientes."
                 )
-        if status.get("state") != "complete":
-            return [], "Tanda Forge incompleta: reintenta las copias pendientes antes de Logística."
         validated = set(status["validated"])
         if not validated or not validated.issubset(set(videos)):
             return [], "Inventario Forge inválido: faltan copias validadas."
+        if status.get("state") == "incomplete":
+            pending_count = len(pending_names)
+            return [name for name in videos if name in validated], (
+                f"Tanda Forge parcial: usando {len(validated)} copias validadas; "
+                f"{pending_count} pendientes."
+            )
+        if status.get("state") != "complete":
+            return [], "Tanda Forge incompleta: reintenta las copias pendientes antes de Logística."
         return [name for name in videos if name in validated], None
     except (OSError, ValueError, KeyError, TypeError):
         return [], "Estado Forge ilegible: no se puede distribuir esta tanda."

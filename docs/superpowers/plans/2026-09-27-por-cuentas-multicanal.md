@@ -90,6 +90,9 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
 - Logistica Por Cuentas muestra un aviso en la previsualizacion si incluye
   salidas validadas de tandas Forge parciales; tandas con inventario invalido
   o estados no distribuibles siguen bloqueadas.
+- Los carriles de video aplican el mismo gate de inventario por cuenta antes
+  de calendarizar: solo aceptan finales presentes y validados, con warning y
+  conteo de pendientes para tandas `incomplete`.
 - Verificacion realizada hasta ahora: compilacion sintactica de modulos Python
   y `git diff --check`. No se ejecutaron tests automatizados ni se hizo una
   prueba visual/live de GUI o Telegram.

@@ -3606,7 +3606,9 @@ class InstagramAutoPro(ctk.CTk):
         root = Path(root_text)
         account_rows = {row["username"]: row for row in self.db.get_all_accounts()}
         finals_by_account = {}
+        partial_notices = []
         extension_filter = {".mp4", ".mov", ".m4v", ".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"}
+        video_targets = {"instagram_reel", "instagram_trial_reel", "facebook_reel"}
         if target == "facebook_marketplace_listing":
             extension_filter = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"}
         for username in accounts:
@@ -3618,10 +3620,24 @@ class InstagramAutoPro(ctk.CTk):
                     "Carril", f"Falta la subcarpeta de finales para @{username}: {root / username}", parent=self
                 )
                 return
-            finals_by_account[username] = sorted(
+            account_finals = sorted(
                 (path for path in account_dir.rglob("*") if path.is_file() and path.suffix.lower() in extension_filter),
                 key=lambda path: str(path).casefold(),
             )
+            if target in video_targets:
+                from Organizador import _tanda_video_inventory
+
+                videos, notice = _tanda_video_inventory(
+                    str(account_dir), extensions=(".mp4", ".mov", ".m4v")
+                )
+                if notice and not notice.startswith("Tanda Forge parcial:"):
+                    messagebox.showwarning("Inventario Forge", f"@{username}: {notice}", parent=self)
+                    return
+                if notice:
+                    partial_notices.append(f"@{username}: {notice}")
+                allowed_videos = set(videos)
+                account_finals = [path for path in account_finals if path.name in allowed_videos]
+            finals_by_account[username] = account_finals
             if len(finals_by_account[username]) < len(slots):
                 messagebox.showwarning(
                     "Finales insuficientes",
@@ -3727,6 +3743,10 @@ class InstagramAutoPro(ctk.CTk):
             f"Cuentas: {len(accounts)} | Publicaciones nuevas: {len(candidates)}",
             "",
         ]
+        if partial_notices:
+            lines.extend(["AVISO: TANDAS FORGE PARCIALES"])
+            lines.extend(f"- {notice}" for notice in partial_notices)
+            lines.append("")
         selected_names = set(accounts)
         for entry in plan.entries:
             if entry.get("username") not in selected_names:
