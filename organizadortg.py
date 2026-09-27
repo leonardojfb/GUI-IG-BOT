@@ -1470,7 +1470,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
         desc = str(msg_res.get("description", ""))
         if "thread not found" not in desc:
             print(f"⚠️ Error en Telegram API (sendMessage) para @{job['username']}: {msg_res}")
-            return job["topic_id"]
+            return None
         print(f"⚠️ Topic expirado para @{job['username']}, recreando...")
         with state_lock:
             topic_id = get_or_create_topic(
