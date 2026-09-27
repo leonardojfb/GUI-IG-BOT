@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, time
+from datetime import date, time, timedelta
 from typing import Iterable
 
 
@@ -18,6 +18,12 @@ class ScheduleConflict:
 class ScheduleMergeResult:
     entries: list[dict]
     conflicts: list[ScheduleConflict]
+
+
+@dataclass(frozen=True)
+class ScheduledSlot:
+    scheduled_date: str
+    scheduled_time: str
 
 
 def _schedule_key(entry: dict) -> tuple[str, str, str] | None:
@@ -79,3 +85,34 @@ def validate_scheduled_fields(scheduled_date: str | None, scheduled_time: str | 
     if len(time_text) != 5:
         raise ValueError("La hora local debe usar formato HH:MM.")
     return date_text, time_text
+
+
+def expand_lane_slots(
+    start_date: str,
+    horizon_days: int,
+    every_days: int,
+    times: Iterable[str],
+) -> list[ScheduledSlot]:
+    """Expand a per-account lane into ordered local date/time slots."""
+    if every_days <= 0:
+        raise ValueError("La regla cada N dias debe ser positiva.")
+    if horizon_days <= 0:
+        raise ValueError("El periodo debe contener al menos un dia.")
+    try:
+        start = date.fromisoformat(str(start_date))
+    except ValueError as error:
+        raise ValueError("La fecha inicial es invalida.") from error
+
+    normalized_times = sorted(
+        {validate_scheduled_fields("2000-01-01", value)[1] for value in times}
+    )
+    if not normalized_times:
+        raise ValueError("El carril necesita al menos una hora.")
+
+    slots: list[ScheduledSlot] = []
+    for offset in range(horizon_days):
+        if offset % every_days:
+            continue
+        scheduled_date = (start + timedelta(days=offset)).isoformat()
+        slots.extend(ScheduledSlot(scheduled_date, value) for value in normalized_times)
+    return slots

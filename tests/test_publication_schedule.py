@@ -1,5 +1,5 @@
 from calendar_manifest import build_entry
-from publication_schedule import merge_scheduled_entries
+from publication_schedule import expand_lane_slots, merge_scheduled_entries
 
 
 def _entry(tmp_path, username, filename, date, time):
@@ -68,3 +68,30 @@ def test_manifest_keeps_schedule_fields_optional_for_legacy_entries(tmp_path):
     assert result.conflicts == []
     assert result.entries[0] is scheduled
     assert result.entries[1] is legacy
+
+
+def test_expand_lane_slots_uses_every_n_days_and_sorts_hours():
+    slots = expand_lane_slots(
+        start_date="2026-10-05",
+        horizon_days=7,
+        every_days=3,
+        times=["16:00", "09:00"],
+    )
+
+    assert [(slot.scheduled_date, slot.scheduled_time) for slot in slots] == [
+        ("2026-10-05", "09:00"),
+        ("2026-10-05", "16:00"),
+        ("2026-10-08", "09:00"),
+        ("2026-10-08", "16:00"),
+        ("2026-10-11", "09:00"),
+        ("2026-10-11", "16:00"),
+    ]
+
+
+def test_expand_lane_slots_rejects_non_positive_frequency():
+    try:
+        expand_lane_slots("2026-10-05", 7, 0, ["09:00"])
+    except ValueError as error:
+        assert "cada N dias" in str(error)
+    else:
+        raise AssertionError("La frecuencia invalida debe bloquearse")
