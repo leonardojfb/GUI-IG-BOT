@@ -206,10 +206,13 @@ def validated_account_outputs(batch_dir: str | os.PathLike, username: str) -> li
         if row.get("username") != username:
             continue
         try:
-            output = Path(row["output_path"]).resolve()
+            recorded_name = Path(str(row["output_path"])).name
             expected_hash = str(row["output_sha256"]).lower()
-        except (KeyError, OSError, TypeError) as error:
+        except (KeyError, OSError, TypeError, ValueError) as error:
             raise ValueError("Una salida de Photo Forge tiene metadatos inválidos.") from error
+        if not recorded_name or recorded_name in {".", ".."}:
+            raise ValueError("Una salida de Photo Forge tiene un nombre inválido.")
+        output = (expected_dir / recorded_name).resolve()
         if output.parent != expected_dir or output.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS:
             raise ValueError(f"La salida de Photo Forge está fuera de la carpeta de @{username}.")
         key = os.path.normcase(str(output)).casefold()
