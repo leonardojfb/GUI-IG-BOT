@@ -96,6 +96,10 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
 - Telegram omite en ejecuciones posteriores las filas ya confirmadas como
   `sent_telegram` o `published`, sin ocultarlas del calendario ni del conteo
   historico de publicaciones.
+- Para carriles nuevos, el hash de publicado incluye identidad y destino
+  tambien para videos: bytes iguales en cuentas/canales distintos no marcan
+  globalmente las otras publicaciones. Reels historicos conservan el hash
+  global anterior para no romper su compatibilidad con Airtable.
 - Las publicaciones de Story llevan un boton para copiar su URL individual
   cuando no supera el limite documentado por Telegram; el enlace completo
   tambien se conserva visible en los metadatos enviados al topic.

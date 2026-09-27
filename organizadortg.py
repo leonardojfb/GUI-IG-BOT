@@ -139,8 +139,9 @@ def _source_sha256(path):
     return digest.hexdigest()
 
 
-def _account_publication_hash(username, publication_target, source_hash):
-    identity = f"photo:{str(username).strip().lower()}:{publication_target}:{source_hash}"
+def _account_publication_hash(username, publication_target, source_hash, media_kind="image"):
+    prefix = "photo" if media_kind == "image" else "video"
+    identity = f"{prefix}:{str(username).strip().lower()}:{publication_target}:{source_hash}"
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
@@ -204,6 +205,7 @@ def _scan_manifest_calendar_structure(manifest_file=None):
             "delivery_kind": entry.get("delivery_kind", "normal"),
             "publication_target": publication_target,
             "media_kind": media_kind,
+            "lane_id": str(entry.get("lane_id") or ""),
             "manual_status": str(entry.get("manual_status") or "planned"),
             "scheduled_date": entry.get("scheduled_date") or "",
             "scheduled_time": entry.get("scheduled_time") or "",
@@ -1187,11 +1189,12 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
             source_hash = _source_sha256(video["path"])
             publication_hash = (
                 source_hash
-                if video.get("media_kind") == "video"
+                if video.get("media_kind") == "video" and not video.get("lane_id")
                 else _account_publication_hash(
                     video.get("username", ""),
                     video.get("publication_target") or publication_target_for_entry(video),
                     source_hash,
+                    video.get("media_kind", "image"),
                 )
             )
             if publication_hash in published_hashes:
