@@ -5715,8 +5715,14 @@ class InstagramAutoPro(ctk.CTk):
             highlightbackground=self.themed(BORDER), font=FONT_BODY,
         )
         self.photo_forge_sources.grid(row=0, column=0, sticky="nsew", padx=12, pady=(12, 6))
+        self.photo_forge_sources.bind("<<ListboxSelect>>", self._photo_forge_show_preview)
+        self.photo_forge_preview = ctk.CTkLabel(
+            source, text="Selecciona una imagen", text_color=TEXT_MUTED,
+            fg_color=BG_CARD2, corner_radius=4, height=170,
+        )
+        self.photo_forge_preview.grid(row=1, column=0, sticky="ew", padx=12, pady=6)
         source_buttons = ctk.CTkFrame(source, fg_color="transparent")
-        source_buttons.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 12))
+        source_buttons.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 12))
         PrimaryButton(source_buttons, text="Agregar imágenes", command=self._photo_forge_add_images).pack(side="left", padx=(0, 6))
         GhostButton(source_buttons, text="Quitar seleccionadas", command=self._photo_forge_remove_images).pack(side="left")
 
@@ -5779,6 +5785,32 @@ class InstagramAutoPro(ctk.CTk):
     def _photo_forge_remove_images(self):
         for index in reversed(self.photo_forge_sources.curselection()):
             self.photo_forge_sources.delete(index)
+        self._photo_forge_show_preview()
+
+    def _photo_forge_show_preview(self, _event=None):
+        selection = self.photo_forge_sources.curselection()
+        if not selection:
+            self.photo_forge_preview.configure(image=None, text="Selecciona una imagen")
+            self.photo_forge_preview_ref = None
+            return
+        path = self.photo_forge_sources.get(selection[0])
+        try:
+            from PIL import Image, ImageOps
+            with Image.open(path) as source:
+                dimensions = source.size
+                image = ImageOps.exif_transpose(source).convert("RGB")
+                image.thumbnail((520, 250), Image.Resampling.LANCZOS)
+                self.photo_forge_preview_ref = ctk.CTkImage(
+                    light_image=image, dark_image=image, size=image.size
+                )
+            self.photo_forge_preview.configure(
+                image=self.photo_forge_preview_ref,
+                text=f"{os.path.basename(path)} · {dimensions[0]}×{dimensions[1]}",
+                compound="top",
+            )
+        except Exception:
+            self.photo_forge_preview.configure(image=None, text=f"No se pudo previsualizar: {os.path.basename(path)}")
+            self.photo_forge_preview_ref = None
 
     def _photo_forge_selected_accounts(self):
         return [self.photo_forge_account_rows[index] for index in self.photo_forge_accounts.curselection()]
