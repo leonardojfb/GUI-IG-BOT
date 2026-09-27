@@ -4090,7 +4090,18 @@ class InstagramAutoPro(ctk.CTk):
 
         manifest = manifest_path(_BASE_DIR)
         try:
-            entries = load_entries(manifest, require_source=True)
+            if manifest.exists():
+                entries = load_entries(manifest, require_source=True)
+            else:
+                import organizadortg
+                entries = [
+                    {
+                        **row,
+                        "source_path": row.get("path", ""),
+                        "day": str(row.get("day", "Dia_1")).replace("Dia_", ""),
+                    }
+                    for row in organizadortg.scan_calendar_structure()
+                ]
         except (OSError, ValueError) as error:
             messagebox.showerror("Calendario", f"No se pudo leer el manifiesto: {error}", parent=self)
             return
