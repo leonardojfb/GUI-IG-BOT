@@ -181,6 +181,51 @@ def create_photo_copies(plan: list[dict], output_root: str | os.PathLike, batch_
     }
 
 
+def validated_account_outputs(batch_dir: str | os.PathLike, username: str) -> list[Path]:
+    """Return this account's Photo Forge outputs in manifest order, fail closed on drift."""
+    root = Path(batch_dir).resolve()
+    manifest_path = root / MANIFEST_NAME
+    try:
+        with manifest_path.open("r", encoding="utf-8") as stream:
+            manifest = json.load(stream)
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("El manifiesto de Photo Forge no se puede leer.") from error
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("version") != 1
+        or not isinstance(manifest.get("entries"), list)
+    ):
+        raise ValueError("El manifiesto existente de Photo Forge no es válido.")
+
+    expected_dir = (root / _safe_name(username)).resolve()
+    outputs = []
+    seen = set()
+    for row in manifest["entries"]:
+        if not isinstance(row, dict):
+            raise ValueError("El manifiesto de Photo Forge contiene una entrada inválida.")
+        if row.get("username") != username:
+            continue
+        try:
+            output = Path(row["output_path"]).resolve()
+            expected_hash = str(row["output_sha256"]).lower()
+        except (KeyError, OSError, TypeError) as error:
+            raise ValueError("Una salida de Photo Forge tiene metadatos inválidos.") from error
+        if output.parent != expected_dir or output.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS:
+            raise ValueError(f"La salida de Photo Forge está fuera de la carpeta de @{username}.")
+        key = os.path.normcase(str(output)).casefold()
+        if key in seen:
+            raise ValueError(f"El manifiesto repite una salida de Photo Forge: {output.name}.")
+        seen.add(key)
+        if not output.is_file():
+            raise ValueError(f"Falta una salida de Photo Forge: {output.name}.")
+        if len(expected_hash) != 64 or _sha256(output) != expected_hash:
+            raise ValueError(f"La salida de Photo Forge cambió desde su validación: {output.name}.")
+        outputs.append(output)
+    if not outputs:
+        raise ValueError(f"Photo Forge no registra finales para @{username} en esta tanda.")
+    return outputs
+
+
 def _render_mirrored_image(source_path: Path, output_path: Path) -> None:
     with Image.open(source_path) as source:
         image_format = source.format

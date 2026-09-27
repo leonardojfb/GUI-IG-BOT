@@ -20,9 +20,9 @@ Para video, usa los finales validados de Forge en `videos_finales/<tanda>`.
 Para fotos, abre **Photo Forge**:
 
 1. Define nombre de tanda y carpeta de salida.
-2. Agrega las imágenes. Logística asigna los finales a los turnos por nombre
-   de archivo, no por el orden de selección; usa nombres con prefijos como
-   `01_`, `02_` si necesitas un orden concreto.
+2. Agrega las imágenes en el orden deseado. Las tandas de Photo Forge guardan
+   ese orden en su manifiesto; para carpetas externas sin manifiesto, Logística
+   ordena los finales por nombre de archivo.
 3. Selecciona las identidades destino. Cada una recibe su propio archivo final.
 4. Deja **Espejo horizontal** apagado para conservar exactamente los bytes; si
    lo activas, se crea una variante reflejada y el original no cambia.

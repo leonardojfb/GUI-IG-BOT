@@ -3701,10 +3701,26 @@ class InstagramAutoPro(ctk.CTk):
                     "Carril", f"Falta la subcarpeta de finales para @{username}: {root / username}", parent=self
                 )
                 return
-            account_finals = sorted(
-                (path for path in account_dir.rglob("*") if path.is_file() and path.suffix.lower() in extension_filter),
-                key=lambda path: str(path).casefold(),
-            )
+            photo_batch_root = root
+            if account_dir == root and not (photo_batch_root / "photo_forge_manifest.json").is_file():
+                photo_batch_root = root.parent
+            photo_manifest = photo_batch_root / "photo_forge_manifest.json"
+            if photo_manifest.is_file() and target not in video_targets:
+                try:
+                    from photo_forge import validated_account_outputs
+
+                    account_finals = [
+                        path for path in validated_account_outputs(photo_batch_root, username)
+                        if path.suffix.lower() in extension_filter
+                    ]
+                except (OSError, ValueError) as error:
+                    messagebox.showwarning("Photo Forge", str(error), parent=self)
+                    return
+            else:
+                account_finals = sorted(
+                    (path for path in account_dir.rglob("*") if path.is_file() and path.suffix.lower() in extension_filter),
+                    key=lambda path: str(path).casefold(),
+                )
             if target in video_targets:
                 from Organizador import _tanda_video_inventory
 
