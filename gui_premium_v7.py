@@ -34,6 +34,7 @@ from calendar_manifest import (
 from publication_schedule import expand_lane_slots, merge_scheduled_entries
 from por_cuentas_lanes import LaneRequest, build_lane_entries, resolve_legacy_reel_schedule
 from database import DatabaseManager
+from social_publishing import resolve_story_link
 from airtable_sync import (
     AirtableConfig,
     AirtableSyncError,
@@ -2004,6 +2005,7 @@ class InstagramAutoPro(ctk.CTk):
         for w in self._acc_scroll.winfo_children():
             w.destroy()
         accounts  = self.db.get_all_accounts()
+        story_base = self.db.get_story_link_base_url()
         vas_list  = ["Sin Asignar"] + self.db.get_vas()
         cats_list = self.db.get_categories() or ["GENERAL"]
         self._acc_header_lbl.configure(text=f"{len(accounts)} cuenta(s) destino")
@@ -2081,9 +2083,88 @@ class InstagramAutoPro(ctk.CTk):
                 r, text=f"Checks ({len(limitations)})", width=108, height=30,
                 command=lambda u=username, values=limitations: self._edit_account_limitations(u, values),
             ).grid(row=0, column=8, padx=(2, 4), pady=6)
+            override_enabled = bool(acc.get("story_link_override_enabled"))
+            link_state = "Propio" if override_enabled else ("Base" if story_base else "Sin link")
+            GhostButton(
+                r, text=link_state, width=92, height=30,
+                command=lambda u=username: self._edit_account_story_link(u),
+            ).grid(row=0, column=9, padx=(2, 4), pady=6)
             DangerButton(r, text="×", width=28, height=30,
                           command=lambda u=username: self._admin_delete_account(u)
-                          ).grid(row=0, column=9, padx=(2, 8), pady=6)
+                          ).grid(row=0, column=10, padx=(2, 8), pady=6)
+
+    def _save_story_link_base(self):
+        try:
+            normalized = self.db.set_story_link_base_url(self.story_link_base_entry.get())
+        except ValueError as error:
+            return messagebox.showwarning("Link Story", str(error), parent=self)
+        self.story_link_base_entry.delete(0, "end")
+        self.story_link_base_entry.insert(0, normalized)
+        self._admin_load_accounts()
+
+    def _edit_account_story_link(self, username: str):
+        account = next(
+            (row for row in self.db.get_all_accounts() if row.get("username") == username),
+            None,
+        )
+        if not account:
+            return messagebox.showerror("Link Story", f"No existe @{username}.", parent=self)
+
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(f"Link Story — @{username}")
+        dialog.geometry("520x250")
+        dialog.configure(fg_color=BG_CARD)
+        dialog.transient(self)
+        dialog.grab_set()
+        ctk.CTkLabel(
+            dialog, text=f"Enlace de Story para @{username}", text_color=TEXT_H1,
+            font=ctk.CTkFont(size=15, weight="bold"),
+        ).pack(anchor="w", padx=20, pady=(18, 8))
+
+        enabled = tk.BooleanVar(value=bool(account.get("story_link_override_enabled")))
+        override_entry = ctk.CTkEntry(
+            dialog, fg_color=BG_INPUT, border_color=BORDER,
+            placeholder_text="https://...",
+        )
+        override_entry.insert(0, account.get("story_link_override") or "")
+        override_entry.pack(fill="x", padx=20, pady=(2, 8))
+        preview = ctk.CTkLabel(dialog, text="", text_color=TEXT_MUTED, anchor="w", wraplength=470)
+        preview.pack(fill="x", padx=20, pady=(0, 8))
+
+        def refresh_preview(*_args):
+            override_entry.configure(state="normal" if enabled.get() else "disabled")
+            try:
+                resolved = resolve_story_link(
+                    self.db.get_story_link_base_url(), username,
+                    enabled.get(), override_entry.get(),
+                )
+            except ValueError:
+                resolved = "URL no válida"
+            preview.configure(text=resolved or "Sin enlace configurado")
+
+        ctk.CTkCheckBox(
+            dialog, text="Usar enlace propio", variable=enabled,
+            command=refresh_preview, text_color=TEXT_BODY,
+            fg_color=ACCENT, hover_color=ACCENT_HOVER,
+        ).pack(anchor="w", padx=20, pady=(0, 8))
+        override_entry.bind("<KeyRelease>", refresh_preview)
+        refresh_preview()
+
+        buttons = ctk.CTkFrame(dialog, fg_color="transparent")
+        buttons.pack(fill="x", padx=20, pady=(8, 16))
+        GhostButton(buttons, text="Cancelar", command=dialog.destroy).pack(side="right")
+
+        def save():
+            try:
+                self.db.set_story_link_override(
+                    username, enabled.get(), override_entry.get() if enabled.get() else ""
+                )
+            except ValueError as error:
+                return messagebox.showwarning("Link Story", str(error), parent=dialog)
+            dialog.destroy()
+            self._admin_load_accounts()
+
+        PrimaryButton(buttons, text="Guardar", command=save).pack(side="right", padx=(0, 8))
 
     def _set_account_label(self, username: str, value: str):
         self.db.update_account(username, ig_label=value)
@@ -4869,7 +4950,7 @@ class InstagramAutoPro(ctk.CTk):
         accounts_card = Card(f, title="Cuentas destino")
         accounts_card.grid(row=2, column=0, sticky="nsew", padx=24, pady=(0, 20))
         accounts_body = accounts_card.body
-        accounts_body.grid_rowconfigure(2, weight=1)
+        accounts_body.grid_rowconfigure(3, weight=1)
         accounts_body.grid_columnconfigure(0, weight=1)
 
         accounts_header = ctk.CTkFrame(accounts_body, fg_color="transparent")
@@ -4898,12 +4979,31 @@ class InstagramAutoPro(ctk.CTk):
         GhostButton(accounts_header, text="Actualizar", width=110,
                     command=self._admin_load_accounts).grid(row=0, column=4, sticky="e")
 
+        story_link_bar = ctk.CTkFrame(accounts_body, fg_color=BG_CARD2, corner_radius=BTN_RADIUS)
+        story_link_bar.grid(row=1, column=0, sticky="ew", pady=(0, 6))
+        story_link_bar.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(
+            story_link_bar, text="Dominio base Story", text_color=TEXT_MUTED,
+            font=ctk.CTkFont(size=11),
+        ).grid(row=0, column=0, padx=(12, 6), pady=8, sticky="w")
+        self.story_link_base_entry = ctk.CTkEntry(
+            story_link_bar, fg_color=BG_INPUT, border_color=BORDER,
+            placeholder_text="https://tu-dominio.com",
+        )
+        self.story_link_base_entry.insert(0, self.db.get_story_link_base_url())
+        self.story_link_base_entry.grid(row=0, column=1, padx=4, pady=6, sticky="ew")
+        GhostButton(
+            story_link_bar, text="Guardar base", width=112,
+            command=self._save_story_link_base,
+        ).grid(row=0, column=2, padx=(4, 10), pady=6)
+
         columns = ctk.CTkFrame(accounts_body, fg_color=BG_CARD2, corner_radius=BTN_RADIUS)
-        columns.grid(row=1, column=0, sticky="ew", pady=(0, 6))
+        columns.grid(row=2, column=0, sticky="ew", pady=(0, 6))
         columns.grid_columnconfigure(0, weight=1)
         for index, (title, width) in enumerate([
             ("Cuenta", 0), ("Etiqueta", 105), ("Seguidores", 78), ("Estado", 98),
-            ("Categoría", 120), ("VA", 150), ("Notas", 150), ("Limitaciones", 108), ("", 28),
+            ("Categoría", 120), ("VA", 150), ("Trials", 118), ("Notas", 150),
+            ("Limitaciones", 108), ("Link Story", 92), ("", 28),
         ]):
             ctk.CTkLabel(columns, text=title, text_color=TEXT_MUTED,
                          font=ctk.CTkFont(size=10, weight="bold"), width=width,
@@ -4912,7 +5012,7 @@ class InstagramAutoPro(ctk.CTk):
                              sticky="ew" if index == 0 else "")
 
         self._acc_scroll = ctk.CTkScrollableFrame(accounts_body, fg_color="transparent", height=380)
-        self._acc_scroll.grid(row=2, column=0, sticky="nsew")
+        self._acc_scroll.grid(row=3, column=0, sticky="nsew")
         self._acc_scroll.grid_columnconfigure(0, weight=1)
         self._admin_refresh()
 

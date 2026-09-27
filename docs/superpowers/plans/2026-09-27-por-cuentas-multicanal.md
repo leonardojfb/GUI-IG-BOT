@@ -82,6 +82,9 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   insercion atomica al manifiesto; carriles manuales Instagram/Facebook desde
   Logistica > Por Cuentas; defaults locales editables; links por identidad;
   pantalla Calendario con filtros, detalles y preview de imagen.
+- Cuentas permite configurar un dominio base de Story y un link propio por
+  identidad; la resolucion queda en SQLite local y no se agrega a los campos
+  sincronizados con Airtable.
 - Implementado: Photo Forge con una salida por identidad, manifiesto de
   procedencia, copia sin cambios por defecto y espejo horizontal opcional.
   Al terminar, Logistica abre con la carpeta de salida y las mismas identidades
