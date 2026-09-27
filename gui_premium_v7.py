@@ -4299,13 +4299,17 @@ class InstagramAutoPro(ctk.CTk):
                 if not entry_id or not path or not Path(path).is_file():
                     continue
                 content_hash = organizadortg._source_sha256(path)
-                if entry.get("media_kind") == "video":
+                media_kind = entry.get("media_kind") or (
+                    "video" if Path(path).suffix.lower() in {".mp4", ".mov", ".m4v"} else "image"
+                )
+                if media_kind == "video" and not entry.get("lane_id"):
                     publication_hash = content_hash
                 else:
                     publication_hash = organizadortg._account_publication_hash(
                         entry.get("username", ""),
                         entry.get("publication_target") or "instagram_reel",
                         content_hash,
+                        media_kind,
                     )
                 if publication_hash in published:
                     statuses[str(entry_id)] = "published"

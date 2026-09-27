@@ -99,7 +99,8 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
 - Para carriles nuevos, el hash de publicado incluye identidad y destino
   tambien para videos: bytes iguales en cuentas/canales distintos no marcan
   globalmente las otras publicaciones. Reels historicos conservan el hash
-  global anterior para no romper su compatibilidad con Airtable.
+  global anterior para no romper su compatibilidad con Airtable. La
+  sincronizacion manual desde Calendario usa el mismo contrato.
 - Las publicaciones de Story llevan un boton para copiar su URL individual
   cuando no supera el limite documentado por Telegram; el enlace completo
   tambien se conserva visible en los metadatos enviados al topic.
