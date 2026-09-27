@@ -137,6 +137,11 @@ def _source_sha256(path):
     return digest.hexdigest()
 
 
+def _account_publication_hash(username, publication_target, source_hash):
+    identity = f"photo:{str(username).strip().lower()}:{publication_target}:{source_hash}"
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
 def _published_callback_data(source_hash):
     return "pub:" + base64.urlsafe_b64encode(
         bytes.fromhex(source_hash)
@@ -987,7 +992,7 @@ def scan_calendar_structure():
     manifest_file = _calendar_manifest_file()
     if os.path.exists(manifest_file):
         all_videos = _scan_manifest_calendar_structure(manifest_file)
-        print(f"Escaneo manifiesto completado: {len(all_videos)} videos encontrados.")
+        print(f"Escaneo manifiesto completado: {len(all_videos)} publicaciones encontradas.")
         return all_videos
 
     if not os.path.exists(input_root):
@@ -1041,7 +1046,7 @@ def scan_calendar_structure():
                 "delivery_kind": "normal",
             })
 
-    print(f"✅ Escaneo completado: {len(all_videos)} videos encontrados.")
+    print(f"✅ Escaneo completado: {len(all_videos)} publicaciones encontradas.")
 
     if len(all_videos) < 5:
         print("⚠️ Videos detectados:")
@@ -1139,27 +1144,37 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
         return "✨ No hay publicaciones en o después de la fecha inicial seleccionada."
 
     try:
-        video_paths = [video for video in all_videos if video.get("media_kind") == "video"]
+        publishable_media = [video for video in all_videos if video.get("media_kind") in {"video", "image"}]
         published_hashes = (
-            fetch_published_video_hashes(load_airtable_config()) if video_paths else set()
+            fetch_published_video_hashes(load_airtable_config()) if publishable_media else set()
         )
         eligible_videos = []
         omitted_published = 0
         for video in all_videos:
             source_hash = _source_sha256(video["path"])
-            if video.get("media_kind") == "video" and source_hash in published_hashes:
+            publication_hash = (
+                source_hash
+                if video.get("media_kind") == "video"
+                else _account_publication_hash(
+                    video.get("username", ""),
+                    video.get("publication_target") or publication_target_for_entry(video),
+                    source_hash,
+                )
+            )
+            if publication_hash in published_hashes:
                 if not selected_accounts or video["username"] in selected_accounts:
                     omitted_published += 1
                 continue
             video["source_hash"] = source_hash
+            video["publication_hash"] = publication_hash
             eligible_videos.append(video)
     except (AirtableSyncError, OSError, ValueError) as exc:
         print(f"⚠️ No se pudo verificar Airtable: {exc}")
-        return "❌ No se pudo verificar Airtable; no se enviaron videos."
+        return "❌ No se pudo verificar Airtable; no se enviaron publicaciones."
 
     all_videos = eligible_videos
     if not all_videos:
-        return f"✨ PROCESO TERMINADO. Se enviaron 0 videos. Omitidos publicados: {omitted_published}."
+        return f"✨ PROCESO TERMINADO. Se enviaron 0 publicaciones. Omitidos publicados: {omitted_published}."
 
     topics_state = load_json(os.path.join(base_dir, STATE_FILE))
     from collections import defaultdict
@@ -1377,7 +1392,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     "meta": meta,
                     "hora_et": hora_et,
                     "dia_str": dia_str,
-                    "source_hash": vid["source_hash"],
+                    "source_hash": vid["publication_hash"],
                 })
 
     def send_metadata(job):
@@ -1432,7 +1447,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                 if job["media_kind"] == "image":
                     ok, _topic_id = _send_image_to_topic(
                         job["chat_id"], topic_id, job["attachment_caption"], job["path"],
-                        topics_state, job["username"], job["tag"],
+                        topics_state, job["username"], job["tag"], job["source_hash"],
                         topic_group=job["topic_group"], delivery_kind=job["delivery_kind"],
                     )
                 else:
