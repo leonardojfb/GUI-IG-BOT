@@ -99,6 +99,8 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
 - Las publicaciones de Story llevan un boton para copiar su URL individual
   cuando no supera el limite documentado por Telegram; el enlace completo
   tambien se conserva visible en los metadatos enviados al topic.
+- Los carriles rechazan finales que ya esten en el manifiesto o repetidos
+  dentro de la tanda candidata, aunque la nueva fecha/destino no choque.
 - Verificacion realizada hasta ahora: compilacion sintactica de modulos Python
   y `git diff --check`. No se ejecutaron tests automatizados ni se hizo una
   prueba visual/live de GUI o Telegram.

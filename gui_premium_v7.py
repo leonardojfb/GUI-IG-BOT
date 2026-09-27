@@ -3727,6 +3727,37 @@ class InstagramAutoPro(ctk.CTk):
                 )
 
             current_entries = load_entries(manifest_file, require_source=False)
+            scheduled_paths = {}
+            for existing in current_entries:
+                source_path = str(existing.get("source_path") or "").strip()
+                if not source_path:
+                    continue
+                path_key = os.path.normcase(os.path.realpath(source_path)).casefold()
+                scheduled_paths.setdefault(path_key, existing)
+            candidate_paths = set()
+            for entry in candidates:
+                path_key = os.path.normcase(
+                    os.path.realpath(str(entry.get("source_path") or ""))
+                ).casefold()
+                previous = scheduled_paths.get(path_key)
+                if previous:
+                    previous_schedule = " ".join(
+                        value for value in (
+                            str(previous.get("scheduled_date") or ""),
+                            str(previous.get("scheduled_time") or ""),
+                        ) if value
+                    ) or f"dia {previous.get('day')} slot {previous.get('slot')}"
+                    raise ValueError(
+                        f"El final {Path(entry['source_path']).name} ya esta calendarizado "
+                        f"para @{previous.get('username')} ({previous.get('publication_target') or 'Reel'}, "
+                        f"{previous_schedule}). Usa otro final de Forge."
+                    )
+                if path_key in candidate_paths:
+                    raise ValueError(
+                        f"El mismo archivo final aparece mas de una vez en los carriles: "
+                        f"{Path(entry['source_path']).name}."
+                    )
+                candidate_paths.add(path_key)
             resolved_entries = []
             for entry in current_entries:
                 schedule = schedule_resolver(entry)
