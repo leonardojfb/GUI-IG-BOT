@@ -93,6 +93,12 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
 - Los carriles de video aplican el mismo gate de inventario por cuenta antes
   de calendarizar: solo aceptan finales presentes y validados, con warning y
   conteo de pendientes para tandas `incomplete`.
+- Telegram omite en ejecuciones posteriores las filas ya confirmadas como
+  `sent_telegram` o `published`, sin ocultarlas del calendario ni del conteo
+  historico de publicaciones.
+- Las publicaciones de Story llevan un boton para copiar su URL individual
+  cuando no supera el limite documentado por Telegram; el enlace completo
+  tambien se conserva visible en los metadatos enviados al topic.
 - Verificacion realizada hasta ahora: compilacion sintactica de modulos Python
   y `git diff --check`. No se ejecutaron tests automatizados ni se hizo una
   prueba visual/live de GUI o Telegram.

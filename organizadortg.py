@@ -150,7 +150,7 @@ def _published_callback_data(source_hash):
     ).decode("ascii").rstrip("=")
 
 
-def _publish_button_markup(caption=None, source_hash=None):
+def _publish_button_markup(caption=None, source_hash=None, story_link_url=None):
     callback_data = (
         _published_callback_data(source_hash)
         if source_hash else PUBLISH_CALLBACK_DATA
@@ -159,6 +159,9 @@ def _publish_button_markup(caption=None, source_hash=None):
     caption_text = str(caption or "")
     if caption_text and len(caption_text) <= 256:
         buttons.append({"text": "📋 Copiar caption", "copy_text": {"text": caption_text}})
+    story_link = str(story_link_url or "").strip()
+    if story_link and len(story_link) <= 256:
+        buttons.append({"text": "🔗 Copiar enlace Story", "copy_text": {"text": story_link}})
     return {"inline_keyboard": [buttons]}
 
 
@@ -201,6 +204,7 @@ def _scan_manifest_calendar_structure(manifest_file=None):
             "delivery_kind": entry.get("delivery_kind", "normal"),
             "publication_target": publication_target,
             "media_kind": media_kind,
+            "manual_status": str(entry.get("manual_status") or "planned"),
             "scheduled_date": entry.get("scheduled_date") or "",
             "scheduled_time": entry.get("scheduled_time") or "",
             "timezone": entry.get("timezone") or "",
@@ -859,7 +863,7 @@ def delete_known_topics_for_accounts(account_names, topics_state):
         should_delete,
     )
 
-def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, username, tag, source_hash=None, topic_group="account", delivery_kind="normal"):
+def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, username, tag, source_hash=None, topic_group="account", delivery_kind="normal", story_link_url=None):
     readable_video_path = _windows_long_path(video_path)
     active_path = readable_video_path
     compressed_tmp = None
@@ -882,7 +886,7 @@ def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, usern
                 'message_thread_id': t_id,
                 'supports_streaming': 'true',
                 'reply_markup': json.dumps(
-                    _publish_button_markup(caption, source_hash), ensure_ascii=False
+                    _publish_button_markup(caption, source_hash, story_link_url), ensure_ascii=False
                 ),
             }
             if caption:
@@ -938,7 +942,7 @@ def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, usern
             os.unlink(compressed_tmp)
 
 
-def _send_image_to_topic(chat_id, topic_id, caption, image_path, topics_state, username, tag, source_hash=None, topic_group="account", delivery_kind="normal"):
+def _send_image_to_topic(chat_id, topic_id, caption, image_path, topics_state, username, tag, source_hash=None, topic_group="account", delivery_kind="normal", story_link_url=None):
     """Deliver a final image as a Telegram photo, preserving its source path."""
     readable_path = _windows_long_path(image_path)
     extension = os.path.splitext(readable_path)[1].lower()
@@ -955,7 +959,9 @@ def _send_image_to_topic(chat_id, topic_id, caption, image_path, topics_state, u
         payload = {
             "chat_id": chat_id,
             "message_thread_id": topic_id,
-            "reply_markup": json.dumps(_publish_button_markup(caption, source_hash), ensure_ascii=False),
+            "reply_markup": json.dumps(
+                _publish_button_markup(caption, source_hash, story_link_url), ensure_ascii=False
+            ),
         }
         if caption:
             payload["caption"] = caption
@@ -1118,6 +1124,16 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
 
     accounts = get_accounts_with_va_info()
     all_videos = scan_calendar_structure()
+    if selected_accounts:
+        all_videos = [video for video in all_videos if video.get("username") in selected_accounts]
+    already_delivered = sum(
+        video.get("manual_status") in {"sent_telegram", "published"}
+        for video in all_videos
+    )
+    all_videos = [
+        video for video in all_videos
+        if video.get("manual_status") not in {"sent_telegram", "published"}
+    ]
     topic_mode = topic_mode if topic_mode in {"account_by_day", "separate_by_type"} else "account_by_day"
     for video in all_videos:
         if video.get("media_kind") not in {"video", "image"}:
@@ -1127,7 +1143,13 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                 else "image"
             )
 
-    if not all_videos: return "❌ No se encontraron publicaciones en el calendario."
+    if not all_videos:
+        if already_delivered:
+            return (
+                "✨ No hay publicaciones pendientes de envio a Telegram. "
+                f"Omitidas por estado: {already_delivered}."
+            )
+        return "❌ No se encontraron publicaciones en el calendario."
 
     anchor_date = start_date.date() if isinstance(start_date, datetime) else start_date
     for video in all_videos:
@@ -1189,7 +1211,10 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
 
     all_videos = eligible_videos
     if not all_videos:
-        return f"✨ PROCESO TERMINADO. Se enviaron 0 publicaciones. Omitidos publicados: {omitted_published}."
+        return (
+            "✨ PROCESO TERMINADO. Se enviaron 0 publicaciones. "
+            f"Omitidos publicados: {omitted_published}; ya entregados: {already_delivered}."
+        )
 
     topics_state = load_json(os.path.join(base_dir, STATE_FILE))
     from collections import defaultdict
@@ -1406,6 +1431,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     "topic_group": topic_group,
                     "caption": cap,
                     "attachment_caption": attachment_caption,
+                    "story_link_url": vid.get("story_link_url") or "",
                     "path": vid["path"],
                     "meta": meta,
                     "hora_et": hora_et,
@@ -1468,12 +1494,14 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                         job["chat_id"], topic_id, job["attachment_caption"], job["path"],
                         topics_state, job["username"], job["tag"], job["source_hash"],
                         topic_group=job["topic_group"], delivery_kind=job["delivery_kind"],
+                        story_link_url=job["story_link_url"],
                     )
                 else:
                     ok, _topic_id = _send_video_to_topic(
                         job["chat_id"], topic_id, job["attachment_caption"], job["path"],
                         topics_state, job["username"], job["tag"], job["source_hash"],
                         topic_group=job["topic_group"], delivery_kind=job["delivery_kind"],
+                        story_link_url=job["story_link_url"],
                     )
                 if ok:
                     sent += 1
@@ -1505,7 +1533,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
     save_json(os.path.join(base_dir, STATE_FILE), topics_state)
     return (
         f"✨ PROCESO TERMINADO. Se enviaron {global_sent} publicaciones. "
-        f"Omitidos publicados: {omitted_published}."
+        f"Omitidos publicados: {omitted_published}; ya entregados: {already_delivered}."
     )
 
 # --- 4. CONTROLADOR DE HILOS Y MOTOR DE EJECUCIÓN ---
