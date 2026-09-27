@@ -80,6 +80,10 @@ los detalles/preview de cada entrada.
 5. Publica manualmente en Instagram/Facebook y luego pulsa **Publicado** en
    Telegram. La entrega a Telegram y la publicacion real son estados distintos.
 
+El modo **Envío express** puede omitir el mensaje de contexto de publicaciones
+legacy; los carriles multicanal siempre conservan ese mensaje para no perder
+fecha, destino ni datos de Marketplace.
+
 No uses **Borrar calendarizaciones** para reordenar: elimina las entradas de
 las cuentas seleccionadas. Una entrada ya enviada a Telegram no se vuelve a
 enviar en la siguiente ejecucion normal.

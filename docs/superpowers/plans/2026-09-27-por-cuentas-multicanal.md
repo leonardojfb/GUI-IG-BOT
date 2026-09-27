@@ -98,6 +98,8 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
 - Implementado: entrega de imagen/video por Telegram, topics por identidad o
   separados por destino, entrega ordenada y estados `planned`, `sent_telegram`
   y `published`. La confirmacion `published` se reconcilia con Airtable.
+- Los jobs con `lane_id` siempre envian su mensaje de contexto aunque este
+  activo **Envío express**; fecha, destino y metadatos Marketplace no se omiten.
 - Logistica Por Cuentas muestra un aviso en la previsualizacion si incluye
   salidas validadas de tandas Forge parciales; tandas con inventario invalido
   o estados no distribuibles siguen bloqueadas.

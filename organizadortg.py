@@ -1443,6 +1443,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     "delivery_kind": delivery_kind,
                     "topic_delivery_kind": topic_delivery_kind,
                     "publication_target": target,
+                    "lane_id": vid.get("lane_id") or "",
                     "media_kind": vid.get("media_kind", "video"),
                     "topic_id": video_topic_id,
                     "topic_group": topic_group,
@@ -1458,7 +1459,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                 })
 
     def send_metadata(job):
-        if express_mode:
+        if express_mode and not job.get("lane_id"):
             return job["topic_id"]
         msg_res = call_tg("sendMessage", {
             'chat_id': job["chat_id"],
