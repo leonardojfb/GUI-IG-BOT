@@ -14,15 +14,25 @@ import math
 import random
 import time
 import threading
+import uuid
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import json
 import shutil
 import requests
 import render_performance
 
-from calendar_manifest import build_entry, manifest_path, replace_entries
+from calendar_manifest import (
+    append_scheduled_entries,
+    build_entry,
+    load_entries,
+    manifest_path,
+    replace_entries,
+)
+from publication_schedule import expand_lane_slots, merge_scheduled_entries
+from por_cuentas_lanes import LaneRequest, build_lane_entries, resolve_legacy_reel_schedule
 from database import DatabaseManager
 from airtable_sync import (
     AirtableConfig,
@@ -3115,10 +3125,100 @@ class InstagramAutoPro(ctk.CTk):
         PrimaryButton(btn_row, text="EJECUTAR POR CUENTAS", height=BTN_H_LG,
                       command=lambda: self._acct_dist_run(preview_only=False)).pack(side="left", padx=10)
 
+        lane_card = Card(parent, title="Agregar carril al calendario existente")
+        lane_card.grid(row=4, column=0, sticky="ew", padx=16, pady=(2, 8))
+        lane = lane_card.body
+        lane.grid_columnconfigure(1, weight=1)
+        lane.grid_columnconfigure(3, weight=1)
+
+        ctk.CTkLabel(lane, text="Destino:", text_color=TEXT_MUTED).grid(
+            row=0, column=0, padx=(14, 6), pady=(12, 6), sticky="e")
+        self.acct_lane_target = ctk.CTkComboBox(
+            lane,
+            values=[
+                "instagram_reel", "instagram_trial_reel", "instagram_story",
+                "instagram_post", "facebook_story", "facebook_page_post",
+                "facebook_reel", "facebook_marketplace_listing",
+            ],
+            fg_color=BG_INPUT, border_color=BORDER, width=230,
+        )
+        self.acct_lane_target.set("instagram_story")
+        self.acct_lane_target.grid(row=0, column=1, padx=6, pady=(12, 6), sticky="ew")
+        ctk.CTkLabel(lane, text="Carpeta de finales por cuenta:", text_color=TEXT_MUTED).grid(
+            row=0, column=2, padx=(10, 6), pady=(12, 6), sticky="e")
+        self.acct_lane_root = ctk.CTkEntry(
+            lane, fg_color=BG_INPUT, border_color=BORDER,
+            placeholder_text="Raíz con una subcarpeta por cuenta",
+        )
+        self.acct_lane_root.grid(row=0, column=3, padx=6, pady=(12, 6), sticky="ew")
+        GhostButton(
+            lane, text="Elegir carpeta", width=110,
+            command=self._acct_lane_choose_root,
+        ).grid(row=0, column=4, padx=(4, 14), pady=(12, 6))
+
+        ctk.CTkLabel(lane, text="Fecha inicial:", text_color=TEXT_MUTED).grid(
+            row=1, column=0, padx=(14, 6), pady=6, sticky="e")
+        self.acct_lane_start_date = ctk.CTkEntry(lane, fg_color=BG_INPUT, border_color=BORDER, width=130)
+        self.acct_lane_start_date.insert(0, datetime.now().strftime("%Y-%m-%d"))
+        self.acct_lane_start_date.grid(row=1, column=1, padx=6, pady=6, sticky="w")
+        ctk.CTkLabel(lane, text="Días / cada N días:", text_color=TEXT_MUTED).grid(
+            row=1, column=2, padx=(10, 6), pady=6, sticky="e")
+        self.acct_lane_horizon = ctk.CTkEntry(lane, fg_color=BG_INPUT, border_color=BORDER, width=62)
+        self.acct_lane_horizon.insert(0, "7")
+        self.acct_lane_horizon.grid(row=1, column=3, padx=(6, 2), pady=6, sticky="w")
+        self.acct_lane_every_days = ctk.CTkEntry(lane, fg_color=BG_INPUT, border_color=BORDER, width=62)
+        self.acct_lane_every_days.insert(0, "1")
+        self.acct_lane_every_days.grid(row=1, column=3, padx=(76, 2), pady=6, sticky="w")
+        ctk.CTkLabel(lane, text="Horas (HH:MM):", text_color=TEXT_MUTED).grid(
+            row=2, column=0, padx=(14, 6), pady=6, sticky="e")
+        self.acct_lane_times = ctk.CTkEntry(
+            lane, fg_color=BG_INPUT, border_color=BORDER,
+            placeholder_text="09:00,16:00",
+        )
+        self.acct_lane_times.insert(0, "09:00,16:00")
+        self.acct_lane_times.grid(row=2, column=1, padx=6, pady=6, sticky="ew")
+        ctk.CTkLabel(lane, text="Caption / aviso de Story:", text_color=TEXT_MUTED).grid(
+            row=2, column=2, padx=(10, 6), pady=6, sticky="e")
+        self.acct_lane_caption = ctk.CTkEntry(lane, fg_color=BG_INPUT, border_color=BORDER)
+        self.acct_lane_caption.grid(row=2, column=3, padx=(6, 14), pady=6, sticky="ew")
+        ctk.CTkLabel(lane, text="Título Marketplace:", text_color=TEXT_MUTED).grid(
+            row=3, column=0, padx=(14, 6), pady=6, sticky="e")
+        self.acct_lane_market_title = ctk.CTkEntry(lane, fg_color=BG_INPUT, border_color=BORDER)
+        self.acct_lane_market_title.grid(row=3, column=1, padx=6, pady=6, sticky="ew")
+        ctk.CTkLabel(lane, text="Precio / condición:", text_color=TEXT_MUTED).grid(
+            row=3, column=2, padx=(10, 6), pady=6, sticky="e")
+        market_fields = ctk.CTkFrame(lane, fg_color="transparent")
+        market_fields.grid(row=3, column=3, padx=(6, 14), pady=6, sticky="ew")
+        self.acct_lane_market_price = ctk.CTkEntry(
+            market_fields, fg_color=BG_INPUT, border_color=BORDER,
+            placeholder_text="Precio", width=100,
+        )
+        self.acct_lane_market_price.pack(side="left", padx=(0, 6))
+        self.acct_lane_market_condition = ctk.CTkEntry(
+            market_fields, fg_color=BG_INPUT, border_color=BORDER,
+            placeholder_text="Condición", width=120,
+        )
+        self.acct_lane_market_condition.pack(side="left")
+        ctk.CTkLabel(
+            lane,
+            text="Fecha inicial: ancla los reels heredados que aún no tienen fecha explícita.",
+            text_color=TEXT_MUTED,
+        ).grid(row=4, column=0, columnspan=5, padx=14, pady=(2, 0), sticky="w")
+        lane_buttons = ctk.CTkFrame(lane, fg_color="transparent")
+        lane_buttons.grid(row=5, column=0, columnspan=5, pady=(8, 12))
+        GhostButton(
+            lane_buttons, text="Previsualizar carril",
+            command=lambda: self._acct_multichannel_run(preview_only=True),
+        ).pack(side="left", padx=6)
+        PrimaryButton(
+            lane_buttons, text="Agregar al calendario",
+            command=lambda: self._acct_multichannel_run(preview_only=False),
+        ).pack(side="left", padx=6)
+
         # ── Resultados ───────────────────────────────────────────────────
         self.acct_dist_result = ctk.CTkTextbox(parent, fg_color=BG_CARD2, height=200,
                                                 text_color=NEON_CYAN, font=FONT_MONO)
-        self.acct_dist_result.grid(row=4, column=0, sticky="nsew", padx=16, pady=(0, 16))
+        self.acct_dist_result.grid(row=5, column=0, sticky="nsew", padx=16, pady=(0, 16))
 
     # ── Lógica Logística ─────────────────────────────────────────────────────
     def reload_dist_lists(self, event=None):
@@ -3400,6 +3500,206 @@ class InstagramAutoPro(ctk.CTk):
         with open(_ACCT_HIST_FILE, "w", encoding="utf-8") as fh:
             json.dump(history, fh, indent=2, ensure_ascii=False)
 
+    def _acct_lane_choose_root(self):
+        path = filedialog.askdirectory(title="Carpeta raiz de finales por cuenta", parent=self)
+        if path:
+            self.acct_lane_root.delete(0, "end")
+            self.acct_lane_root.insert(0, path)
+
+    def _acct_multichannel_run(self, preview_only: bool = True):
+        accounts = self._acct_dist_accounts()
+        root_text = self.acct_lane_root.get().strip()
+        target = self.acct_lane_target.get().strip()
+        start_date = self.acct_lane_start_date.get().strip()
+        times = [value.strip() for value in self.acct_lane_times.get().split(",") if value.strip()]
+        caption = self.acct_lane_caption.get().strip()
+        if len(caption) > 3500:
+            messagebox.showerror("Carril", "Caption/aviso demasiado largo (máximo 3500 caracteres).", parent=self)
+            return
+        marketplace_title = self.acct_lane_market_title.get().strip()
+        marketplace_price = self.acct_lane_market_price.get().strip()
+        marketplace_condition = self.acct_lane_market_condition.get().strip()
+        try:
+            horizon_days = int(self.acct_lane_horizon.get())
+            every_days = int(self.acct_lane_every_days.get())
+            slots = expand_lane_slots(start_date, horizon_days, every_days, times)
+            if not accounts:
+                raise ValueError("Carga las cuentas destino en Por Cuentas.")
+            if not root_text or not Path(root_text).is_dir():
+                raise ValueError("Selecciona una carpeta raiz existente.")
+            if not target:
+                raise ValueError("Selecciona el destino del carril.")
+            if target == "facebook_marketplace_listing" and (not marketplace_title or not marketplace_price):
+                raise ValueError("Marketplace requiere título y precio.")
+        except ValueError as error:
+            messagebox.showwarning("Carril", str(error), parent=self)
+            return
+
+        root = Path(root_text)
+        account_rows = {row["username"]: row for row in self.db.get_all_accounts()}
+        finals_by_account = {}
+        extension_filter = {".mp4", ".mov", ".m4v", ".jpg", ".jpeg", ".png", ".webp"}
+        if target == "facebook_marketplace_listing":
+            extension_filter = {".jpg", ".jpeg", ".png", ".webp"}
+        for username in accounts:
+            account_dir = root / username
+            if not account_dir.is_dir() and len(accounts) == 1:
+                account_dir = root
+            if not account_dir.is_dir():
+                messagebox.showwarning(
+                    "Carril", f"Falta la subcarpeta de finales para @{username}: {root / username}", parent=self
+                )
+                return
+            finals_by_account[username] = sorted(
+                (path for path in account_dir.rglob("*") if path.is_file() and path.suffix.lower() in extension_filter),
+                key=lambda path: str(path).casefold(),
+            )
+            if len(finals_by_account[username]) < len(slots):
+                messagebox.showwarning(
+                    "Finales insuficientes",
+                    f"@{username}: el carril requiere {len(slots)} archivos finales y hay "
+                    f"{len(finals_by_account[username])}.",
+                    parent=self,
+                )
+                return
+
+        seen_final_paths = {}
+        for username, paths in finals_by_account.items():
+            for path in paths[:len(slots)]:
+                resolved_path = str(path.resolve()).casefold()
+                previous_owner = seen_final_paths.get(resolved_path)
+                if previous_owner and previous_owner != username:
+                    messagebox.showwarning(
+                        "Final compartido",
+                        f"El mismo archivo final aparece para @{previous_owner} y @{username}. "
+                        "Cada cuenta necesita su propio final.",
+                        parent=self,
+                    )
+                    return
+                seen_final_paths[resolved_path] = username
+
+        account_ids = {row["username"]: row.get("id") for row in self.db.get_all_accounts()}
+        lane_id = str(uuid.uuid4())
+        candidates = []
+        try:
+            for username in accounts:
+                account = account_rows.get(username)
+                if not account:
+                    raise ValueError(f"La cuenta @{username} no existe en la base local.")
+                va_name = account.get("assigned_va") or "Sin Asignar"
+                timezone = self.db.get_va_timezone(va_name)
+                is_story = target in {"instagram_story", "facebook_story"}
+                story_link = self.db.resolve_story_link_for_account(username) if is_story else ""
+                if is_story and not story_link:
+                    raise ValueError(f"Configura el enlace de Story de @{username} en Cuentas.")
+                delivery_kind = "trial" if target == "instagram_trial_reel" else "normal"
+                request = LaneRequest(
+                    username=username,
+                    account_id=account_ids.get(username),
+                    tanda=root.name,
+                    delivery_kind=delivery_kind,
+                    publication_target=target,
+                    timezone=timezone,
+                    media_kind="image" if target == "facebook_marketplace_listing" else "mixed",
+                    lane_id=lane_id,
+                    plan_id=lane_id,
+                    start_date=start_date,
+                    horizon_days=horizon_days,
+                    every_days=every_days,
+                    times=times,
+                    caption=caption,
+                    story_link_url=story_link,
+                    story_announcement_text=caption if is_story else "",
+                    platform_payload=(
+                        {
+                            "title": marketplace_title,
+                            "price": marketplace_price,
+                            "condition": marketplace_condition,
+                            "description": caption,
+                        }
+                        if target == "facebook_marketplace_listing"
+                        else {}
+                    ),
+                )
+                entries = build_lane_entries(request, finals_by_account[username])
+                for entry, source_path in zip(entries, finals_by_account[username]):
+                    extension = source_path.suffix.lower()
+                    entry["media_kind"] = "video" if extension in {".mp4", ".mov", ".m4v"} else "image"
+                    if target in {"instagram_reel", "instagram_trial_reel", "facebook_reel"} and entry["media_kind"] != "video":
+                        raise ValueError(f"{target} necesita finales de video.")
+                    if target == "facebook_marketplace_listing" and entry["media_kind"] != "image":
+                        raise ValueError("Marketplace acepta finales de imagen en este carril.")
+                candidates.extend(entries)
+
+            manifest_file = manifest_path(_BASE_DIR)
+
+            def schedule_resolver(entry):
+                if entry.get("username") not in set(accounts):
+                    return {}
+                return resolve_legacy_reel_schedule(entry, start_date, self.db)
+
+            current_entries = load_entries(manifest_file, require_source=False)
+            resolved_entries = []
+            for entry in current_entries:
+                schedule = schedule_resolver(entry)
+                resolved_entries.append({**entry, **schedule} if schedule else entry)
+            plan = merge_scheduled_entries(resolved_entries, candidates)
+        except (OSError, ValueError) as error:
+            messagebox.showerror("Carril", str(error), parent=self)
+            return
+
+        lines = [
+            "PREVISUALIZACION DE CARRIL" if preview_only else "CONFIRMACION DE CARRIL",
+            f"Destino: {target}",
+            f"Periodo: {start_date} + {horizon_days - 1} dias; cada {every_days} dia(s)",
+            f"Cuentas: {len(accounts)} | Publicaciones nuevas: {len(candidates)}",
+            "",
+        ]
+        selected_names = set(accounts)
+        for entry in plan.entries:
+            if entry.get("username") not in selected_names:
+                continue
+            if not (start_date <= entry.get("scheduled_date", "") <= (date.fromisoformat(start_date) + timedelta(days=horizon_days - 1)).isoformat()):
+                continue
+            marker = "NUEVA" if entry in candidates else "EXISTENTE"
+            lines.append(
+                f"{entry.get('scheduled_date')} {entry.get('scheduled_time')} "
+                f"@{entry.get('username')} {entry.get('publication_target')} "
+                f"[{marker}] {entry.get('telegram_filename')}"
+            )
+        if plan.conflicts:
+            lines.extend(["", "CONFLICTOS:"])
+            lines.extend(
+                f"@{conflict.username} {conflict.scheduled_date} {conflict.scheduled_time}: "
+                f"ya existe una publicacion. No se guardo el plan."
+                for conflict in plan.conflicts
+            )
+
+        result_text = "\n".join(lines)
+        if not preview_only:
+            if plan.conflicts:
+                self.acct_dist_result.configure(state="normal")
+                self.acct_dist_result.delete("1.0", "end")
+                self.acct_dist_result.insert("end", result_text)
+                self.acct_dist_result.configure(state="disabled")
+                return
+            if not messagebox.askyesno("Agregar carril", result_text + "\n\n¿Confirmar y agregar?", parent=self):
+                return
+            try:
+                saved = append_scheduled_entries(manifest_file, candidates, schedule_resolver)
+            except (OSError, ValueError) as error:
+                messagebox.showerror("No se pudo guardar el carril", str(error), parent=self)
+                return
+            if saved.conflicts:
+                result_text += "\n\nEl calendario cambio desde la vista previa. No se guardo; vuelve a previsualizar."
+            else:
+                result_text += f"\n\nAgregadas {len(candidates)} entradas. No se copiaron archivos."
+
+        self.acct_dist_result.configure(state="normal")
+        self.acct_dist_result.delete("1.0", "end")
+        self.acct_dist_result.insert("end", result_text)
+        self.acct_dist_result.configure(state="disabled")
+
     def _acct_dist_run(self, preview_only: bool = True):
         selected_tandas = self._acct_dist_selected_tandas()
         tanda = selected_tandas[0] if selected_tandas else ""
@@ -3438,21 +3738,6 @@ class InstagramAutoPro(ctk.CTk):
             source_tanda: os.path.join(_BASE_DIR, "videos_finales", source_tanda)
             for source_tanda in selected_tandas
         }
-
-        # Advertir si la ejecución va a sobreescribir Dia_* existentes
-        if not preview_only:
-            cal_root = os.path.join(_BASE_DIR, "CALENDARIO_POSTEO")
-            if os.path.exists(cal_root):
-                existing = [d for d in os.listdir(cal_root)
-                            if d.lower().startswith("dia_") and
-                            os.path.isdir(os.path.join(cal_root, d))]
-                if existing:
-                    if not messagebox.askyesno(
-                        "⚠️ Sobreescribir",
-                        f"Se borrarán las carpetas Dia_* existentes de las cuentas seleccionadas "
-                        f"y se crearán nuevas.\n¿Continuar?"
-                    ):
-                        return
 
         def task():
             nonlocal days, n
@@ -3590,25 +3875,6 @@ class InstagramAutoPro(ctk.CTk):
                 lines.append("")
 
             if not preview_only:
-                cal_root = os.path.join(_BASE_DIR, "CALENDARIO_POSTEO")
-
-                # Limpiar carpetas Dia_* existentes solo para las cuentas del plan
-                if False and os.path.exists(cal_root):
-                    for day_folder in os.listdir(cal_root):
-                        if not day_folder.lower().startswith("dia_"):
-                            continue
-                        day_path = os.path.join(cal_root, day_folder)
-                        for acc in accounts:
-                            acc_path = os.path.join(day_path, acc)
-                            if _path_isdir(acc_path):
-                                shutil.rmtree(_windows_long_path(acc_path))
-                        try:
-                            if not any(True for _ in os.scandir(_windows_long_path(day_path))):
-                                shutil.rmtree(_windows_long_path(day_path))
-                        except OSError:
-                            pass
-
-                # Crear estructura Dia_X/<cuenta>/video.mp4
                 entries = []
                 affected = set()
                 logical_names = set()
@@ -3657,13 +3923,16 @@ class InstagramAutoPro(ctk.CTk):
                             total_copiados += 1
 
                 if affected:
-                    replace_entries(manifest_path(_BASE_DIR), entries, affected, "normal")
+                    replace_entries(
+                        manifest_path(_BASE_DIR), entries, affected, "normal",
+                        publication_target="instagram_reel",
+                    )
 
                 lines += ["=" * 60,
-                          f"✅  Estructura creada en : {cal_root}",
-                          f"📁  Días generados       : Dia_1 → Dia_{days}",
-                          f"📋  Cuentas              : {len(plan)}",
-                          f"🎞️  Archivos copiados    : {total_copiados}"]
+                          f"✅  Calendario actualizado: {manifest_path(_BASE_DIR)}",
+                          f"📅  Días organizados       : Dia_1 → Dia_{days}",
+                          f"📋  Cuentas                : {len(plan)}",
+                          f"🧾  Rutas registradas      : {total_copiados}"]
 
             return "\n".join(lines)
 
@@ -3714,7 +3983,7 @@ class InstagramAutoPro(ctk.CTk):
         filter_row.grid_columnconfigure(0, weight=1)
         self._tg_only_with_videos = tk.BooleanVar(value=True)
         tg_filter_toggle = ToggleRow(
-            filter_row, "Solo con videos", variable=self._tg_only_with_videos
+            filter_row, "Solo con publicaciones", variable=self._tg_only_with_videos
         )
         tg_filter_toggle.switch.configure(command=self.load_organized_accounts)
         tg_filter_toggle.grid(row=0, column=0, sticky="w")
@@ -3957,7 +4226,7 @@ class InstagramAutoPro(ctk.CTk):
         except ValueError:
             return messagebox.showwarning("⚠️", "Formato de fecha inválido. Usa YYYY-MM-DD.")
 
-        only_with_videos = self._tg_only_with_videos.get() if self._tg_only_with_videos else False
+        only_with_publications = self._tg_only_with_videos.get() if self._tg_only_with_videos else False
         accounts = self.db.get_all_accounts()
         import organizadortg as telegram_bot
         for diagnostic_line in _telegram_runtime_diagnostics(self.db):
@@ -3965,15 +4234,15 @@ class InstagramAutoPro(ctk.CTk):
 
         enriched = []
         for acc in accounts:
-            video_counts = telegram_bot.count_account_calendar_videos_by_kind(acc["username"])
-            total = video_counts["normal"] + video_counts["trial"]
-            if only_with_videos and total == 0:
+            publication_counts = telegram_bot.count_account_calendar_publications(acc["username"])
+            total = publication_counts["total"]
+            if only_with_publications and total == 0:
                 continue
             enriched.append({
                 "username": acc["username"],
                 "assigned_va": acc.get("assigned_va", "Sin Asignar"),
                 "total_videos": total,
-                "video_label": telegram_bot.format_account_calendar_video_label(video_counts),
+                "video_label": telegram_bot.format_account_calendar_publication_label(publication_counts),
                 "account_type": acc.get("account_type", ""),
             })
 
@@ -3984,7 +4253,7 @@ class InstagramAutoPro(ctk.CTk):
             self.list_tg.insert("end", f"@{acc['username']}  [{tag}]  ({acc['assigned_va']})  {acc['video_label']}")
         self.list_tg.select_set(0, "end")  # seleccionar todas por defecto
 
-        self.bot_log(f"Cargadas {len(enriched)} cuentas para {date_str}{'  (solo con videos)' if only_with_videos else ''}.", "INFO")
+        self.bot_log(f"Cargadas {len(enriched)} cuentas para {date_str}{'  (solo con publicaciones)' if only_with_publications else ''}.", "INFO")
 
     def bot_log(self, message: str, level="INFO"):
         """Escribe en la consola del bot (thread-safe)."""

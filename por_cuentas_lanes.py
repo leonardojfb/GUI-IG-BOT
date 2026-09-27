@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 import re
 
@@ -85,3 +85,47 @@ def build_lane_entries(request: LaneRequest, final_paths: list[str | Path]) -> l
             )
         )
     return entries
+
+
+def resolve_legacy_reel_schedule(entry: dict, start_date: str, db_manager) -> dict:
+    """Resolve day/slot-only Reel rows using the existing VA/category schedule."""
+    if entry.get("scheduled_date") and entry.get("scheduled_time"):
+        return {}
+    target = entry.get("publication_target")
+    if target and target not in {"instagram_reel", "instagram_trial_reel"}:
+        return {}
+    try:
+        day_number = int(entry.get("day") or 0)
+        slot_number = int(entry.get("slot") or 0)
+        if day_number < 1 or slot_number < 1:
+            raise ValueError("La entrada legacy no tiene dia/slot resoluble.")
+        local_date = date.fromisoformat(start_date) + timedelta(days=day_number - 1)
+        accounts = {row["username"]: row for row in db_manager.get_all_accounts()}
+        account = accounts.get(entry.get("username"))
+        if not account:
+            raise ValueError(f"No existe la cuenta @{entry.get('username')} para resolver el horario.")
+        va_name = account.get("assigned_va") or "Sin Asignar"
+        category = (account.get("account_type") or "general").strip().lower()
+        import organizadortg
+
+        configured = organizadortg.get_slots_for_set(va_name, category, local_date.weekday(), db_manager)
+        raw_time = configured[slot_number - 1]
+        source_time = datetime.strptime(raw_time.strip(), "%I:%M %p").time()
+        from zoneinfo import ZoneInfo
+
+        timezone = db_manager.get_va_timezone(va_name)
+        eastern = ZoneInfo("America/New_York")
+        local_zone = ZoneInfo(timezone)
+        eastern_datetime = datetime.combine(local_date, source_time, tzinfo=eastern)
+        local_datetime = eastern_datetime.astimezone(local_zone)
+    except (IndexError, KeyError, TypeError, ValueError, OSError) as error:
+        raise ValueError(
+            f"No se pudo resolver fecha/hora legacy de @{entry.get('username')} "
+            f"(dia {entry.get('day')}, slot {entry.get('slot')}): {error}"
+        ) from error
+    return {
+        "scheduled_date": local_datetime.date().isoformat(),
+        "scheduled_time": local_datetime.strftime("%H:%M"),
+        "timezone": timezone,
+        "media_kind": entry.get("media_kind") or "video",
+    }

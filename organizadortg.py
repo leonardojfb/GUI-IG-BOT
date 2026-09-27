@@ -178,9 +178,10 @@ def _scan_manifest_calendar_structure(manifest_file=None):
     rows = []
     for entry in load_entries(manifest_file or _calendar_manifest_file(), require_source=True):
         publication_target = publication_target_for_entry(entry)
-        if not is_telegram_publication_target(publication_target):
-            continue
         day_number = int(entry.get("day") or 0)
+        media_kind = str(entry.get("media_kind") or "").strip().lower()
+        if not media_kind:
+            media_kind = "video" if Path(entry["source_path"]).suffix.lower() in {".mp4", ".mov", ".m4v"} else "image"
         rows.append({
             "path": entry["source_path"],
             "filename": entry["telegram_filename"],
@@ -191,6 +192,14 @@ def _scan_manifest_calendar_structure(manifest_file=None):
             "username": entry["username"],
             "delivery_kind": entry.get("delivery_kind", "normal"),
             "publication_target": publication_target,
+            "media_kind": media_kind,
+            "scheduled_date": entry.get("scheduled_date") or "",
+            "scheduled_time": entry.get("scheduled_time") or "",
+            "timezone": entry.get("timezone") or "",
+            "caption": entry.get("caption") or "",
+            "story_link_url": entry.get("story_link_url") or "",
+            "story_announcement_text": entry.get("story_announcement_text") or "",
+            "platform_payload": entry.get("platform_payload") or {},
             "account_id": entry.get("account_id"),
             "transform_log_id": entry.get("transform_log_id"),
             "caption_mode": entry.get("caption_mode"),
@@ -225,6 +234,8 @@ def count_account_calendar_videos_by_kind(account_name, normal_root=None, trial_
         for row in _scan_manifest_calendar_structure(_calendar_manifest_file()):
             if row["username"] != account_name:
                 continue
+            if not is_telegram_publication_target(row.get("publication_target")):
+                continue
             kind = row.get("delivery_kind", "normal")
             if kind in counts:
                 counts[kind] += 1
@@ -237,6 +248,32 @@ def count_account_calendar_videos_by_kind(account_name, normal_root=None, trial_
     }
 
 
+def count_account_calendar_publications(account_name):
+    account_name = _safe_calendar_account_name(account_name)
+    if not account_name:
+        return {"total": 0, "video": 0, "image": 0}
+    if _manifest_exists():
+        rows = [
+            row for row in _scan_manifest_calendar_structure(_calendar_manifest_file())
+            if row["username"] == account_name
+        ]
+        return {
+            "total": len(rows),
+            "video": sum(row.get("media_kind") == "video" for row in rows),
+            "image": sum(row.get("media_kind") == "image" for row in rows),
+        }
+    video_total = _count_account_calendar_videos(account_name, input_root)
+    return {"total": video_total, "video": video_total, "image": 0}
+
+
+def format_account_calendar_publication_label(counts):
+    return (
+        f"{int(counts.get('total', 0) or 0)} publicaciones "
+        f"({int(counts.get('video', 0) or 0)} videos, "
+        f"{int(counts.get('image', 0) or 0)} imagenes)"
+    )
+
+
 def count_account_calendar_videos(account_name, roots=None):
     account_name = _safe_calendar_account_name(account_name)
     if not account_name:
@@ -245,6 +282,7 @@ def count_account_calendar_videos(account_name, roots=None):
         return sum(
             1 for row in _scan_manifest_calendar_structure(_calendar_manifest_file())
             if row["username"] == account_name
+            and is_telegram_publication_target(row.get("publication_target"))
         )
     roots = roots or (input_root, trial_input_root)
     total = 0
@@ -866,6 +904,56 @@ def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, usern
         if compressed_tmp and os.path.exists(compressed_tmp):
             os.unlink(compressed_tmp)
 
+
+def _send_image_to_topic(chat_id, topic_id, caption, image_path, topics_state, username, tag, source_hash=None):
+    """Deliver a final image as a Telegram photo, preserving its source path."""
+    readable_path = _windows_long_path(image_path)
+    extension = os.path.splitext(readable_path)[1].lower()
+    use_photo = extension in {".jpg", ".jpeg", ".png"} and os.path.getsize(readable_path) <= 10 * 1024 * 1024
+    method = "sendPhoto" if use_photo else "sendDocument"
+    field = "photo" if use_photo else "document"
+    content_type = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+    }.get(extension, "application/octet-stream")
+    for _attempt in range(5):
+        payload = {
+            "chat_id": chat_id,
+            "message_thread_id": topic_id,
+            "reply_markup": json.dumps(_publish_button_markup(caption, source_hash), ensure_ascii=False),
+        }
+        if caption:
+            payload["caption"] = caption
+        with open(readable_path, "rb") as media_file:
+            response = requests.post(
+                f"https://api.telegram.org/bot{TOKEN}/{method}",
+                data=payload,
+                files={field: (os.path.basename(readable_path), media_file, content_type)},
+            )
+        if response.status_code == 200:
+            return True, topic_id
+        try:
+            body = response.json()
+        except (AttributeError, ValueError):
+            body = {}
+        if response.status_code == 429:
+            delay = int(body.get("parameters", {}).get("retry_after", 15))
+            time.sleep(delay + 1)
+            continue
+        description = str(body.get("description") or getattr(response, "text", ""))
+        if "thread not found" in description.lower():
+            topic_id = get_or_create_topic(
+                chat_id, username, tag, topics_state, force_recreate=True
+            )
+            if not topic_id:
+                return False, None
+            continue
+        print(f"Error Telegram al enviar imagen a @{username}: {description}")
+        return False, topic_id
+    return False, topic_id
+
 def scan_calendar_structure():
     print(f"📂 Escaneando calendario en: {input_root}")
     print(f"📄 Archivo organizadortg cargado: {__file__}")
@@ -996,15 +1084,42 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
     accounts = get_accounts_with_va_info()
     all_videos = scan_calendar_structure()
 
-    if not all_videos: return "❌ No se encontraron videos en CALENDARIO_POSTEO. Revisa que las carpetas se llamen 'Dia_X'."
+    if not all_videos: return "❌ No se encontraron publicaciones en el calendario."
+
+    anchor_date = start_date.date() if isinstance(start_date, datetime) else start_date
+    for video in all_videos:
+        if video.get("scheduled_date"):
+            try:
+                scheduled_date = datetime.strptime(video["scheduled_date"], "%Y-%m-%d").date()
+            except ValueError:
+                return f"❌ Fecha de calendario invalida en {video.get('filename')}."
+            day_number = (scheduled_date - anchor_date).days + 1
+            if day_number < 1:
+                video["skip_before_start"] = True
+                continue
+            video["calendar_date"] = scheduled_date
+            video["day"] = f"Dia_{day_number}"
+        else:
+            try:
+                day_number = int(str(video.get("day", "Dia_1")).split("_")[-1])
+            except ValueError:
+                day_number = 1
+            video["calendar_date"] = anchor_date + timedelta(days=max(0, day_number - 1))
+            video["day"] = f"Dia_{max(1, day_number)}"
+    all_videos = [video for video in all_videos if not video.get("skip_before_start")]
+    if not all_videos:
+        return "✨ No hay publicaciones en o después de la fecha inicial seleccionada."
 
     try:
-        published_hashes = fetch_published_video_hashes(load_airtable_config())
+        video_paths = [video for video in all_videos if video.get("media_kind") == "video"]
+        published_hashes = (
+            fetch_published_video_hashes(load_airtable_config()) if video_paths else set()
+        )
         eligible_videos = []
         omitted_published = 0
         for video in all_videos:
             source_hash = _source_sha256(video["path"])
-            if source_hash in published_hashes:
+            if video.get("media_kind") == "video" and source_hash in published_hashes:
                 if not selected_accounts or video["username"] in selected_accounts:
                     omitted_published += 1
                 continue
@@ -1090,6 +1205,8 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
     jobs_by_chat = defaultdict(list)
 
     for dia in sorted_days:
+        day_index = max(0, int(str(dia).split("_")[-1]) - 1)
+        fecha_envio = anchor_date + timedelta(days=day_index)
         dia_str = fecha_envio.strftime('%Y-%m-%d')
         day_of_week = fecha_envio.weekday()
 
@@ -1109,6 +1226,20 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
             va_tz = acc_info.get('va_timezone', 'America/Argentina/Buenos_Aires')
             tiempos = get_slots_for_set(va_name, category, day_of_week, db)
 
+            from por_cuentas_lanes import resolve_legacy_reel_schedule
+            for video in videos:
+                if not (video.get("scheduled_date") and video.get("scheduled_time") and video.get("slot")):
+                    schedule = resolve_legacy_reel_schedule(video, anchor_date.isoformat(), db)
+                    if schedule:
+                        video.update(schedule)
+                        video["_legacy_resolved_schedule"] = True
+            videos.sort(key=lambda video: (
+                video.get("scheduled_date") or dia_str,
+                video.get("scheduled_time") or "",
+                int(video.get("slot") or 0),
+                video.get("filename") or "",
+            ))
+
             has_normal_videos = any(vid.get("delivery_kind", "normal") == "normal" for vid in videos)
             t_id = get_or_create_topic(chat_id, username, tag, topics_state) if has_normal_videos else None
             if has_normal_videos and not t_id:
@@ -1124,17 +1255,38 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     print(f"Topic Trial no encontrado para @{username}; se omite el video.")
                     continue
 
-                hora_et = tiempos[i % len(tiempos)]
-                et_label, local_label = convert_et_to_va_tz(hora_et, va_tz)
-                meta = (
-                    f"{tag}\n"
-                    f"Día: {dia_str}\n"
-                    f"⏰ {et_label}\n"
-                    f"   → {local_label}\n"
-                    f"Formato: Reel"
-                )
+                if vid.get("scheduled_time") and not vid.get("_legacy_resolved_schedule"):
+                    hora_et = ""
+                    local_label = f"{vid['scheduled_time']} {vid.get('timezone') or va_tz}"
+                    target = vid.get("publication_target") or publication_target_for_entry(vid)
+                    meta = (
+                        f"{tag}\nFecha: {vid.get('scheduled_date') or dia_str}\n"
+                        f"Hora: {local_label}\nDestino: {target}"
+                    )
+                    if vid.get("story_link_url"):
+                        meta += f"\nEnlace Story: {vid['story_link_url']}"
+                    if vid.get("story_announcement_text"):
+                        meta += f"\nTexto Story: {vid['story_announcement_text']}"
+                    payload = vid.get("platform_payload") or {}
+                    for label, key in (("Titulo", "title"), ("Precio", "price"), ("Condicion", "condition"), ("Descripcion", "description")):
+                        if payload.get(key):
+                            meta += f"\n{label}: {payload[key]}"
+                else:
+                    slot_number = int(vid.get("slot") or i + 1)
+                    hora_et = tiempos[(slot_number - 1) % len(tiempos)]
+                    et_label, local_label = convert_et_to_va_tz(hora_et, va_tz)
+                    target = vid.get("publication_target") or publication_target_for_entry(vid)
+                    meta = (
+                        f"{tag}\n"
+                        f"Día: {dia_str}\n"
+                        f"⏰ {et_label}\n"
+                        f"   → {local_label}\n"
+                        f"Formato: Reel"
+                    )
 
-                if delivery_kind == "trial":
+                if vid.get("caption"):
+                    cap = vid["caption"]
+                elif delivery_kind == "trial":
                     trial_map = trial_caption_maps.get(
                         extract_tanda_tag_from_calendar_filename(vid["filename"]), {}
                     )
@@ -1151,21 +1303,29 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                         caption_indexes,
                     )
 
+                if vid.get("story_announcement_text") and not cap:
+                    cap = vid["story_announcement_text"]
+
+                if vid.get("scheduled_time") and not vid.get("_legacy_resolved_schedule") and cap:
+                    meta += f"\nCaption: {cap}"
+                attachment_caption = cap if len(cap) <= 1000 else ""
+
                 jobs_by_chat[chat_id].append({
                     "chat_id": chat_id,
                     "username": username,
                     "tag": tag,
                     "delivery_kind": delivery_kind,
+                    "publication_target": target,
+                    "media_kind": vid.get("media_kind", "video"),
                     "topic_id": video_topic_id,
                     "caption": cap,
+                    "attachment_caption": attachment_caption,
                     "path": vid["path"],
                     "meta": meta,
                     "hora_et": hora_et,
                     "dia_str": dia_str,
                     "source_hash": vid["source_hash"],
                 })
-
-        fecha_envio += timedelta(days=1)
 
     def send_metadata(job):
         if express_mode:
@@ -1210,15 +1370,21 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                 break
             if controller:
                 controller.paused.wait()
-            print(f"📤 Enviando a @{job['username']} [{job['tag']}] (Día {job['dia_str']} - {job['hora_et']} ET)...")
+            print(f"📤 Enviando a @{job['username']} [{job['publication_target']}] ({job['dia_str']} {job['hora_et']})...")
             try:
                 topic_id = send_metadata(job)
                 if not topic_id:
                     continue
-                ok, _topic_id = _send_video_to_topic(
-                    job["chat_id"], topic_id, job["caption"], job["path"],
-                    topics_state, job["username"], job["tag"], job["source_hash"],
-                )
+                if job["media_kind"] == "image":
+                    ok, _topic_id = _send_image_to_topic(
+                        job["chat_id"], topic_id, job["attachment_caption"], job["path"],
+                        topics_state, job["username"], job["tag"], job["source_hash"],
+                    )
+                else:
+                    ok, _topic_id = _send_video_to_topic(
+                        job["chat_id"], topic_id, job["attachment_caption"], job["path"],
+                        topics_state, job["username"], job["tag"], job["source_hash"],
+                    )
                 if ok:
                     sent += 1
                 with state_lock:
@@ -1241,7 +1407,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
 
     save_json(os.path.join(base_dir, STATE_FILE), topics_state)
     return (
-        f"✨ PROCESO TERMINADO. Se enviaron {global_sent} videos. "
+        f"✨ PROCESO TERMINADO. Se enviaron {global_sent} publicaciones. "
         f"Omitidos publicados: {omitted_published}."
     )
 

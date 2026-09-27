@@ -4,6 +4,7 @@ from urllib.parse import quote, urlparse, urlunparse
 INSTAGRAM_REEL = "instagram_reel"
 INSTAGRAM_TRIAL_REEL = "instagram_trial_reel"
 INSTAGRAM_STORY = "instagram_story"
+FACEBOOK_STORY = "facebook_story"
 INSTAGRAM_POST = "instagram_post"
 FACEBOOK_PAGE_POST = "facebook_page_post"
 FACEBOOK_MARKETPLACE_LISTING = "facebook_marketplace_listing"
@@ -14,6 +15,7 @@ PUBLICATION_TARGETS = frozenset(
         INSTAGRAM_REEL,
         INSTAGRAM_TRIAL_REEL,
         INSTAGRAM_STORY,
+        FACEBOOK_STORY,
         INSTAGRAM_POST,
         FACEBOOK_PAGE_POST,
         FACEBOOK_MARKETPLACE_LISTING,
@@ -82,7 +84,7 @@ def validate_publication_metadata(
 
     normalized_link = ""
     normalized_announcement = str(story_announcement_text or "").strip()
-    if publication_target == INSTAGRAM_STORY:
+    if publication_target in {INSTAGRAM_STORY, FACEBOOK_STORY}:
         normalized_link = _validated_full_url(story_link_url)
         if not normalized_announcement:
             raise ValueError("La historia necesita texto de anuncio.")

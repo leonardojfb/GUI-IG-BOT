@@ -164,10 +164,18 @@ def replace_entries(
 def append_scheduled_entries(
     path: str | os.PathLike,
     entries: list[dict],
+    schedule_resolver=None,
 ) -> ScheduleMergeResult:
     """Append a confirmed schedule without replacing existing calendar rows."""
     manifest = Path(path)
-    result = merge_scheduled_entries(_read_payload(manifest)["entries"], entries)
+    current = list(_read_payload(manifest)["entries"])
+    if schedule_resolver is not None:
+        resolved = []
+        for entry in current:
+            schedule = schedule_resolver(entry)
+            resolved.append({**entry, **schedule} if schedule else entry)
+        current = resolved
+    result = merge_scheduled_entries(current, entries)
     if not result.conflicts:
         _write_payload(manifest, result.entries)
     return result
