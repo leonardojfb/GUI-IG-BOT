@@ -1231,7 +1231,12 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
             if topic_mode == "separate_by_type"
             else "account"
         )
-        account_topic_specs[vid['username']].add((delivery_kind, group))
+        topic_delivery_kind = (
+            "normal"
+            if topic_mode == "account_by_day" and vid.get("lane_id")
+            else delivery_kind
+        )
+        account_topic_specs[vid['username']].add((topic_delivery_kind, group))
 
     unique_usernames = sorted({vid['username'] for vid in all_videos})
     if reset_topics:
@@ -1341,9 +1346,12 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
             ))
 
             if topic_mode == "account_by_day":
-                has_normal_videos = any(vid.get("delivery_kind", "normal") == "normal" for vid in videos)
-                t_id = get_or_create_topic(chat_id, username, tag, topics_state) if has_normal_videos else None
-                if has_normal_videos and not t_id:
+                has_account_topic = any(
+                    vid.get("delivery_kind", "normal") == "normal" or vid.get("lane_id")
+                    for vid in videos
+                )
+                t_id = get_or_create_topic(chat_id, username, tag, topics_state) if has_account_topic else None
+                if has_account_topic and not t_id:
                     print(f"❌ Topic no encontrado para @{username} — saltando.")
                     continue
 
@@ -1354,15 +1362,20 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     if topic_mode == "separate_by_type"
                     else "account"
                 )
-                if topic_mode == "account_by_day" and delivery_kind == "normal":
+                topic_delivery_kind = (
+                    "normal"
+                    if topic_mode == "account_by_day" and vid.get("lane_id")
+                    else delivery_kind
+                )
+                if topic_mode == "account_by_day" and topic_delivery_kind == "normal":
                     video_topic_id = t_id
                 else:
                     video_topic_id = get_or_create_topic(
                         chat_id, username, tag, topics_state,
-                        delivery_kind=delivery_kind, topic_group=topic_group,
+                        delivery_kind=topic_delivery_kind, topic_group=topic_group,
                     )
                 if not video_topic_id:
-                    print(f"Topic Trial no encontrado para @{username}; se omite el video.")
+                    print(f"Topic no encontrado para @{username}; se omite la publicacion.")
                     continue
 
                 if vid.get("scheduled_time") and not vid.get("_legacy_resolved_schedule"):
@@ -1428,6 +1441,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     "username": username,
                     "tag": tag,
                     "delivery_kind": delivery_kind,
+                    "topic_delivery_kind": topic_delivery_kind,
                     "publication_target": target,
                     "media_kind": vid.get("media_kind", "video"),
                     "topic_id": video_topic_id,
@@ -1461,7 +1475,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
         with state_lock:
             topic_id = get_or_create_topic(
                 job["chat_id"], job["username"], job["tag"], topics_state,
-                force_recreate=True, delivery_kind=job["delivery_kind"],
+                force_recreate=True, delivery_kind=job["topic_delivery_kind"],
                 topic_group=job["topic_group"],
             )
             save_json(os.path.join(base_dir, STATE_FILE), topics_state)
@@ -1496,14 +1510,14 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     ok, _topic_id = _send_image_to_topic(
                         job["chat_id"], topic_id, job["attachment_caption"], job["path"],
                         topics_state, job["username"], job["tag"], job["source_hash"],
-                        topic_group=job["topic_group"], delivery_kind=job["delivery_kind"],
+                        topic_group=job["topic_group"], delivery_kind=job["topic_delivery_kind"],
                         story_link_url=job["story_link_url"],
                     )
                 else:
                     ok, _topic_id = _send_video_to_topic(
                         job["chat_id"], topic_id, job["attachment_caption"], job["path"],
                         topics_state, job["username"], job["tag"], job["source_hash"],
-                        topic_group=job["topic_group"], delivery_kind=job["delivery_kind"],
+                        topic_group=job["topic_group"], delivery_kind=job["topic_delivery_kind"],
                         story_link_url=job["story_link_url"],
                     )
                 if ok:

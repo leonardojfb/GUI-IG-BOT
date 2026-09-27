@@ -101,6 +101,9 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   globalmente las otras publicaciones. Reels historicos conservan el hash
   global anterior para no romper su compatibilidad con Airtable. La
   sincronizacion manual desde Calendario usa el mismo contrato.
+- En el topic mode predeterminado, todas las publicaciones de carriles nuevos
+  de una identidad (incluido Instagram Trial) comparten su topic cronologico;
+  las tandas Trial legacy conservan su topic separado.
 - Las publicaciones de Story llevan un boton para copiar su URL individual
   cuando no supera el limite documentado por Telegram; el enlace completo
   tambien se conserva visible en los metadatos enviados al topic.
