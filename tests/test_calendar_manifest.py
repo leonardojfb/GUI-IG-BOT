@@ -1,6 +1,7 @@
 import json
 
 from calendar_manifest import (
+    append_scheduled_entries,
     build_entry,
     load_entries,
     manifest_path,
@@ -127,3 +128,51 @@ def test_remove_entries_for_accounts_removes_all_kinds(tmp_path):
 
     assert removed == 2
     assert [e["username"] for e in load_entries(manifest)] == ["bob"]
+
+
+def test_append_scheduled_entries_preserves_existing_calendar_and_inserts_by_time(tmp_path):
+    manifest = tmp_path / "calendar_manifest.json"
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"x")
+    early = build_entry(
+        "alice", 1, "normal", 1, 1, "T", str(source), "early.mp4",
+        scheduled_date="2026-10-05", scheduled_time="10:00",
+    )
+    late = build_entry(
+        "alice", 1, "normal", 1, 2, "T", str(source), "late.mp4",
+        scheduled_date="2026-10-05", scheduled_time="13:00",
+    )
+    middle = build_entry(
+        "alice", 1, "normal", 1, 3, "T", str(source), "middle.jpg",
+        publication_target="instagram_post",
+        scheduled_date="2026-10-05", scheduled_time="12:00",
+    )
+    replace_entries(manifest, [early, late], {"alice"}, "normal")
+
+    result = append_scheduled_entries(manifest, [middle])
+
+    assert result.conflicts == []
+    assert [entry["telegram_filename"] for entry in load_entries(manifest)] == [
+        "early.mp4", "middle.jpg", "late.mp4",
+    ]
+
+
+def test_append_scheduled_entries_does_not_write_when_a_time_is_occupied(tmp_path):
+    manifest = tmp_path / "calendar_manifest.json"
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"x")
+    existing = build_entry(
+        "alice", 1, "normal", 1, 1, "T", str(source), "reel.mp4",
+        scheduled_date="2026-10-05", scheduled_time="12:00",
+    )
+    candidate = build_entry(
+        "alice", 1, "normal", 1, 2, "T", str(source), "story.jpg",
+        publication_target="instagram_post",
+        scheduled_date="2026-10-05", scheduled_time="12:00",
+    )
+    replace_entries(manifest, [existing], {"alice"}, "normal")
+
+    result = append_scheduled_entries(manifest, [candidate])
+
+    assert len(result.conflicts) == 1
+    assert [entry["telegram_filename"] for entry in load_entries(manifest)] == ["reel.mp4"]

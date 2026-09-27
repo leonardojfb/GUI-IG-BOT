@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from social_publishing import default_publication_target, validate_publication_metadata
-from publication_schedule import validate_scheduled_fields
+from publication_schedule import ScheduleMergeResult, merge_scheduled_entries, validate_scheduled_fields
 
 MANIFEST_VERSION = 1
 MANIFEST_FILENAME = "calendar_manifest.json"
@@ -159,6 +159,18 @@ def replace_entries(
     merged = kept + list(entries)
     _write_payload(manifest, merged)
     return merged
+
+
+def append_scheduled_entries(
+    path: str | os.PathLike,
+    entries: list[dict],
+) -> ScheduleMergeResult:
+    """Append a confirmed schedule without replacing existing calendar rows."""
+    manifest = Path(path)
+    result = merge_scheduled_entries(_read_payload(manifest)["entries"], entries)
+    if not result.conflicts:
+        _write_payload(manifest, result.entries)
+    return result
 
 
 def remove_entries_for_accounts(path: str | os.PathLike, usernames: set[str]) -> int:
