@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from social_publishing import default_publication_target, validate_publication_metadata
+from publication_schedule import validate_scheduled_fields
 
 MANIFEST_VERSION = 1
 MANIFEST_FILENAME = "calendar_manifest.json"
@@ -40,6 +41,12 @@ def build_entry(
     story_announcement_text: str = "",
     platform_payload: dict | None = None,
     manual_status: str = "planned",
+    scheduled_date: str | None = None,
+    scheduled_time: str | None = None,
+    timezone: str = "",
+    media_kind: str = "",
+    lane_id: str = "",
+    plan_id: str = "",
 ) -> dict:
     target = publication_target or default_publication_target(delivery_kind)
     metadata = validate_publication_metadata(
@@ -50,6 +57,7 @@ def build_entry(
         story_announcement_text,
         platform_payload,
     )
+    local_date, local_time = validate_scheduled_fields(scheduled_date, scheduled_time)
     entry = {
         "id": str(uuid.uuid4()),
         "username": str(username),
@@ -69,6 +77,17 @@ def build_entry(
         "platform_payload": metadata["platform_payload"],
         "manual_status": str(manual_status or "planned"),
     }
+    if local_date:
+        entry["scheduled_date"] = local_date
+        entry["scheduled_time"] = local_time
+    if timezone:
+        entry["timezone"] = str(timezone)
+    if media_kind:
+        entry["media_kind"] = str(media_kind)
+    if lane_id:
+        entry["lane_id"] = str(lane_id)
+    if plan_id:
+        entry["plan_id"] = str(plan_id)
     if caption_mode:
         entry["caption_mode"] = str(caption_mode)
     return entry
