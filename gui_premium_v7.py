@@ -3209,6 +3209,7 @@ class InstagramAutoPro(ctk.CTk):
         ).grid(row=4, column=0, columnspan=5, padx=14, pady=(2, 0), sticky="w")
         lane_buttons = ctk.CTkFrame(lane, fg_color="transparent")
         lane_buttons.grid(row=5, column=0, columnspan=5, pady=(8, 12))
+        self._load_lane_defaults()
         GhostButton(
             lane_buttons, text="Previsualizar carril",
             command=lambda: self._acct_multichannel_run(preview_only=True),
@@ -3216,6 +3217,10 @@ class InstagramAutoPro(ctk.CTk):
         GhostButton(
             lane_buttons, text="Ver calendario",
             command=lambda: self.show_frame("Calendario"),
+        ).pack(side="left", padx=6)
+        GhostButton(
+            lane_buttons, text="Guardar defaults",
+            command=self._save_lane_defaults,
         ).pack(side="left", padx=6)
         PrimaryButton(
             lane_buttons, text="Agregar al calendario",
@@ -3512,6 +3517,46 @@ class InstagramAutoPro(ctk.CTk):
         if path:
             self.acct_lane_root.delete(0, "end")
             self.acct_lane_root.insert(0, path)
+
+    def _load_lane_defaults(self):
+        try:
+            raw = self.db.get_social_publishing_setting("por_cuentas_lane_defaults", "")
+            values = json.loads(raw) if raw else {}
+            target = values.get("target", "instagram_story")
+            if target in self.acct_lane_target.cget("values"):
+                self.acct_lane_target.set(target)
+            for widget, key, default in (
+                (self.acct_lane_horizon, "horizon_days", "7"),
+                (self.acct_lane_every_days, "every_days", "1"),
+                (self.acct_lane_times, "times", "09:00,16:00"),
+            ):
+                value = str(values.get(key, default))
+                widget.delete(0, "end")
+                widget.insert(0, value)
+        except (AttributeError, TypeError, ValueError):
+            return
+
+    def _save_lane_defaults(self):
+        values = {
+            "target": self.acct_lane_target.get().strip(),
+            "horizon_days": int(self.acct_lane_horizon.get()),
+            "every_days": int(self.acct_lane_every_days.get()),
+            "times": self.acct_lane_times.get().strip(),
+        }
+        try:
+            expand_lane_slots(
+                self.acct_lane_start_date.get().strip(),
+                values["horizon_days"],
+                values["every_days"],
+                [part.strip() for part in values["times"].split(",") if part.strip()],
+            )
+            self.db.set_social_publishing_setting(
+                "por_cuentas_lane_defaults", json.dumps(values, ensure_ascii=True)
+            )
+        except (AttributeError, TypeError, ValueError) as error:
+            messagebox.showwarning("Defaults de carril", str(error), parent=self)
+            return
+        messagebox.showinfo("Defaults de carril", "Preferencias predeterminadas guardadas.", parent=self)
 
     def _acct_multichannel_run(self, preview_only: bool = True):
         accounts = self._acct_dist_accounts()

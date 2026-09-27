@@ -313,6 +313,25 @@ class DatabaseManager:
         row = cur.fetchone()
         return row["setting_value"] if row else ""
 
+    def get_social_publishing_setting(self, key, default=""):
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT setting_value FROM social_publishing_settings WHERE setting_key = ?",
+            (str(key),),
+        )
+        row = cur.fetchone()
+        return row["setting_value"] if row else default
+
+    def set_social_publishing_setting(self, key, value):
+        cur = self.conn.cursor()
+        cur.execute(
+            "INSERT INTO social_publishing_settings (setting_key, setting_value) "
+            "VALUES (?, ?) ON CONFLICT(setting_key) DO UPDATE SET "
+            "setting_value=excluded.setting_value, updated_at=CURRENT_TIMESTAMP",
+            (str(key), str(value)),
+        )
+        self.conn.commit()
+
     def set_story_link_base_url(self, value):
         normalized = normalize_story_link_base(value)
         cur = self.conn.cursor()
