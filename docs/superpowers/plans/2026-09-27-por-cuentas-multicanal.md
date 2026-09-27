@@ -110,3 +110,6 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   release bootstrap solo con `updater.py` y `version.json`; publicar el codigo
   de la funcion en una version posterior para que instalaciones antiguas
   acepten `publication_schedule.py`, `por_cuentas_lanes.py` y `photo_forge.py`.
+  El checkout compartido actualmente anuncia `1.0.48`; por tanto, al llegar
+  a release, usar `1.0.49` para el bootstrap y `1.0.50` para la funcionalidad.
+  No rebajar ni reemplazar los datos locales del launcher durante este puente.
