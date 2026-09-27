@@ -56,6 +56,7 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "social_publishing.py",
         "publication_schedule.py",
         "por_cuentas_lanes.py",
+        "photo_forge.py",
         "telegram_core.py",
         "cleaner.py",
         "vercuentas.py",

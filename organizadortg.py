@@ -691,23 +691,38 @@ def _is_trials_subaccount(account_name="", account_type=""):
     return "trial" in f"{account_name or ''} {account_type or ''}".lower()
 
 
-def topic_state_key(chat_id, acc_name, delivery_kind="normal"):
+def topic_state_key(chat_id, acc_name, delivery_kind="normal", topic_group="account"):
     suffix = "_trials" if delivery_kind == "trial" else ""
-    return f"{chat_id}_{acc_name}{suffix}"
+    group_suffix = f"__target_{topic_group}" if topic_group and topic_group != "account" else ""
+    return f"{chat_id}_{acc_name}{suffix}{group_suffix}"
 
 
-def _topic_display_name(acc_name, tag_emoji, is_admin=False, delivery_kind="normal"):
+def _topic_display_name(acc_name, tag_emoji, is_admin=False, delivery_kind="normal", topic_group="account"):
     if is_admin:
         return acc_name
     full_name = f"{acc_name} {tag_emoji}"
     if (delivery_kind == "trial" or _is_trials_subaccount(acc_name, tag_emoji)) and not full_name.lower().startswith(TRIAL_TOPIC_PREFIX.lower()):
-        return f"{TRIAL_TOPIC_PREFIX}{full_name}"
+        full_name = f"{TRIAL_TOPIC_PREFIX}{full_name}"
+    if topic_group and topic_group != "account":
+        target_labels = {
+            "instagram_reel": "Instagram Reel",
+            "instagram_trial_reel": "Instagram Trial Reel",
+            "instagram_story": "Instagram Story",
+            "instagram_post": "Instagram Post",
+            "facebook_story": "Facebook Story",
+            "facebook_page_post": "Facebook Post",
+            "facebook_reel": "Facebook Reel",
+            "facebook_marketplace_listing": "Marketplace",
+        }
+        full_name = f"{full_name} · {target_labels.get(topic_group, topic_group)}"
     return full_name
 
 
-def get_or_create_topic(chat_id, acc_name, tag_emoji, state, is_admin=False, force_recreate=False, delivery_kind="normal"):
-    full_name = _topic_display_name(acc_name, tag_emoji, is_admin=is_admin, delivery_kind=delivery_kind)
-    state_key = topic_state_key(chat_id, acc_name, delivery_kind)
+def get_or_create_topic(chat_id, acc_name, tag_emoji, state, is_admin=False, force_recreate=False, delivery_kind="normal", topic_group="account"):
+    full_name = _topic_display_name(
+        acc_name, tag_emoji, is_admin=is_admin, delivery_kind=delivery_kind, topic_group=topic_group
+    )
+    state_key = topic_state_key(chat_id, acc_name, delivery_kind, topic_group)
     if state_key in state and not force_recreate: return _topic_id_from_state_value(state[state_key])
     if force_recreate: state.pop(state_key, None)
     res = call_tg("createForumTopic", {'chat_id': chat_id, 'name': full_name})
@@ -726,15 +741,22 @@ def _topic_state_chat_id(state_key):
 def _topic_state_account_name(state_key):
     if not isinstance(state_key, str) or "_" not in state_key:
         return None
-    account_name = state_key.split("_", 1)[1]
+    account_name = state_key.split("_", 1)[1].split("__target_", 1)[0]
     if account_name.endswith("_trials"):
         return account_name[:-len("_trials")]
     return account_name
 
 def _topic_state_delivery_kind(state_key):
-    if isinstance(state_key, str) and state_key.endswith("_trials"):
+    account_part = state_key.split("_", 1)[1].split("__target_", 1)[0] if isinstance(state_key, str) and "_" in state_key else ""
+    if account_part.endswith("_trials"):
         return "trial"
     return "normal"
+
+
+def _topic_state_group(state_key):
+    if isinstance(state_key, str) and "__target_" in state_key:
+        return state_key.split("__target_", 1)[1]
+    return "account"
 
 def _normalize_account_name(name):
     return str(name or "").strip().lstrip("@").lower()
@@ -829,7 +851,7 @@ def delete_known_topics_for_accounts(account_names, topics_state):
         should_delete,
     )
 
-def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, username, tag, source_hash=None):
+def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, username, tag, source_hash=None, topic_group="account", delivery_kind="normal"):
     readable_video_path = _windows_long_path(video_path)
     active_path = readable_video_path
     compressed_tmp = None
@@ -892,7 +914,10 @@ def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, usern
                 continue
             if "thread not found" in r.text:
                 print(f"⚠️ Topic expirado al enviar video @{username}, recreando...")
-                t_id = get_or_create_topic(chat_id, username, tag, topics_state, force_recreate=True)
+                t_id = get_or_create_topic(
+                    chat_id, username, tag, topics_state, force_recreate=True,
+                    topic_group=topic_group, delivery_kind=delivery_kind,
+                )
                 if not t_id:
                     print(f"❌ No se pudo recrear topic para @{username}.")
                     return False, None
@@ -905,7 +930,7 @@ def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, usern
             os.unlink(compressed_tmp)
 
 
-def _send_image_to_topic(chat_id, topic_id, caption, image_path, topics_state, username, tag, source_hash=None):
+def _send_image_to_topic(chat_id, topic_id, caption, image_path, topics_state, username, tag, source_hash=None, topic_group="account", delivery_kind="normal"):
     """Deliver a final image as a Telegram photo, preserving its source path."""
     readable_path = _windows_long_path(image_path)
     extension = os.path.splitext(readable_path)[1].lower()
@@ -945,7 +970,8 @@ def _send_image_to_topic(chat_id, topic_id, caption, image_path, topics_state, u
         description = str(body.get("description") or getattr(response, "text", ""))
         if "thread not found" in description.lower():
             topic_id = get_or_create_topic(
-                chat_id, username, tag, topics_state, force_recreate=True
+                chat_id, username, tag, topics_state, force_recreate=True,
+                topic_group=topic_group, delivery_kind=delivery_kind,
             )
             if not topic_id:
                 return False, None
@@ -1061,7 +1087,7 @@ def _account_tag(acc_info):
         return "SUICIDE"
     return category.upper() if category else "GENERAL"
 
-def execute_telegram_plan(start_date, selected_accounts=None, controller=None, reset_topics=False, express_mode=False, db_manager=None):
+def execute_telegram_plan(start_date, selected_accounts=None, controller=None, reset_topics=False, express_mode=False, db_manager=None, topic_mode="account_by_day"):
     if db_manager is not None:
         global db
         previous_db = db
@@ -1073,6 +1099,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                 controller,
                 reset_topics=reset_topics,
                 express_mode=express_mode,
+                topic_mode=topic_mode,
             )
         finally:
             db = previous_db
@@ -1083,6 +1110,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
 
     accounts = get_accounts_with_va_info()
     all_videos = scan_calendar_structure()
+    topic_mode = topic_mode if topic_mode in {"account_by_day", "separate_by_type"} else "account_by_day"
 
     if not all_videos: return "❌ No se encontraron publicaciones en el calendario."
 
@@ -1136,10 +1164,16 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
     topics_state = load_json(os.path.join(base_dir, STATE_FILE))
     from collections import defaultdict
     day_account_videos = defaultdict(lambda: defaultdict(list))
-    account_delivery_kinds = defaultdict(set)
+    account_topic_specs = defaultdict(set)
     for vid in all_videos:
         day_account_videos[vid['day']][vid['username']].append(vid)
-        account_delivery_kinds[vid['username']].add(vid.get("delivery_kind", "normal"))
+        delivery_kind = vid.get("delivery_kind", "normal")
+        group = (
+            vid.get("publication_target") or publication_target_for_entry(vid)
+            if topic_mode == "separate_by_type"
+            else "account"
+        )
+        account_topic_specs[vid['username']].add((delivery_kind, group))
 
     unique_usernames = sorted({vid['username'] for vid in all_videos})
     if reset_topics:
@@ -1183,10 +1217,15 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
             continue
         chat_id = acc_info['tg_group_id']
         tag = _account_tag(acc_info)
-        for delivery_kind in sorted(account_delivery_kinds[username], key=lambda kind: kind != "normal"):
-            topic_kwargs = {"delivery_kind": delivery_kind} if delivery_kind == "trial" else {}
+        for delivery_kind, topic_group in sorted(
+            account_topic_specs[username],
+            key=lambda spec: (spec[0] != "normal", spec[1]),
+        ):
+            topic_kwargs = {"delivery_kind": delivery_kind, "topic_group": topic_group}
             t_id = get_or_create_topic(chat_id, username, tag, topics_state, **topic_kwargs)
             topic_label = "TRIAL" if delivery_kind == "trial" else tag
+            if topic_group != "account":
+                topic_label += f" / {topic_group}"
             if t_id:
                 print(f"✅ Topic listo: @{username} [{topic_label}] → thread {t_id}")
             else:
@@ -1240,17 +1279,27 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                 video.get("filename") or "",
             ))
 
-            has_normal_videos = any(vid.get("delivery_kind", "normal") == "normal" for vid in videos)
-            t_id = get_or_create_topic(chat_id, username, tag, topics_state) if has_normal_videos else None
-            if has_normal_videos and not t_id:
-                print(f"❌ Topic no encontrado para @{username} — saltando.")
-                continue
+            if topic_mode == "account_by_day":
+                has_normal_videos = any(vid.get("delivery_kind", "normal") == "normal" for vid in videos)
+                t_id = get_or_create_topic(chat_id, username, tag, topics_state) if has_normal_videos else None
+                if has_normal_videos and not t_id:
+                    print(f"❌ Topic no encontrado para @{username} — saltando.")
+                    continue
 
             for i, vid in enumerate(videos):
                 delivery_kind = vid.get("delivery_kind", "normal")
-                video_topic_id = t_id if delivery_kind == "normal" else get_or_create_topic(
-                    chat_id, username, tag, topics_state, delivery_kind="trial"
+                topic_group = (
+                    vid.get("publication_target") or publication_target_for_entry(vid)
+                    if topic_mode == "separate_by_type"
+                    else "account"
                 )
+                if topic_mode == "account_by_day" and delivery_kind == "normal":
+                    video_topic_id = t_id
+                else:
+                    video_topic_id = get_or_create_topic(
+                        chat_id, username, tag, topics_state,
+                        delivery_kind=delivery_kind, topic_group=topic_group,
+                    )
                 if not video_topic_id:
                     print(f"Topic Trial no encontrado para @{username}; se omite el video.")
                     continue
@@ -1305,6 +1354,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
 
                 if vid.get("story_announcement_text") and not cap:
                     cap = vid["story_announcement_text"]
+                cap = str(cap or "")
 
                 if vid.get("scheduled_time") and not vid.get("_legacy_resolved_schedule") and cap:
                     meta += f"\nCaption: {cap}"
@@ -1320,6 +1370,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     "publication_target": target,
                     "media_kind": vid.get("media_kind", "video"),
                     "topic_id": video_topic_id,
+                    "topic_group": topic_group,
                     "caption": cap,
                     "attachment_caption": attachment_caption,
                     "path": vid["path"],
@@ -1348,6 +1399,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
             topic_id = get_or_create_topic(
                 job["chat_id"], job["username"], job["tag"], topics_state,
                 force_recreate=True, delivery_kind=job["delivery_kind"],
+                topic_group=job["topic_group"],
             )
             save_json(os.path.join(base_dir, STATE_FILE), topics_state)
         if not topic_id:
@@ -1381,11 +1433,13 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     ok, _topic_id = _send_image_to_topic(
                         job["chat_id"], topic_id, job["attachment_caption"], job["path"],
                         topics_state, job["username"], job["tag"],
+                        topic_group=job["topic_group"], delivery_kind=job["delivery_kind"],
                     )
                 else:
                     ok, _topic_id = _send_video_to_topic(
                         job["chat_id"], topic_id, job["attachment_caption"], job["path"],
                         topics_state, job["username"], job["tag"], job["source_hash"],
+                        topic_group=job["topic_group"], delivery_kind=job["delivery_kind"],
                     )
                 if ok:
                     sent += 1
@@ -1415,12 +1469,13 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
 
 # --- 4. CONTROLADOR DE HILOS Y MOTOR DE EJECUCIÓN ---
 class TelegramBotController:
-    def __init__(self, start_date_str, selected_accounts=None, reset_topics=False, express_mode=False, db_manager=None):
+    def __init__(self, start_date_str, selected_accounts=None, reset_topics=False, express_mode=False, db_manager=None, topic_mode="account_by_day"):
         self.start_date_str = start_date_str
         self.selected_accounts = selected_accounts
         self.reset_topics = reset_topics
         self.express_mode = express_mode
         self.db_manager = db_manager
+        self.topic_mode = topic_mode
         self._paused = threading.Event()
         self._paused.set()
         self._stopped = False
@@ -1443,6 +1498,7 @@ class TelegramBotController:
             execute_kwargs = {
                 "reset_topics": self.reset_topics,
                 "express_mode": self.express_mode,
+                "topic_mode": self.topic_mode,
             }
             if self.db_manager is not None:
                 execute_kwargs["db_manager"] = self.db_manager

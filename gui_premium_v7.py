@@ -1268,7 +1268,8 @@ class InstagramAutoPro(ctk.CTk):
         # — Navegación agrupada por flujo de trabajo —
         nav_groups = [
             ("Edición",       [("🖼️   Edición de video", "VideoEditor")]),
-            ("Contenido",    [("🔮   Forge", "Forge"), ("🎬   Tandas", "Tandas")]),
+            ("Contenido",    [("🔮   Forge", "Forge"), ("🖼️   Photo Forge", "PhotoForge"),
+                              ("🎬   Tandas", "Tandas")]),
             ("Distribución", [("🚀   Logística", "Logistica"), ("🗓️   Calendario", "Calendario"),
                               ("📡   Cuentas", "Cuentas"), ("📲   Telegram", "Telegram")]),
             ("Control",      [("📊   Dashboard", "Dashboard")]),
@@ -1326,7 +1327,7 @@ class InstagramAutoPro(ctk.CTk):
         container.grid_columnconfigure(0, weight=1)
         self._container = container
 
-        for name in ["Dashboard", "Equipo", "Tandas", "Logistica", "Calendario", "Telegram", "Cuentas", "VerifyLegacy", "AIAdvisor", "Forge", "VideoEditor", "Actualizaciones"]:
+        for name in ["Dashboard", "Equipo", "Tandas", "Logistica", "Calendario", "Telegram", "Cuentas", "VerifyLegacy", "AIAdvisor", "Forge", "PhotoForge", "VideoEditor", "Actualizaciones"]:
             f = ctk.CTkFrame(container, fg_color=BG_APP, corner_radius=0)
             f.grid(row=0, column=0, sticky="nsew")
             f.grid_columnconfigure(0, weight=1)
@@ -1343,6 +1344,7 @@ class InstagramAutoPro(ctk.CTk):
         self._build_verify_legacy_frame()
         self._build_ai_frame()
         self._build_forge_frame()
+        self._build_photo_forge_frame()
         self._build_video_editor_frame()
         self._build_updates_frame()
 
@@ -3590,9 +3592,9 @@ class InstagramAutoPro(ctk.CTk):
         root = Path(root_text)
         account_rows = {row["username"]: row for row in self.db.get_all_accounts()}
         finals_by_account = {}
-        extension_filter = {".mp4", ".mov", ".m4v", ".jpg", ".jpeg", ".png", ".webp"}
+        extension_filter = {".mp4", ".mov", ".m4v", ".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"}
         if target == "facebook_marketplace_listing":
-            extension_filter = {".jpg", ".jpeg", ".png", ".webp"}
+            extension_filter = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"}
         for username in accounts:
             account_dir = root / username
             if not account_dir.is_dir() and len(accounts) == 1:
@@ -4255,6 +4257,22 @@ class InstagramAutoPro(ctk.CTk):
             command=self._toggle_schedule_panel,
         )
         self.btn_toggle_sched.grid(row=0, column=0, sticky="ew")
+        topic_mode_row = ctk.CTkFrame(sched_header, fg_color="transparent")
+        topic_mode_row.grid(row=0, column=1, sticky="e", padx=(10, 0))
+        ctk.CTkLabel(topic_mode_row, text="Topics:", text_color=TEXT_MUTED).pack(side="left", padx=(0, 6))
+        self.tg_topic_mode = ctk.CTkComboBox(
+            topic_mode_row,
+            values=["Por identidad y fecha", "Separados por tipo"],
+            width=190,
+            fg_color=BG_INPUT,
+            border_color=BORDER,
+            command=self._save_tg_topic_mode,
+        )
+        saved_topic_mode = self.db.get_social_publishing_setting("telegram_topic_mode", "account_by_day")
+        self.tg_topic_mode.set(
+            "Separados por tipo" if saved_topic_mode == "separate_by_type" else "Por identidad y fecha"
+        )
+        self.tg_topic_mode.pack(side="left")
 
         # Fila 3: panel de horarios (oculto inicialmente)
         self.sched_panel = ctk.CTkScrollableFrame(ctrl, fg_color=BG_INPUT, height=160)
@@ -4470,6 +4488,10 @@ class InstagramAutoPro(ctk.CTk):
         self._refresh_schedule_panel()
 
     # ── Lógica Bot Telegram ──────────────────────────────────────────────────
+    def _save_tg_topic_mode(self, selected):
+        mode = "separate_by_type" if selected == "Separados por tipo" else "account_by_day"
+        self.db.set_social_publishing_setting("telegram_topic_mode", mode)
+
     def load_organized_accounts(self):
         try:
             date_str = self.e_date_tg.get().strip()
@@ -4599,6 +4621,7 @@ class InstagramAutoPro(ctk.CTk):
         reset_topics = bool(reset_topics_var.get()) if reset_topics_var is not None else False
         express_mode_var = getattr(self, "_tg_express_mode", None)
         express_mode = bool(express_mode_var.get()) if express_mode_var is not None else False
+        topic_mode = "separate_by_type" if self.tg_topic_mode.get() == "Separados por tipo" else "account_by_day"
         if reset_topics:
             if not messagebox.askyesno(
                 "Borrar topics existentes",
@@ -4622,6 +4645,7 @@ class InstagramAutoPro(ctk.CTk):
             reset_topics=reset_topics,
             express_mode=express_mode,
             db_manager=self.db,
+            topic_mode=topic_mode,
         )
         
         self.btn_start_tg.configure(state="disabled")
@@ -5645,6 +5669,185 @@ class InstagramAutoPro(ctk.CTk):
 
     # FORGE DE METADATA
     # ══════════════════════════════════════════════════════════════════════
+    def _build_photo_forge_frame(self):
+        f = self._frames["PhotoForge"]
+        f.grid_rowconfigure(2, weight=1)
+        f.grid_columnconfigure(0, weight=1)
+        PageHeader(
+            f, "CONTENIDO", "Photo Forge",
+            "Genera finales independientes por identidad sin modificar las imágenes fuente.",
+        ).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 10))
+
+        settings = Card(f, title="Lote de imágenes")
+        settings.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 10))
+        form = settings.body
+        form.grid_columnconfigure(1, weight=1)
+        form.grid_columnconfigure(3, weight=1)
+        ctk.CTkLabel(form, text="Nombre del lote:", text_color=TEXT_MUTED).grid(
+            row=0, column=0, padx=(14, 6), pady=12, sticky="e")
+        self.photo_forge_batch = ctk.CTkEntry(form, fg_color=BG_INPUT, border_color=BORDER)
+        self.photo_forge_batch.insert(0, "Fotos_" + datetime.now().strftime("%Y%m%d"))
+        self.photo_forge_batch.grid(row=0, column=1, padx=6, pady=12, sticky="ew")
+        ctk.CTkLabel(form, text="Salida:", text_color=TEXT_MUTED).grid(
+            row=0, column=2, padx=(14, 6), pady=12, sticky="e")
+        self.photo_forge_output = ctk.CTkEntry(
+            form, fg_color=BG_INPUT, border_color=BORDER,
+            placeholder_text=os.path.join(_BASE_DIR, "imagenes_finales"),
+        )
+        self.photo_forge_output.insert(0, os.path.join(_BASE_DIR, "imagenes_finales"))
+        self.photo_forge_output.grid(row=0, column=3, padx=6, pady=12, sticky="ew")
+        GhostButton(form, text="Elegir", width=74, command=self._photo_forge_choose_output).grid(
+            row=0, column=4, padx=(4, 14), pady=12)
+
+        content = ctk.CTkFrame(f, fg_color="transparent")
+        content.grid(row=2, column=0, sticky="nsew", padx=24, pady=(0, 10))
+        content.grid_rowconfigure(0, weight=1)
+        content.grid_columnconfigure((0, 1), weight=1)
+        source_card = Card(content, title="Imágenes fuente")
+        source_card.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        source = source_card.body
+        source.grid_rowconfigure(0, weight=1)
+        source.grid_columnconfigure(0, weight=1)
+        self.photo_forge_sources = tk.Listbox(
+            source, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
+            selectbackground=self.themed(ACCENT), selectforeground=self.themed(ACCENT_TEXT),
+            selectmode=tk.EXTENDED, borderwidth=0, highlightthickness=1,
+            highlightbackground=self.themed(BORDER), font=FONT_BODY,
+        )
+        self.photo_forge_sources.grid(row=0, column=0, sticky="nsew", padx=12, pady=(12, 6))
+        source_buttons = ctk.CTkFrame(source, fg_color="transparent")
+        source_buttons.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 12))
+        PrimaryButton(source_buttons, text="Agregar imágenes", command=self._photo_forge_add_images).pack(side="left", padx=(0, 6))
+        GhostButton(source_buttons, text="Quitar seleccionadas", command=self._photo_forge_remove_images).pack(side="left")
+
+        account_card = Card(content, title="Identidades destino")
+        account_card.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        account = account_card.body
+        account.grid_rowconfigure(0, weight=1)
+        account.grid_columnconfigure(0, weight=1)
+        self.photo_forge_accounts = tk.Listbox(
+            account, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
+            selectbackground=self.themed(ACCENT), selectforeground=self.themed(ACCENT_TEXT),
+            selectmode=tk.EXTENDED, borderwidth=0, highlightthickness=1,
+            highlightbackground=self.themed(BORDER), font=FONT_BODY,
+        )
+        self.photo_forge_accounts.grid(row=0, column=0, sticky="nsew", padx=12, pady=(12, 6))
+        account_buttons = ctk.CTkFrame(account, fg_color="transparent")
+        account_buttons.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 12))
+        GhostButton(account_buttons, text="Todas", command=lambda: self.photo_forge_accounts.select_set(0, "end")).pack(side="left", padx=(0, 6))
+        GhostButton(account_buttons, text="Ninguna", command=lambda: self.photo_forge_accounts.selection_clear(0, "end")).pack(side="left")
+        GhostButton(account_buttons, text="Actualizar", command=self._photo_forge_reload_accounts).pack(side="right")
+        self.photo_forge_account_rows = []
+        self._photo_forge_reload_accounts()
+
+        actions = ctk.CTkFrame(f, fg_color="transparent")
+        actions.grid(row=3, column=0, sticky="ew", padx=24, pady=(0, 8))
+        GhostButton(actions, text="Previsualizar", command=self._photo_forge_preview).pack(side="left", padx=(0, 8))
+        self.photo_forge_run_button = PrimaryButton(actions, text="Generar finales por cuenta", command=self._photo_forge_run)
+        self.photo_forge_run_button.pack(side="left")
+        self.photo_forge_result = ctk.CTkTextbox(f, height=95, fg_color=BG_CARD2, text_color=TEXT_BODY)
+        self.photo_forge_result.grid(row=4, column=0, sticky="ew", padx=24, pady=(0, 16))
+        self.photo_forge_result.insert("end", "Los originales se conservan. Cada identidad recibe un archivo final separado, byte por byte idéntico al original.")
+
+    def _photo_forge_reload_accounts(self):
+        if not hasattr(self, "photo_forge_accounts"):
+            return
+        self.photo_forge_account_rows = self.db.get_all_accounts()
+        self.photo_forge_accounts.delete(0, "end")
+        for row in self.photo_forge_account_rows:
+            self.photo_forge_accounts.insert("end", f"@{row.get('username', '')}  ·  {row.get('account_type', '')}")
+        self.photo_forge_accounts.select_set(0, "end")
+
+    def _photo_forge_choose_output(self):
+        path = filedialog.askdirectory(title="Carpeta base de imágenes finales", parent=self)
+        if path:
+            self.photo_forge_output.delete(0, "end")
+            self.photo_forge_output.insert(0, path)
+
+    def _photo_forge_add_images(self):
+        paths = filedialog.askopenfilenames(
+            title="Seleccionar imágenes fuente",
+            filetypes=[("Imágenes", "*.jpg *.jpeg *.png *.webp *.tif *.tiff"), ("Todos", "*.*")],
+            parent=self,
+        )
+        existing = {self.photo_forge_sources.get(index).casefold() for index in range(self.photo_forge_sources.size())}
+        for path in paths:
+            if path.casefold() not in existing:
+                self.photo_forge_sources.insert("end", path)
+                existing.add(path.casefold())
+
+    def _photo_forge_remove_images(self):
+        for index in reversed(self.photo_forge_sources.curselection()):
+            self.photo_forge_sources.delete(index)
+
+    def _photo_forge_selected_accounts(self):
+        return [self.photo_forge_account_rows[index] for index in self.photo_forge_accounts.curselection()]
+
+    def _photo_forge_preview(self):
+        source_count = self.photo_forge_sources.size()
+        accounts = self._photo_forge_selected_accounts()
+        if not source_count or not accounts:
+            return messagebox.showwarning("Photo Forge", "Selecciona imágenes e identidades.", parent=self)
+        self.photo_forge_result.configure(state="normal")
+        self.photo_forge_result.delete("1.0", "end")
+        self.photo_forge_result.insert(
+            "end",
+            f"Lote: {self.photo_forge_batch.get().strip()}\n"
+            f"Imágenes: {source_count} · Identidades: {len(accounts)} · Finales: {source_count * len(accounts)}\n"
+            f"Salida: {os.path.join(self.photo_forge_output.get().strip(), self.photo_forge_batch.get().strip())}\n"
+            "Se preservan los bytes del archivo. No hay conversión ni modificación del original.",
+        )
+        self.photo_forge_result.configure(state="disabled")
+
+    def _photo_forge_run(self):
+        source_paths = [self.photo_forge_sources.get(index) for index in range(self.photo_forge_sources.size())]
+        accounts = self._photo_forge_selected_accounts()
+        output_root = self.photo_forge_output.get().strip()
+        batch_name = self.photo_forge_batch.get().strip()
+        if not source_paths or not accounts or not output_root or not batch_name:
+            return messagebox.showwarning("Photo Forge", "Completa imágenes, identidades, lote y salida.", parent=self)
+        total = len(source_paths) * len(accounts)
+        if not messagebox.askyesno(
+            "Generar Photo Forge",
+            f"Se crearán hasta {total} archivos finales en carpetas separadas por identidad.\n"
+            "Las imágenes fuente se conservarán sin modificar.\n\n¿Continuar?",
+            parent=self,
+        ):
+            return
+        account_rows = [dict(row) for row in accounts]
+        self.photo_forge_run_button.configure(state="disabled")
+
+        def task():
+            import photo_forge
+            plan = photo_forge.plan_photo_copies(source_paths, account_rows, output_root, batch_name)
+            return photo_forge.create_photo_copies(plan, output_root, batch_name)
+
+        def done(success, result):
+            self.photo_forge_run_button.configure(state="normal")
+            self.photo_forge_result.configure(state="normal")
+            self.photo_forge_result.delete("1.0", "end")
+            if success:
+                self.photo_forge_result.insert(
+                    "end",
+                    f"Finales nuevos: {len(result['created'])} · Ya existentes: {len(result['existing'])}\n"
+                    f"Manifiesto: {result['manifest_path']}\n"
+                    "Cada salida pertenece a una identidad; no se copiaron archivos al calendario.",
+                )
+                self.acct_lane_root.delete(0, "end")
+                self.acct_lane_root.insert(0, result["batch_dir"])
+                self.show_frame("Logistica")
+                messagebox.showinfo(
+                    "Photo Forge",
+                    f"Finales generados: {len(result['created'])}\n{result['batch_dir']}",
+                    parent=self,
+                )
+            else:
+                self.photo_forge_result.insert("end", f"Error: {result}")
+                messagebox.showerror("Photo Forge", str(result), parent=self)
+            self.photo_forge_result.configure(state="disabled")
+
+        WorkerThread(self, done, task).start()
+
     def _build_transform_log_panel(self, parent):
         panel = ctk.CTkFrame(parent, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
         panel.grid_columnconfigure(0, weight=1)
