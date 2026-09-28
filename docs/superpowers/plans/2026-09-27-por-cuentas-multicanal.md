@@ -214,7 +214,7 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   `build_release.ps1 -BootstrapUpdater` tampoco necesita localizar ni copiar
   FFmpeg: el bootstrap solo empaqueta `updater.py` y `version.json`.
   Staging validado sin publicar: bootstrap `1.0.49` con exactamente esos dos
-  archivos; paquete funcional `1.0.50` con 37 archivos, lista del manifiesto y
+  archivos; paquete funcional `1.0.50` con 36 archivos, lista del manifiesto y
   SHA-256 coincidentes, módulos nuevos presentes y base/manifiestos/media de
   usuario excluidos. Integración temporal: apliqué ambos ZIP en orden sobre
   una instalación `1.0.48` con el updater anterior; la DB centinela se preservó
@@ -232,11 +232,25 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   allowlist y updater: 15 passed. Compilación y `git diff --check` correctos.
   Actualicé staging desde esta base: bootstrap `1.0.49` (2 archivos) y
   funcional `1.0.50` (37 archivos); SHA-256 funcional
-  `e65aa942d4f40e2c5ee7ffeeb79a55ede7e10b7d956ac903a31ffb5d5d0581c5`.
+  `1433ef0005cdc58d3f516acdfbfe3061f8495fe541eb94eeeb19f7117031f9e3`.
   Los módulos nuevos están incluidos y no hay DB local, manifiesto de
   calendario ni medios en el ZIP. Repetí la integración temporal en una
   instalación sintética: el updater 1.0.48 aplicó el bootstrap, el updater
   resultante aplicó 1.0.50, y DB, manifiesto y medio centinela permanecieron
   byte por byte intactos; los tres módulos nuevos aparecieron instalados.
-  No se publicó ni se probó contra el launcher instalado real; el envío real a
+  No se publicó ni se modificó la instalación compartida; el envío real a
   Telegram sigue pendiente y no se ejecutó.
+- Verificación de interfaz/launcher en staging, 2026-09-28: inicié `launcher.py`
+  desde una instalación temporal actualizada `1.0.48` -> `1.0.49` -> `1.0.50`;
+  el proceso hijo abrió la ventana principal `Instagram Automation Pro — V7`,
+  1416x899, respondió y conservó DB, manifiesto y media centinela. SQLite quedó
+  con `integrity_check=ok`. Tras esperar el repintado, la captura mostró Dashboard y navegación
+  lateral. En una instancia aislada invoqué los botones reales de Logística,
+  Photo Forge y Calendario; los tres frames quedaron visibles y expusieron 107,
+  39 y 20 textos, respectivamente. Suite completa posterior al bump: 357
+  passed, 1 skipped (`test_dashboard_refresh.py:26`, no display disponible).
+  Artefactos locales: `releases/MetodoIG-v1.0.49.zip` y
+  `releases/MetodoIG-v1.0.50.zip`; 1.0.50 coincide con el hash del manifiesto.
+  Esto valida el flujo en una instalación temporal, no modifica ni valida el
+  launcher compartido 1.0.48, que conserva sus cambios locales. No publiqué
+  releases ni envié mensajes a Telegram.
