@@ -24,8 +24,10 @@ Para fotos, abre **Photo Forge**:
 3. Elige un **Placement**: Original, Story 9:16, Post 4:5, Post cuadrado,
    Portada 16:9 o Photo Reel (imagen). Photo Reel sigue siendo imagen y no se
    convierte a video.
-4. Elige cuántas variantes generar por imagen (1 a 20) y la intensidad
-   **Sutil**, **Estándar** o **Fuerte**. La receta aplica parámetros
+4. Elige cuántas variantes generar por imagen (1 a 20), opcionalmente limita
+   la generación con una lista como `1,3-5`, y selecciona la intensidad
+   **Sutil**, **Estándar** o **Fuerte**. El preview usa la primera variante
+   elegida. La receta aplica parámetros
    deterministas de encuadre, escala de salida, luz, contraste, color, gamma,
    nitidez, rotación y grano; los formatos con pérdida usan calidad registrada
    en la receta.
@@ -34,18 +36,22 @@ Para fotos, abre **Photo Forge**:
    calidad JPEG/WebP. Dejar ambos campos vacíos conserva el rango del preset;
    los límites se validan antes de renderizar. Preview y generación usan los
    mismos rangos, guardados en la receta de cada resultado.
-6. **Espejo horizontal** es opcional. El preview muestra el placement y el
-   primer resultado; vuelve a pulsar **Previsualizar** después de cambiar el
-   número de variantes.
+6. **Espejo horizontal** es opcional. El preview muestra el placement y la
+   primera variante elegida; vuelve a pulsar **Previsualizar** después de
+   cambiar el número/selección de variantes o sus rangos.
 7. Selecciona las identidades destino y confirma **Generar finales por cuenta**.
    Cada variante se genera físicamente bajo su identidad; las fotos originales
    no se modifican ni se copian al calendario.
 8. La tanda guarda perfil, intensidad, parámetros efectivos, procedencia y
    SHA-256 de cada resultado en `photo_forge_manifest.json`. Para los carriles
-   de imagen, Logística valida esos hashes y mantiene el orden del manifiesto;
+   de imagen, Logística valida esos hashes y mantiene el orden del manifiesto.
    El carril **Instagram Photo Reel** sólo admite el perfil Photo Reel de este
    manifiesto; los carriles Reel Normal/Trial y Facebook Reel aceptan sólo
    videos validados por Forge.
+   Si agregas variantes con otra selección o perfil a la misma tanda, el
+   manifiesto retiene cada ejecución (`recipe_runs`) y un resumen de
+   todos los finales; `recipe` indica solo la última ejecución. Cada registro
+   distingue rutas solicitadas, creadas en esa ejecución y reutilizadas.
 
 Photo Forge abre **Logistica** con la carpeta de salida y las identidades
 seleccionadas. Revisa esa seleccion antes de calendarizar.

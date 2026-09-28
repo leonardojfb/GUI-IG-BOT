@@ -6038,6 +6038,14 @@ class InstagramAutoPro(ctk.CTk):
             row=2, column=2, padx=6, pady=(0, 10), sticky="w")
         ToggleRow(form, "Espejo horizontal", variable=self.photo_forge_mirror_var).grid(
             row=2, column=3, padx=6, pady=(0, 10), sticky="w")
+        ctk.CTkLabel(form, text="Variantes elegidas:", text_color=TEXT_MUTED).grid(
+            row=3, column=0, padx=(14, 6), pady=(0, 12), sticky="e")
+        self.photo_forge_variant_selection = ctk.CTkEntry(
+            form, fg_color=BG_INPUT, border_color=BORDER,
+            placeholder_text="Todas o una lista como 1,3-5",
+        )
+        self.photo_forge_variant_selection.grid(
+            row=3, column=1, columnspan=3, padx=6, pady=(0, 12), sticky="ew")
 
         content = ctk.CTkFrame(f, fg_color="transparent")
         content.grid(row=2, column=0, sticky="nsew", padx=24, pady=(0, 10))
@@ -6148,18 +6156,21 @@ class InstagramAutoPro(ctk.CTk):
             selected_accounts = self._photo_forge_selected_accounts()
             account = dict(selected_accounts[0]) if selected_accounts else {"id": 0, "username": "preview"}
             profile = self.photo_forge_profile_labels.get(self.photo_forge_profile.get(), "original")
-            try:
-                variant_index = int(self.photo_forge_variant_count.get())
-            except (AttributeError, TypeError, ValueError):
-                variant_index = 1
+            variant_index = int(self.photo_forge_variant_count.get())
+            if not 1 <= variant_index <= 20:
+                raise ValueError("Usa entre 1 y 20 variantes por imagen.")
+            selected_variants = photo_forge.normalize_variant_indices(
+                variant_index,
+                self.photo_forge_variant_selection.get().strip() or None,
+            )
             strength = self.photo_forge_strength_labels.get(
                 self.photo_forge_strength.get(), "standard"
             ) if hasattr(self, "photo_forge_strength") else "standard"
             preview = photo_forge.render_photo_preview(
-                path, preview_path, profile=profile, variant_index=1,
+                path, preview_path, profile=profile, variant_index=selected_variants[0],
                 strength=strength, mirror_horizontal=bool(self.photo_forge_mirror_var.get()),
                 account=account, batch_name=self.photo_forge_batch.get().strip() or "preview",
-                variants_per_image=max(1, min(20, variant_index)),
+                variants_per_image=variant_index,
                 parameter_ranges=getattr(self, "photo_forge_parameter_ranges", {}),
             )
             with Image.open(path) as source:
@@ -6173,7 +6184,8 @@ class InstagramAutoPro(ctk.CTk):
             self.photo_forge_preview.configure(
                 image=self.photo_forge_preview_ref,
                 text=(f"{os.path.basename(path)} · {dimensions[0]}×{dimensions[1]} → "
-                      f"{preview['width']}×{preview['height']} · {self.photo_forge_profile.get()} · V1"),
+                      f"{preview['width']}×{preview['height']} · {self.photo_forge_profile.get()} "
+                      f"· V{selected_variants[0]}"),
                 compound="top",
             )
         except Exception as error:
@@ -6282,6 +6294,9 @@ class InstagramAutoPro(ctk.CTk):
             parameter_ranges = photo_forge.normalize_parameter_ranges(
                 getattr(self, "photo_forge_parameter_ranges", {})
             )
+            selected_variants = photo_forge.normalize_variant_indices(
+                variant_count, self.photo_forge_variant_selection.get().strip() or None,
+            )
         except ValueError as error:
             return messagebox.showwarning("Photo Forge", str(error), parent=self)
         if not self.photo_forge_sources.curselection() and source_count:
@@ -6294,8 +6309,9 @@ class InstagramAutoPro(ctk.CTk):
             f"Lote: {self.photo_forge_batch.get().strip()}\n"
             f"Perfil: {self.photo_forge_profile.get()} · Variantes/foto: {variant_count} · "
             f"Intensidad: {self.photo_forge_strength.get()} · Rangos manuales: {len(parameter_ranges)}\n"
+            f"Variantes elegidas: {', '.join(map(str, selected_variants))}\n"
             f"Imágenes: {source_count} · Identidades: {len(accounts)} · Finales: "
-            f"{source_count * len(accounts) * variant_count}\n"
+            f"{source_count * len(accounts) * len(selected_variants)}\n"
             f"Salida: {os.path.join(self.photo_forge_output.get().strip(), self.photo_forge_batch.get().strip())}\n"
             + (
                 "Se aplicará espejo horizontal además del perfil y las variaciones elegidas. Los originales no cambian."
@@ -6326,13 +6342,17 @@ class InstagramAutoPro(ctk.CTk):
             parameter_ranges = photo_forge.normalize_parameter_ranges(
                 getattr(self, "photo_forge_parameter_ranges", {})
             )
+            selected_variants = photo_forge.normalize_variant_indices(
+                variants_per_image, self.photo_forge_variant_selection.get().strip() or None,
+            )
         except (KeyError, ValueError) as error:
             return messagebox.showwarning("Photo Forge", str(error), parent=self)
-        total = len(source_paths) * len(accounts) * variants_per_image
+        total = len(source_paths) * len(accounts) * len(selected_variants)
         confirmation = (
             f"Se crearán hasta {total} variantes en carpetas separadas por identidad.\n"
             f"Placement: {self.photo_forge_profile.get()} · Intensidad: {strength}.\n"
             f"Efectos con rangos manuales: {len(parameter_ranges)}.\n"
+            f"Variantes elegidas: {', '.join(map(str, selected_variants))}.\n"
             f"Espejo horizontal: {'sí' if mirror_horizontal else 'no'}.\n"
             "La receta, parámetros y hashes se guardarán en el manifiesto.\n"
             "Las imágenes fuente se conservarán sin modificar.\n\n¿Continuar?"
@@ -6355,7 +6375,7 @@ class InstagramAutoPro(ctk.CTk):
             plan = photo_forge.plan_photo_copies(
                 source_paths, account_rows, output_root, batch_name, mirror_horizontal,
                 profile=profile, variants_per_image=variants_per_image, strength=strength,
-                parameter_ranges=parameter_ranges,
+                parameter_ranges=parameter_ranges, variant_indices=selected_variants,
             )
             return photo_forge.create_photo_copies(plan, output_root, batch_name)
 

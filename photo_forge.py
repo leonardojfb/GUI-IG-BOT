@@ -8,6 +8,7 @@ import random
 import re
 import shutil
 import tempfile
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -101,6 +102,57 @@ def normalize_parameter_ranges(parameter_ranges: dict | None) -> dict:
             )
         normalized[key] = [minimum, maximum]
     return normalized
+
+
+def normalize_variant_indices(
+    variants_per_image: int,
+    variant_indices: list[int] | str | None = None,
+) -> list[int]:
+    try:
+        total = int(variants_per_image)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Las variantes por imagen deben ser un número entero.") from error
+    if not 1 <= total <= 20:
+        raise ValueError("Las variantes por imagen deben estar entre 1 y 20.")
+    if variant_indices is None:
+        return list(range(1, total + 1))
+    if isinstance(variant_indices, str):
+        tokens = [token.strip() for token in variant_indices.split(",")]
+        if not tokens or any(not token for token in tokens):
+            raise ValueError("Usa números separados por coma, por ejemplo 1,3-5.")
+        expanded = []
+        for token in tokens:
+            if "-" not in token:
+                expanded.append(token)
+                continue
+            parts = token.split("-")
+            if len(parts) != 2 or not all(part.strip().isdigit() for part in parts):
+                raise ValueError("Usa números separados por coma, por ejemplo 1,3-5.")
+            start, end = (int(part.strip()) for part in parts)
+            if start > end:
+                raise ValueError("El inicio de un rango no puede superar su final.")
+            if start < 1 or end > total:
+                raise ValueError(f"Elige variantes entre 1 y {total}.")
+            expanded.extend(range(start, end + 1))
+        variant_indices = expanded
+    if not isinstance(variant_indices, (list, tuple)) or not variant_indices:
+        raise ValueError("Selecciona al menos una variante para generar.")
+    normalized = []
+    for value in variant_indices:
+        if isinstance(value, bool):
+            raise ValueError("Los números de variante deben ser enteros.")
+        try:
+            index = int(value)
+        except (TypeError, ValueError) as error:
+            raise ValueError("Los números de variante deben ser enteros.") from error
+        if str(value).strip() not in {str(index), f"{index}.0"}:
+            raise ValueError("Los números de variante deben ser enteros.")
+        if not 1 <= index <= total:
+            raise ValueError(f"Elige variantes entre 1 y {total}.")
+        if index in normalized:
+            raise ValueError(f"La variante {index} está repetida.")
+        normalized.append(index)
+    return sorted(normalized)
 
 
 def _variation_parameters(
@@ -241,11 +293,13 @@ def plan_photo_copies(
     variants_per_image: int = 1,
     strength: str = "standard",
     parameter_ranges: dict | None = None,
+    variant_indices: list[int] | str | None = None,
 ) -> list[dict]:
     if profile not in PHOTO_PROFILES:
         raise ValueError("Selecciona un perfil de salida válido.")
     if not 1 <= int(variants_per_image) <= 20:
         raise ValueError("Las variantes por imagen deben estar entre 1 y 20.")
+    selected_variants = normalize_variant_indices(variants_per_image, variant_indices)
     if strength not in VARIATION_STRENGTHS:
         raise ValueError("Selecciona una intensidad de variación válida.")
     parameter_ranges = normalize_parameter_ranges(parameter_ranges)
@@ -264,7 +318,7 @@ def plan_photo_copies(
         account_dir = root / username
         for source in sources:
             digest = source_hashes[source]
-            for variant_index in range(1, int(variants_per_image) + 1):
+            for variant_index in selected_variants:
                 parameters = _variation_parameters(
                     digest, account, _safe_name(batch_name), variant_index,
                     VARIATION_STRENGTHS[strength], parameter_ranges,
@@ -313,6 +367,8 @@ def plan_photo_copies(
                     "mirror_horizontal": bool(mirror_horizontal),
                     "profile": profile,
                     "variant_index": variant_index,
+                    "variant_total": int(variants_per_image),
+                    "variant_selection": selected_variants,
                     "recipe_version": 1,
                     "recipe_id": recipe_id,
                     "recipe_strength": strength,
@@ -377,12 +433,18 @@ def create_photo_copies(plan: list[dict], output_root: str | os.PathLike, batch_
     root = Path(output_root).resolve() / _safe_name(batch_name)
     manifest_path = root / MANIFEST_NAME
     previous_entries = []
+    previous_recipe = {}
+    previous_recipe_runs = []
     if manifest_path.exists():
         with manifest_path.open("r", encoding="utf-8") as stream:
             previous = json.load(stream)
         if not isinstance(previous, dict) or previous.get("version") not in {1, 2} or not isinstance(previous.get("entries"), list):
             raise ValueError("El manifiesto existente de Photo Forge no es válido.")
         previous_entries = previous["entries"]
+        previous_recipe = previous.get("recipe") or {}
+        previous_recipe_runs = previous.get("recipe_runs") or []
+        if not isinstance(previous_recipe_runs, list) or any(not isinstance(item, dict) for item in previous_recipe_runs):
+            raise ValueError("El historial de recetas Photo Forge no es válido.")
     previous_by_path = {row.get("output_path"): row for row in previous_entries if isinstance(row, dict)}
     created = []
     existing = []
@@ -460,19 +522,102 @@ def create_photo_copies(plan: list[dict], output_root: str | os.PathLike, batch_
 
     entries_by_path = {row.get("output_path"): row for row in previous_entries}
     entries_by_path.update({row["output_path"]: row for row in [*existing, *created]})
+    current_recipe = {
+        "version": 1,
+        "profile": plan[0].get("profile", "original") if plan else "original",
+        "variants_per_image": max((int(row.get("variant_total", row.get("variant_index", 1))) for row in plan), default=1),
+        "variant_selection": plan[0].get("variant_selection", []) if plan else [],
+        "strength": plan[0].get("recipe_strength", "standard") if plan else "standard",
+        "parameter_ranges": plan[0].get("parameter_ranges", {}) if plan else {},
+        "recipe_ids": sorted({str(row.get("recipe_id", "")) for row in plan if row.get("recipe_id")}),
+    }
+
+    def unique_output_paths(rows):
+        paths = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            output_path = str(row.get("output_path", ""))
+            if not output_path:
+                continue
+            key = os.path.normcase(os.path.abspath(output_path)).casefold()
+            paths.setdefault(key, output_path)
+        return sorted(paths.values(), key=str.casefold)
+
+    recipe_runs = list(previous_recipe_runs)
+    if previous_entries and not recipe_runs:
+        legacy_recipe_snapshot = dict(previous_recipe) if isinstance(previous_recipe, dict) else {}
+        for field in (
+            "profile", "variants_per_image", "variant_selection", "strength",
+            "parameter_ranges", "recipe_ids",
+        ):
+            legacy_recipe_snapshot.setdefault(field, None)
+        legacy_run = {
+            "legacy": True,
+            "scope": "unknown_legacy_mapping",
+            "recipe_snapshot": legacy_recipe_snapshot,
+            "unassigned_output_paths": unique_output_paths(previous_entries),
+        }
+        legacy_run["run_id"] = "legacy-" + hashlib.sha256(
+            json.dumps(legacy_run, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        recipe_runs.append(legacy_run)
+
+    if plan:
+        run_payload = {
+            "recipe": current_recipe,
+            "requested_output_paths": unique_output_paths(plan),
+        }
+        recipe_runs.append({
+            "run_id": str(uuid.uuid4()),
+            "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            **run_payload,
+            "created_output_paths": unique_output_paths(created),
+            "reused_output_paths": unique_output_paths(existing),
+        })
+    retained_entries = list(entries_by_path.values())
+    known_variant_totals = {
+        int(row["variant_total"])
+        for row in retained_entries
+        if row.get("variant_total") is not None
+    }
+    has_unknown_variant_totals = any(row.get("variant_total") is None for row in retained_entries)
+    variant_totals = sorted(known_variant_totals)
+    if has_unknown_variant_totals:
+        variant_totals.append(None)
+    known_profiles = {str(row["profile"]) for row in retained_entries if row.get("profile") is not None}
+    has_unknown_profiles = any(row.get("profile") is None for row in retained_entries)
+    profiles = sorted(known_profiles)
+    if has_unknown_profiles:
+        profiles.append(None)
+    known_variant_indices = {
+        int(row["variant_index"])
+        for row in retained_entries
+        if row.get("variant_index") is not None
+    }
+    has_unknown_variant_indices = any(row.get("variant_index") is None for row in retained_entries)
+    variant_indices = sorted(known_variant_indices)
+    if has_unknown_variant_indices:
+        variant_indices.append(None)
+    recipe_summary = {
+        "entry_count": len(retained_entries),
+        "profiles": profiles,
+        "profile_unknown": has_unknown_profiles,
+        "variant_indices": variant_indices,
+        "variant_index_unknown": has_unknown_variant_indices,
+        "variant_totals": variant_totals,
+        "variant_total_unknown": has_unknown_variant_totals,
+        "recipe_ids": sorted({str(row.get("recipe_id")) for row in retained_entries if row.get("recipe_id")}),
+    }
     manifest = {
         "version": 1,
         "batch": _safe_name(batch_name),
         "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-        "recipe": {
-            "version": 1,
-            "profile": plan[0].get("profile", "original") if plan else "original",
-            "variants_per_image": max((int(row.get("variant_index", 1)) for row in plan), default=1),
-            "strength": plan[0].get("recipe_strength", "standard") if plan else "standard",
-            "parameter_ranges": plan[0].get("parameter_ranges", {}) if plan else {},
-            "recipe_ids": sorted({str(row.get("recipe_id", "")) for row in plan if row.get("recipe_id")}),
-        },
-        "entries": list(entries_by_path.values()),
+        "recipe": current_recipe if plan else previous_recipe,
+        "recipe_scope": "latest_run" if plan else "legacy",
+        "recipe_runs": recipe_runs,
+        "recipe_summary": recipe_summary,
+        "entries": retained_entries,
     }
     fd, temp_name = tempfile.mkstemp(prefix=f".{MANIFEST_NAME}.", suffix=".tmp", dir=root)
     try:

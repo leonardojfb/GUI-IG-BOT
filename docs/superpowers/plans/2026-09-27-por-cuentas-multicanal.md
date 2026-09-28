@@ -100,11 +100,18 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   Logistica abre con la carpeta de salida y las identidades elegidas.
 - Implementado parcialmente de LEG-53: rangos manuales mínimos/máximos para 11
   parámetros, usados por igual en preview y render y guardados en cada receta;
-  los campos vacíos conservan el preset. Sigue pendiente perspectiva, perfiles
+  los campos vacíos conservan el preset. La GUI permite elegir un subconjunto
+  de variantes por índices/rangos y previsualiza la primera variante elegida.
+  Las tandas conservan recetas por ejecución y un resumen agregado al añadir
+  más perfiles/subconjuntos sin borrar las salidas anteriores; el historial
+  separa rutas solicitadas, nuevas y reutilizadas. Los totales que manifiestos
+  antiguos no registraron, y el perfil/índice que falte en entradas legacy,
+  se muestran como desconocidos.
+  Sigue pendiente perspectiva, perfiles
   de metadata configurables, conexión con Vault/captions, cola de jobs persistente,
-  preview/selección individual de variantes y repetición de receta como objeto
-  separado de una ejecución. No presentar Photo Forge como implementación
-  completa del prototipo mientras esos puntos sigan pendientes.
+  preview comparativo y selección interactiva por salida/identidad, y repetición
+  de receta como objeto separado de una ejecución. No presentar Photo Forge
+  como implementación completa del prototipo mientras esos puntos sigan pendientes.
 - Si la raiz de carril contiene `photo_forge_manifest.json`, Logistica toma
   solo las salidas registradas para cada identidad y verifica `output_sha256`
   antes de calendarizar. Se conserva el orden del manifiesto; faltantes,
