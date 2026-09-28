@@ -9,7 +9,11 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from social_publishing import default_publication_target, validate_publication_metadata
+from social_publishing import (
+    INSTAGRAM_PHOTO_REEL,
+    default_publication_target,
+    validate_publication_metadata,
+)
 from publication_schedule import ScheduleMergeResult, merge_scheduled_entries, validate_scheduled_fields
 
 MANIFEST_VERSION = 1
@@ -68,6 +72,8 @@ def build_entry(
         story_announcement_text,
         platform_payload,
     )
+    if target == INSTAGRAM_PHOTO_REEL and str(media_kind).lower() != "image":
+        raise ValueError("Instagram Photo Reel requiere media_kind='image'.")
     local_date, local_time = validate_scheduled_fields(scheduled_date, scheduled_time)
     entry = {
         "id": str(uuid.uuid4()),

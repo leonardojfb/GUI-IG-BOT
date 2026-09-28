@@ -87,7 +87,10 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   sincronizados con Airtable.
 - Implementado parcialmente: Photo Forge genera 1-20 variantes deterministas
   por imagen e identidad, con perfiles Original, Story 9:16, Post 4:5, cuadrado,
-  portada 16:9 y Photo Reel imagen. Los presets de intensidad cambian encuadre,
+  portada 16:9 y Photo Reel imagen. Logística filtra el perfil al tomar finales
+  Photo Forge; su default es por destino y queda configurable. El carril manual
+  Instagram Photo Reel valida que sus entradas procedan del perfil Photo Reel
+  y las entrega a Telegram como imagen. Los presets de intensidad cambian encuadre,
   luz, contraste, color, gamma, nitidez, rotacion y grano; el perfil limita
   resolucion y calidad JPEG/WebP queda registrada. El original no se modifica;
   los renders eliminan EXIF y conservan ICC si es compatible. El preview renderiza el primer
@@ -96,8 +99,7 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   admite manifiestos v1/v2 y valida SHA-256 por identidad. Al terminar,
   Logistica abre con la carpeta de salida y las identidades elegidas.
 - Pendiente de LEG-53: rangos manuales por parámetro, perspectiva, perfiles de
-  metadata configurables, carril `PHOTO_REEL` de imagen (el Reel actual exige
-  video), conexión con Vault/captions, cola de jobs persistente,
+  metadata configurables, conexión con Vault/captions, cola de jobs persistente,
   preview/selección individual de variantes y repetición de receta como objeto
   separado de una ejecución. No presentar Photo Forge como implementación
   completa del prototipo mientras esos puntos sigan pendientes.

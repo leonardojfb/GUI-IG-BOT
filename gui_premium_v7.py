@@ -3237,7 +3237,7 @@ class InstagramAutoPro(ctk.CTk):
         self.acct_lane_target = ctk.CTkComboBox(
             lane,
             values=[
-                "instagram_reel", "instagram_trial_reel", "instagram_story",
+                "instagram_reel", "instagram_photo_reel", "instagram_trial_reel", "instagram_story",
                 "instagram_post", "facebook_story", "facebook_page_post",
                 "facebook_reel", "facebook_marketplace_listing",
             ],
@@ -3300,13 +3300,31 @@ class InstagramAutoPro(ctk.CTk):
             placeholder_text="Condición", width=120,
         )
         self.acct_lane_market_condition.pack(side="left")
+        self.acct_lane_photo_profile_labels = {
+            "Automático por destino": None,
+            "Original": "original",
+            "Story 9:16": "story_9_16",
+            "Post 4:5": "post_4_5",
+            "Post cuadrado 1:1": "square_1_1",
+            "Portada 16:9": "cover_16_9",
+            "Photo Reel (imagen)": "photo_reel",
+        }
+        ctk.CTkLabel(lane, text="Perfil Photo Forge:", text_color=TEXT_MUTED).grid(
+            row=4, column=0, padx=(14, 6), pady=6, sticky="e")
+        self.acct_lane_photo_profile = ctk.CTkComboBox(
+            lane,
+            values=list(self.acct_lane_photo_profile_labels),
+            fg_color=BG_INPUT, border_color=BORDER, width=230,
+        )
+        self.acct_lane_photo_profile.set("Automático por destino")
+        self.acct_lane_photo_profile.grid(row=4, column=1, padx=6, pady=6, sticky="ew")
         ctk.CTkLabel(
             lane,
             text="Fecha inicial: ancla los reels heredados que aún no tienen fecha explícita.",
             text_color=TEXT_MUTED,
-        ).grid(row=4, column=0, columnspan=5, padx=14, pady=(2, 0), sticky="w")
+        ).grid(row=5, column=0, columnspan=5, padx=14, pady=(2, 0), sticky="w")
         lane_buttons = ctk.CTkFrame(lane, fg_color="transparent")
-        lane_buttons.grid(row=5, column=0, columnspan=5, pady=(8, 12))
+        lane_buttons.grid(row=6, column=0, columnspan=5, pady=(8, 12))
         self._load_lane_defaults()
         GhostButton(
             lane_buttons, text="Previsualizar carril",
@@ -3623,6 +3641,9 @@ class InstagramAutoPro(ctk.CTk):
             target = values.get("target", "instagram_story")
             if target in self.acct_lane_target.cget("values"):
                 self.acct_lane_target.set(target)
+            photo_profile = values.get("photo_profile", "Automático por destino")
+            if photo_profile in self.acct_lane_photo_profile.cget("values"):
+                self.acct_lane_photo_profile.set(photo_profile)
             for widget, key, default in (
                 (self.acct_lane_horizon, "horizon_days", "7"),
                 (self.acct_lane_every_days, "every_days", "1"),
@@ -3638,6 +3659,7 @@ class InstagramAutoPro(ctk.CTk):
         try:
             values = {
                 "target": self.acct_lane_target.get().strip(),
+                "photo_profile": self.acct_lane_photo_profile.get().strip(),
                 "horizon_days": int(self.acct_lane_horizon.get()),
                 "every_days": int(self.acct_lane_every_days.get()),
                 "times": self.acct_lane_times.get().strip(),
@@ -3660,6 +3682,18 @@ class InstagramAutoPro(ctk.CTk):
         accounts = self._acct_dist_accounts()
         root_text = self.acct_lane_root.get().strip()
         target = self.acct_lane_target.get().strip()
+        photo_profile_label = self.acct_lane_photo_profile.get().strip()
+        auto_photo_profiles = {
+            "instagram_story": "story_9_16",
+            "facebook_story": "story_9_16",
+            "instagram_post": "post_4_5",
+            "facebook_page_post": "post_4_5",
+            "facebook_marketplace_listing": "square_1_1",
+            "instagram_photo_reel": "photo_reel",
+        }
+        photo_profile = self.acct_lane_photo_profile_labels.get(photo_profile_label)
+        if photo_profile_label == "Automático por destino":
+            photo_profile = auto_photo_profiles.get(target)
         start_date = self.acct_lane_start_date.get().strip()
         times = [value.strip() for value in self.acct_lane_times.get().split(",") if value.strip()]
         caption = self.acct_lane_caption.get().strip()
@@ -3679,6 +3713,10 @@ class InstagramAutoPro(ctk.CTk):
                 raise ValueError("Selecciona una carpeta raiz existente.")
             if not target:
                 raise ValueError("Selecciona el destino del carril.")
+            if target not in {"instagram_reel", "instagram_trial_reel", "facebook_reel"} and not photo_profile:
+                raise ValueError("Selecciona un perfil Photo Forge válido para este destino.")
+            if target == "instagram_photo_reel" and photo_profile != "photo_reel":
+                raise ValueError("Instagram Photo Reel debe usar el perfil Photo Reel (imagen).")
             if target == "facebook_marketplace_listing" and (not marketplace_title or not marketplace_price):
                 raise ValueError("Marketplace requiere título y precio.")
         except ValueError as error:
@@ -3691,7 +3729,7 @@ class InstagramAutoPro(ctk.CTk):
         partial_notices = []
         extension_filter = {".mp4", ".mov", ".m4v", ".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"}
         video_targets = {"instagram_reel", "instagram_trial_reel", "facebook_reel"}
-        if target == "facebook_marketplace_listing":
+        if target in {"facebook_marketplace_listing", "instagram_photo_reel"}:
             extension_filter = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"}
         for username in accounts:
             account_dir = root / username
@@ -3706,12 +3744,23 @@ class InstagramAutoPro(ctk.CTk):
             if account_dir == root and not (photo_batch_root / "photo_forge_manifest.json").is_file():
                 photo_batch_root = root.parent
             photo_manifest = photo_batch_root / "photo_forge_manifest.json"
+            if target == "instagram_photo_reel" and not photo_manifest.is_file():
+                messagebox.showwarning(
+                    "Photo Reel",
+                    "Este carril requiere salidas Photo Forge con perfil Photo Reel (imagen) y manifiesto válido.",
+                    parent=self,
+                )
+                return
             if photo_manifest.is_file() and target not in video_targets:
                 try:
                     from photo_forge import validated_account_outputs
 
                     account_finals = [
-                        path for path in validated_account_outputs(photo_batch_root, username)
+                        path for path in validated_account_outputs(
+                            photo_batch_root,
+                            username,
+                            profile=photo_profile,
+                        )
                         if path.suffix.lower() in extension_filter
                     ]
                 except (OSError, ValueError) as error:
@@ -3786,7 +3835,11 @@ class InstagramAutoPro(ctk.CTk):
                     delivery_kind=delivery_kind,
                     publication_target=target,
                     timezone=timezone,
-                    media_kind="image" if target == "facebook_marketplace_listing" else "mixed",
+                    media_kind=(
+                        "image"
+                        if target in {"facebook_marketplace_listing", "instagram_photo_reel"}
+                        else "mixed"
+                    ),
                     lane_id=lane_id,
                     plan_id=lane_id,
                     start_date=start_date,
@@ -3815,6 +3868,8 @@ class InstagramAutoPro(ctk.CTk):
                         raise ValueError(f"{target} necesita finales de video.")
                     if target == "facebook_marketplace_listing" and entry["media_kind"] != "image":
                         raise ValueError("Marketplace acepta finales de imagen en este carril.")
+                    if target == "instagram_photo_reel" and entry["media_kind"] != "image":
+                        raise ValueError("Photo Reel de Instagram acepta finales de imagen.")
                 candidates.extend(entries)
 
             manifest_file = manifest_path(_BASE_DIR)
@@ -3872,6 +3927,7 @@ class InstagramAutoPro(ctk.CTk):
         lines = [
             "PREVISUALIZACION DE CARRIL" if preview_only else "CONFIRMACION DE CARRIL",
             f"Destino: {target}",
+            f"Perfil Photo Forge: {photo_profile or 'no aplica'}",
             f"Periodo: {start_date} + {horizon_days - 1} dias; cada {every_days} dia(s)",
             f"Cuentas: {len(accounts)} | Publicaciones nuevas: {len(candidates)}",
             "",

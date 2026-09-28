@@ -2,6 +2,7 @@ from urllib.parse import quote, urlparse, urlunparse
 
 
 INSTAGRAM_REEL = "instagram_reel"
+INSTAGRAM_PHOTO_REEL = "instagram_photo_reel"
 INSTAGRAM_TRIAL_REEL = "instagram_trial_reel"
 INSTAGRAM_STORY = "instagram_story"
 FACEBOOK_STORY = "facebook_story"
@@ -13,6 +14,7 @@ FACEBOOK_REEL = "facebook_reel"
 PUBLICATION_TARGETS = frozenset(
     {
         INSTAGRAM_REEL,
+        INSTAGRAM_PHOTO_REEL,
         INSTAGRAM_TRIAL_REEL,
         INSTAGRAM_STORY,
         FACEBOOK_STORY,
@@ -22,7 +24,7 @@ PUBLICATION_TARGETS = frozenset(
         FACEBOOK_REEL,
     }
 )
-TELEGRAM_PUBLICATION_TARGETS = frozenset({INSTAGRAM_REEL, INSTAGRAM_TRIAL_REEL})
+TELEGRAM_PUBLICATION_TARGETS = frozenset({INSTAGRAM_REEL, INSTAGRAM_PHOTO_REEL, INSTAGRAM_TRIAL_REEL})
 
 
 def default_publication_target(delivery_kind):
@@ -81,6 +83,8 @@ def validate_publication_metadata(
         raise ValueError(f"publication_target no soportado: {publication_target}")
     if delivery_kind == "trial" and publication_target != INSTAGRAM_TRIAL_REEL:
         raise ValueError("Las publicaciones Trial deben usar instagram_trial_reel.")
+    if publication_target == INSTAGRAM_PHOTO_REEL and delivery_kind != "normal":
+        raise ValueError("Photo Reel de imagen debe usar delivery_kind normal.")
 
     normalized_link = ""
     normalized_announcement = str(story_announcement_text or "").strip()

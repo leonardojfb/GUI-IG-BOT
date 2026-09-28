@@ -252,6 +252,8 @@ def count_account_calendar_videos_by_kind(account_name, normal_root=None, trial_
                 continue
             if not is_telegram_publication_target(row.get("publication_target")):
                 continue
+            if row.get("media_kind") != "video":
+                continue
             kind = row.get("delivery_kind", "normal")
             if kind in counts:
                 counts[kind] += 1
@@ -299,6 +301,7 @@ def count_account_calendar_videos(account_name, roots=None):
             1 for row in _scan_manifest_calendar_structure(_calendar_manifest_file())
             if row["username"] == account_name
             and is_telegram_publication_target(row.get("publication_target"))
+            and row.get("media_kind") == "video"
         )
     roots = roots or (input_root, trial_input_root)
     total = 0
@@ -728,6 +731,7 @@ def _topic_display_name(acc_name, tag_emoji, is_admin=False, delivery_kind="norm
     if topic_group and topic_group != "account":
         target_labels = {
             "instagram_reel": "Instagram Reel",
+            "instagram_photo_reel": "Instagram Photo Reel",
             "instagram_trial_reel": "Instagram Trial Reel",
             "instagram_story": "Instagram Story",
             "instagram_post": "Instagram Post",

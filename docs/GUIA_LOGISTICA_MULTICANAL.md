@@ -38,7 +38,9 @@ Para fotos, abre **Photo Forge**:
 7. La tanda guarda perfil, intensidad, parámetros efectivos, procedencia y
    SHA-256 de cada resultado en `photo_forge_manifest.json`. Para los carriles
    de imagen, Logística valida esos hashes y mantiene el orden del manifiesto;
-   los carriles Reel actuales aceptan sólo video validado por Forge.
+   El carril **Instagram Photo Reel** sólo admite el perfil Photo Reel de este
+   manifiesto; los carriles Reel Normal/Trial y Facebook Reel aceptan sólo
+   videos validados por Forge.
 
 Photo Forge abre **Logistica** con la carpeta de salida y las identidades
 seleccionadas. Revisa esa seleccion antes de calendarizar.
@@ -52,10 +54,14 @@ imágenes fijas JPG, PNG, WebP y TIFF; no procesa GIF ni imágenes animadas.
 
 En **Logistica > Por Cuentas > Agregar carril al calendario**:
 
-- **Destino**: Instagram Reel/Trial/Story/Post o Facebook Story/Post/Reel/
-  Marketplace.
+- **Destino**: Instagram Reel/Photo Reel/Trial/Story/Post o Facebook
+  Story/Post/Reel/Marketplace. Instagram Photo Reel requiere imágenes Photo
+  Forge del perfil Photo Reel; no es una conversión ni un Reel de video.
 - **Carpeta de finales por cuenta**: carpeta que contiene una subcarpeta por
   identidad. Photo Forge completa este campo al terminar.
+- **Perfil Photo Forge**: por defecto se resuelve según el destino (Story 9:16,
+  Post 4:5, Marketplace cuadrado o Photo Reel imagen); puedes elegir otro perfil
+  explícitamente. Las tandas históricas sin perfil se consideran Original.
 - **Fecha inicial**, **Dias**, **cada N dias** y **Horas**: generan los turnos.
   Usa horas distintas para varias publicaciones del mismo dia.
 - **Caption / aviso de Story**: texto comun del carril. En Story tambien es el
@@ -116,6 +122,5 @@ enviar en la siguiente ejecucion normal.
   deterministas; todavía no expone controles manuales independientes para cada
   efecto ni deformación de perspectiva, y aún no está conectado a una cola de
   producción persistente/Vault de recetas.
-- El perfil de exportación Photo Reel conserva una salida de imagen, pero el
-  carril de calendarización `Photo Reel` independiente aún está pendiente; el
-  destino Reel disponible en Logística requiere video.
+- Photo Reel es un destino manual de Instagram: Telegram entrega la imagen y
+  la VA la publica desde la app de Instagram. No hay publicación automática.

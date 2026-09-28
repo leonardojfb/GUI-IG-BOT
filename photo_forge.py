@@ -238,7 +238,7 @@ def plan_photo_copies(
                 recipe_id = hashlib.sha256(
                     json.dumps(recipe_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
                 ).hexdigest()
-                profile_suffix = "" if profile in {"original", "photo_reel"} else f"__{profile.upper()}"
+                profile_suffix = f"__{profile.upper()}"
                 filename = (
                     f"{source.stem[:80]}__ACC{account_id or 0}_{username}__{digest[:10]}"
                     f"__V{variant_index:02d}{profile_suffix}{source.suffix.lower()}"
@@ -430,7 +430,11 @@ def create_photo_copies(plan: list[dict], output_root: str | os.PathLike, batch_
     }
 
 
-def validated_account_outputs(batch_dir: str | os.PathLike, username: str) -> list[Path]:
+def validated_account_outputs(
+    batch_dir: str | os.PathLike,
+    username: str,
+    profile: str | None = None,
+) -> list[Path]:
     """Return this account's Photo Forge outputs in manifest order, fail closed on drift."""
     root = Path(batch_dir).resolve()
     manifest_path = root / MANIFEST_NAME
@@ -453,6 +457,8 @@ def validated_account_outputs(batch_dir: str | os.PathLike, username: str) -> li
         if not isinstance(row, dict):
             raise ValueError("El manifiesto de Photo Forge contiene una entrada inválida.")
         if row.get("username") != username:
+            continue
+        if profile is not None and row.get("profile", "original") != profile:
             continue
         try:
             recorded_name = Path(str(row["output_path"])).name
