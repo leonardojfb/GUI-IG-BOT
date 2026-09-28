@@ -70,7 +70,7 @@ def _forge_app(tmp_path, completed, video_names=None):
         video.touch()
     metadata = [
         {
-            "iphone_model": "iPhone 16",
+            "iphone_model": "iPhone 17",
             "city": "Miami",
             "lat": "+25.7617",
             "lon": "-080.1918",
@@ -78,7 +78,7 @@ def _forge_app(tmp_path, completed, video_names=None):
             "ios_version": "26.0",
         },
         {
-            "iphone_model": "iPhone 16",
+            "iphone_model": "iPhone 17",
             "city": "Boston",
             "lat": "+42.3601",
             "lon": "-071.0589",
@@ -322,7 +322,7 @@ def test_forge_variant_uses_high_profile_libx264_and_strips_ffmpeg_encoder_tags(
         "source.mp4",
         "output.mp4",
         {
-            "iphone_model": "iPhone 16",
+            "iphone_model": "iPhone 17",
             "lat": "+25.7617",
             "lon": "-080.1918",
             "ios_version": "26.0",
@@ -380,7 +380,7 @@ def test_forge_variant_normalizes_square_pixels_and_compatible_pix_fmt(monkeypat
         "source.mp4",
         "output.mp4",
         {
-            "iphone_model": "iPhone 16",
+            "iphone_model": "iPhone 17",
             "lat": "+25.7617",
             "lon": "-080.1918",
             "ios_version": "26.0",

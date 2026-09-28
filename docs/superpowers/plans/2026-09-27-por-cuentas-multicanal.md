@@ -214,7 +214,7 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   `build_release.ps1 -BootstrapUpdater` tampoco necesita localizar ni copiar
   FFmpeg: el bootstrap solo empaqueta `updater.py` y `version.json`.
   Staging validado sin publicar: bootstrap `1.0.49` con exactamente esos dos
-  archivos; paquete funcional `1.0.50` con 36 archivos, lista del manifiesto y
+  archivos; paquete funcional `1.0.50` con 37 archivos, lista del manifiesto y
   SHA-256 coincidentes, módulos nuevos presentes y base/manifiestos/media de
   usuario excluidos. Integración temporal: apliqué ambos ZIP en orden sobre
   una instalación `1.0.48` con el updater anterior; la DB centinela se preservó
@@ -222,3 +222,21 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   esa copia actualizada y verifiqué Logística Por Cuentas, Biblioteca y Photo
   Forge, junto con el valor centinela de SQLite. No es una instalación del
   launcher real ni una release publicada.
+- Continuación 2026-09-28: la rama aislada estaba basada en `1.0.45`; integré
+  los commits de release `1.0.46`-`1.0.48` para conservar el límite Forge iPhone
+  17+, los reintentos por hash tras mover las fuentes y la distribución de
+  salidas validadas de tandas parciales. Resolví el único conflicto de GUI
+  manteniendo la resolución por hash y el aviso legible de tandas parciales.
+  La suite combinada de calendario, carriles, publicación manual, Photo Forge,
+  Forge iPhone y Telegram pasó: 133 passed, 1 skipped por falta de display;
+  allowlist y updater: 15 passed. Compilación y `git diff --check` correctos.
+  Actualicé staging desde esta base: bootstrap `1.0.49` (2 archivos) y
+  funcional `1.0.50` (37 archivos); SHA-256 funcional
+  `e65aa942d4f40e2c5ee7ffeeb79a55ede7e10b7d956ac903a31ffb5d5d0581c5`.
+  Los módulos nuevos están incluidos y no hay DB local, manifiesto de
+  calendario ni medios en el ZIP. Repetí la integración temporal en una
+  instalación sintética: el updater 1.0.48 aplicó el bootstrap, el updater
+  resultante aplicó 1.0.50, y DB, manifiesto y medio centinela permanecieron
+  byte por byte intactos; los tres módulos nuevos aparecieron instalados.
+  No se publicó ni se probó contra el launcher instalado real; el envío real a
+  Telegram sigue pendiente y no se ejecutó.
