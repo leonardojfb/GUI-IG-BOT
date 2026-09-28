@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.45",
+    "version":  "1.0.48",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.45",
-    "asset_name":  "MetodoIG-v1.0.45.zip",
-    "sha256":  "a4d769be55a64034e278f46a7467bfd201c7a8c148aaf359aa1106a2b7570579",
-    "notes":  "Forge iPhone SDR/HLG y preflight; Forge parcial y Logistica Por Cuentas; mezcla de tandas con captions por origen; Telegram y render; GUI adaptable.",
+    "github_release_tag":  "v1.0.48",
+    "asset_name":  "MetodoIG-v1.0.48.zip",
+    "sha256":  "2ec408057eb543d6bbbb4838edf4fbbf488bb289bc2d89369eabba99e847a38e",
+    "notes":  "Logistica permite distribuir copias Forge validadas aunque haya pendientes y muestra el aviso de conteos.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",
