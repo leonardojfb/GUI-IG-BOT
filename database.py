@@ -5,6 +5,7 @@ Limpio, sin código legacy, e integra la lógica Anti-Choque Global.
 import sqlite3
 import os
 import json
+import hashlib
 from social_publishing import normalize_story_link_base, resolve_story_link
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -125,6 +126,32 @@ CREATE TABLE IF NOT EXISTS video_transform_logs (
 CREATE INDEX IF NOT EXISTS idx_video_transform_logs_process_created
 ON video_transform_logs(process_kind, created_at);
 
+CREATE TABLE IF NOT EXISTS vault_assets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_key TEXT NOT NULL UNIQUE,
+    asset_hash TEXT NOT NULL,
+    media_type TEXT NOT NULL CHECK(media_type IN ('image', 'video')),
+    asset_role TEXT NOT NULL DEFAULT 'source' CHECK(asset_role IN ('source', 'generated')),
+    display_name TEXT NOT NULL,
+    source_path TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_vault_assets_type_name
+ON vault_assets(media_type, display_name COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_vault_assets_hash
+ON vault_assets(asset_hash);
+
+CREATE TABLE IF NOT EXISTS vault_asset_links (
+    parent_asset_id INTEGER NOT NULL REFERENCES vault_assets(id) ON DELETE CASCADE,
+    child_asset_id INTEGER NOT NULL REFERENCES vault_assets(id) ON DELETE CASCADE,
+    relation_kind TEXT NOT NULL DEFAULT 'derived',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY(parent_asset_id, child_asset_id, relation_kind),
+    CHECK(parent_asset_id != child_asset_id)
+);
+
 CREATE TABLE IF NOT EXISTS social_publishing_settings (
     setting_key TEXT PRIMARY KEY,
     setting_value TEXT NOT NULL DEFAULT '',
@@ -211,6 +238,126 @@ class DatabaseManager:
 
     def close(self):
         if self.conn: self.conn.close()
+
+    # ==================== BIBLIOTECA / VAULT ====================
+    def _vault_file_metadata(self, path):
+        resolved = os.path.abspath(os.fspath(path))
+        if not os.path.isfile(resolved):
+            raise ValueError(f"No existe el archivo: {resolved}")
+        suffix = os.path.splitext(resolved)[1].lower()
+        image_extensions = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"}
+        video_extensions = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+        if suffix in image_extensions:
+            media_type = "image"
+        elif suffix in video_extensions:
+            media_type = "video"
+        else:
+            raise ValueError(f"Formato no admitido por Biblioteca: {suffix or '(sin extension)'}")
+        digest = hashlib.sha256()
+        with open(resolved, "rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return resolved, suffix, media_type, digest.hexdigest()
+
+    def upsert_vault_asset(self, path, *, asset_role="source"):
+        if asset_role not in {"source", "generated"}:
+            raise ValueError("El rol del asset debe ser source o generated.")
+        resolved, _suffix, media_type, digest = self._vault_file_metadata(path)
+        asset_key = (
+            f"source:{digest}" if asset_role == "source"
+            else f"generated:{os.path.normcase(resolved).casefold()}"
+        )
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO vault_assets (
+                asset_key, asset_hash, media_type, asset_role, display_name, source_path
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(asset_key) DO UPDATE SET
+                asset_hash=excluded.asset_hash,
+                media_type=excluded.media_type,
+                display_name=excluded.display_name,
+                source_path=excluded.source_path,
+                updated_at=datetime('now')
+            """,
+            (asset_key, digest, media_type, asset_role, os.path.basename(resolved), resolved),
+        )
+        self.conn.commit()
+        row = cur.execute("SELECT * FROM vault_assets WHERE asset_key=?", (asset_key,)).fetchone()
+        return dict(row)
+
+    def list_vault_assets(self, search="", media_type=None, limit=2000):
+        clauses = []
+        params = []
+        query = str(search or "").strip()
+        if query:
+            like = f"%{query}%"
+            clauses.append("(display_name LIKE ? COLLATE NOCASE OR source_path LIKE ? COLLATE NOCASE OR asset_hash LIKE ?)")
+            params.extend((like, like, like))
+        if media_type:
+            if media_type not in {"image", "video"}:
+                raise ValueError("El tipo de medio debe ser image o video.")
+            clauses.append("media_type=?")
+            params.append(media_type)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(max(1, min(int(limit), 10000)))
+        rows = self.conn.execute(
+            f"SELECT * FROM vault_assets {where} ORDER BY datetime(updated_at) DESC, id DESC LIMIT ?",
+            params,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_vault_asset(self, asset_id):
+        row = self.conn.execute("SELECT * FROM vault_assets WHERE id=?", (int(asset_id),)).fetchone()
+        return dict(row) if row else None
+
+    def register_vault_derivative(self, source_asset_id, output_path, relation_kind="derived"):
+        resolved, _suffix, media_type, digest = self._vault_file_metadata(output_path)
+        asset_key = f"generated:{os.path.normcase(resolved).casefold()}"
+        with self.conn:
+            source = self.conn.execute(
+                "SELECT id FROM vault_assets WHERE id=?", (int(source_asset_id),),
+            ).fetchone()
+            if not source:
+                raise ValueError("El asset de origen ya no existe en Biblioteca.")
+            self.conn.execute(
+                """
+                INSERT INTO vault_assets (
+                    asset_key, asset_hash, media_type, asset_role, display_name, source_path
+                ) VALUES (?, ?, ?, 'generated', ?, ?)
+                ON CONFLICT(asset_key) DO UPDATE SET
+                    asset_hash=excluded.asset_hash,
+                    media_type=excluded.media_type,
+                    display_name=excluded.display_name,
+                    source_path=excluded.source_path,
+                    updated_at=datetime('now')
+                """,
+                (asset_key, digest, media_type, os.path.basename(resolved), resolved),
+            )
+            output = self.conn.execute(
+                "SELECT * FROM vault_assets WHERE asset_key=?", (asset_key,),
+            ).fetchone()
+            self.conn.execute(
+                "INSERT OR IGNORE INTO vault_asset_links(parent_asset_id, child_asset_id, relation_kind) VALUES (?, ?, ?)",
+                (int(source_asset_id), int(output["id"]), str(relation_kind)),
+            )
+        return dict(output)
+
+    def list_vault_asset_history(self, asset_id, limit=200):
+        rows = self.conn.execute(
+            """
+            SELECT l.relation_kind, l.created_at,
+                   p.id AS parent_id, p.display_name AS parent_name, p.source_path AS parent_path,
+                   c.id AS child_id, c.display_name AS child_name, c.source_path AS child_path
+            FROM vault_asset_links l
+            JOIN vault_assets p ON p.id=l.parent_asset_id
+            JOIN vault_assets c ON c.id=l.child_asset_id
+            WHERE l.parent_asset_id=? OR l.child_asset_id=?
+            ORDER BY datetime(l.created_at) DESC LIMIT ?
+            """,
+            (int(asset_id), int(asset_id), max(1, min(int(limit), 2000))),
+        ).fetchall()
+        return [dict(row) for row in rows]
 
     # ==================== CATEGORÍAS ====================
     def get_categories(self):

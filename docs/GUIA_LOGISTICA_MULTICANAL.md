@@ -16,11 +16,20 @@ Los finales se mantienen en su carpeta de origen y no se copian a
 
 ## 2. Preparar finales
 
+La **Biblioteca** aparece bajo Contenido en la navegación. Importa imágenes o
+videos para indexarlos por SHA-256 y encontrarlos por nombre, hash o ruta. La
+importación no mueve ni copia los archivos. Los resultados de Photo Forge se
+añaden como derivados con relaciones a su origen; conserva un registro propio
+por ruta/cuenta aunque dos finales tengan los mismos bytes.
+
 Para video, usa los finales validados de Forge en `videos_finales/<tanda>`.
-Para fotos, abre **Photo Forge**:
+Para fotos, abre **Photo Forge** y agrega imágenes desde disco o usa **Desde
+Biblioteca** para elegir imágenes previamente registradas:
 
 1. Define nombre de tanda y carpeta de salida.
 2. Agrega las imágenes en el orden deseado; el primer archivo se previsualiza.
+   **Comparar variantes** permite elegir por imagen e identidad. Solo una pareja
+   editada queda personalizada; las demás heredan la selección global.
 3. Elige un **Placement**: Original, Story 9:16, Post 4:5, Post cuadrado,
    Portada 16:9 o Photo Reel (imagen). Photo Reel sigue siendo imagen y no se
    convierte a video.

@@ -1284,7 +1284,7 @@ class InstagramAutoPro(ctk.CTk):
         # — Navegación agrupada por flujo de trabajo —
         nav_groups = [
             ("Edición",       [("🖼️   Edición de video", "VideoEditor")]),
-            ("Contenido",    [("🔮   Forge", "Forge"), ("🖼️   Photo Forge", "PhotoForge"),
+            ("Contenido",    [("📚   Biblioteca", "Boveda"), ("🔮   Forge", "Forge"), ("🖼️   Photo Forge", "PhotoForge"),
                               ("🎬   Tandas", "Tandas")]),
             ("Distribución", [("🚀   Logística", "Logistica"), ("🗓️   Calendario", "Calendario"),
                               ("📡   Cuentas", "Cuentas"), ("📲   Telegram", "Telegram")]),
@@ -1343,7 +1343,7 @@ class InstagramAutoPro(ctk.CTk):
         container.grid_columnconfigure(0, weight=1)
         self._container = container
 
-        for name in ["Dashboard", "Equipo", "Tandas", "Logistica", "Calendario", "Telegram", "Cuentas", "VerifyLegacy", "AIAdvisor", "Forge", "PhotoForge", "VideoEditor", "Actualizaciones"]:
+        for name in ["Dashboard", "Equipo", "Tandas", "Logistica", "Calendario", "Telegram", "Cuentas", "VerifyLegacy", "AIAdvisor", "Forge", "PhotoForge", "VideoEditor", "Actualizaciones", "Boveda"]:
             f = ctk.CTkFrame(container, fg_color=BG_APP, corner_radius=0)
             f.grid(row=0, column=0, sticky="nsew")
             f.grid_columnconfigure(0, weight=1)
@@ -1361,6 +1361,7 @@ class InstagramAutoPro(ctk.CTk):
         self._build_ai_frame()
         self._build_forge_frame()
         self._build_photo_forge_frame()
+        self._build_vault_frame()
         self._build_video_editor_frame()
         self._build_updates_frame()
 
@@ -6073,6 +6074,7 @@ class InstagramAutoPro(ctk.CTk):
         source_buttons = ctk.CTkFrame(source, fg_color="transparent")
         source_buttons.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 12))
         PrimaryButton(source_buttons, text="Agregar imágenes", command=self._photo_forge_add_images).pack(side="left", padx=(0, 6))
+        GhostButton(source_buttons, text="Desde Biblioteca", command=self.vault_select_for_photo_forge).pack(side="left", padx=(0, 6))
         GhostButton(source_buttons, text="Quitar seleccionadas", command=self._photo_forge_remove_images).pack(side="left")
 
         account_card = Card(content, title="Identidades destino")
@@ -6106,6 +6108,192 @@ class InstagramAutoPro(ctk.CTk):
         self.photo_forge_result.insert(
             "end", "Photo Forge crea variantes de imagen por identidad; receta y SHA-256 quedan en el manifiesto."
         )
+
+    def _build_vault_frame(self):
+        frame = self._frames["Boveda"]
+        frame.grid_columnconfigure(0, weight=1)
+        frame.grid_rowconfigure(2, weight=1)
+        PageHeader(
+            frame, "CONTENIDO", "Biblioteca",
+            "Busca originales y derivados por tipo, hash y ruta; los archivos permanecen donde están.",
+        ).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 10))
+        toolbar = ctk.CTkFrame(frame, fg_color="transparent")
+        toolbar.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 8))
+        toolbar.grid_columnconfigure(0, weight=1)
+        self.vault_search_var = tk.StringVar(value="")
+        self.vault_search_var.trace_add("write", lambda *_: self.refresh_vault_table())
+        ctk.CTkEntry(
+            toolbar, textvariable=self.vault_search_var, fg_color=BG_INPUT,
+            border_color=BORDER, placeholder_text="Buscar nombre, hash o ruta",
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        PrimaryButton(toolbar, text="Importar medios", command=self.vault_import_files).grid(row=0, column=1)
+
+        body = ctk.CTkFrame(frame, fg_color="transparent")
+        body.grid(row=2, column=0, sticky="nsew", padx=24, pady=(0, 18))
+        body.grid_columnconfigure(0, weight=3)
+        body.grid_columnconfigure(1, weight=2)
+        body.grid_rowconfigure(0, weight=1)
+        table_frame = ctk.CTkFrame(body, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        table_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        table_frame.grid_rowconfigure(0, weight=1)
+        table_frame.grid_columnconfigure(0, weight=1)
+        columns = ("name", "type", "role", "hash", "path")
+        self.vault_tree = ttk.Treeview(
+            table_frame, columns=columns, show="headings", style="Premium.Treeview",
+        )
+        for column, label in (
+            ("name", "Archivo"), ("type", "Tipo"), ("role", "Clase"),
+            ("hash", "SHA-256"), ("path", "Ruta"),
+        ):
+            self.vault_tree.heading(column, text=label)
+        self.vault_tree.column("name", width=190, minwidth=120)
+        self.vault_tree.column("type", width=70, stretch=False)
+        self.vault_tree.column("role", width=90, stretch=False)
+        self.vault_tree.column("hash", width=105, stretch=False)
+        self.vault_tree.column("path", width=320, minwidth=160)
+        scroll = ttk.Scrollbar(table_frame, orient="vertical", command=self.vault_tree.yview)
+        hscroll = ttk.Scrollbar(table_frame, orient="horizontal", command=self.vault_tree.xview)
+        self.vault_tree.configure(yscrollcommand=scroll.set, xscrollcommand=hscroll.set)
+        self.vault_tree.grid(row=0, column=0, sticky="nsew", padx=(10, 0), pady=(10, 0))
+        scroll.grid(row=0, column=1, sticky="ns", padx=(0, 10), pady=(10, 0))
+        hscroll.grid(row=1, column=0, sticky="ew", padx=(10, 0), pady=(0, 10))
+        self.vault_tree.bind("<<TreeviewSelect>>", lambda _event: self.vault_refresh_detail())
+
+        detail = Card(body, title="Detalle y procedencia")
+        detail.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        detail.body.grid_columnconfigure(0, weight=1)
+        detail.body.grid_rowconfigure(0, weight=1)
+        self.vault_detail = ctk.CTkTextbox(detail.body, fg_color=BG_CARD2, text_color=TEXT_BODY)
+        self.vault_detail.grid(row=0, column=0, sticky="nsew", padx=12, pady=12)
+        self.vault_detail.insert("1.0", "Selecciona un asset para ver su hash, ubicación y derivados.")
+        self.vault_detail.configure(state="disabled")
+        self.refresh_vault_table()
+
+    def vault_import_files(self):
+        paths = filedialog.askopenfilenames(
+            title="Importar a Biblioteca",
+            filetypes=[
+                ("Imágenes y videos", "*.jpg *.jpeg *.png *.webp *.tif *.tiff *.mp4 *.mov *.avi *.mkv *.webm"),
+                ("Todos los archivos", "*.*"),
+            ],
+            parent=self,
+        )
+        if not paths:
+            return
+        imported = 0
+        errors = []
+        for path in paths:
+            try:
+                self.db.upsert_vault_asset(path)
+                imported += 1
+            except (OSError, ValueError) as error:
+                errors.append(f"{os.path.basename(path)}: {error}")
+        self.refresh_vault_table()
+        message = f"Assets registrados: {imported}. Los originales no se movieron."
+        if errors:
+            message += "\n\nNo se pudieron registrar:\n" + "\n".join(errors[:8])
+        messagebox.showinfo("Biblioteca", message, parent=self)
+
+    def refresh_vault_table(self):
+        if not hasattr(self, "vault_tree"):
+            return
+        for item in self.vault_tree.get_children():
+            self.vault_tree.delete(item)
+        search = self.vault_search_var.get() if hasattr(self, "vault_search_var") else ""
+        for asset in self.db.list_vault_assets(search=search):
+            self.vault_tree.insert(
+                "", "end", iid=str(asset["id"]),
+                values=(
+                    asset["display_name"], asset["media_type"],
+                    "Derivado" if asset["asset_role"] == "generated" else "Original",
+                    asset["asset_hash"][:12], asset["source_path"],
+                ),
+            )
+
+    def vault_refresh_detail(self):
+        if not hasattr(self, "vault_tree") or not hasattr(self, "vault_detail"):
+            return
+        selection = self.vault_tree.selection()
+        asset = self.db.get_vault_asset(int(selection[0])) if selection else None
+        lines = []
+        if asset:
+            lines.extend([
+                asset["display_name"],
+                f"Tipo: {asset['media_type']} · {'derivado' if asset['asset_role'] == 'generated' else 'original'}",
+                f"SHA-256: {asset['asset_hash']}",
+                f"Ruta: {asset['source_path']}",
+                "",
+                "Relaciones:",
+            ])
+            history = self.db.list_vault_asset_history(asset["id"])
+            if history:
+                for relation in history:
+                    if relation["parent_id"] == asset["id"]:
+                        lines.append(f"Generó: {relation['child_name']} · {relation['child_path']}")
+                    else:
+                        lines.append(f"Origen: {relation['parent_name']} · {relation['parent_path']}")
+            else:
+                lines.append("Sin relaciones registradas.")
+        else:
+            lines.append("Selecciona un asset para ver su hash, ubicación y derivados.")
+        self.vault_detail.configure(state="normal")
+        self.vault_detail.delete("1.0", "end")
+        self.vault_detail.insert("1.0", "\n".join(lines))
+        self.vault_detail.configure(state="disabled")
+
+    def vault_select_for_photo_forge(self):
+        assets = self.db.list_vault_assets(media_type="image")
+        if not assets:
+            return messagebox.showinfo("Biblioteca", "No hay imágenes registradas. Importa imágenes desde Biblioteca.", parent=self)
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Seleccionar imágenes de Biblioteca")
+        dialog.geometry("900x560")
+        dialog.minsize(680, 420)
+        dialog.transient(self)
+        dialog.grid_columnconfigure(0, weight=1)
+        dialog.grid_rowconfigure(0, weight=1)
+        columns = ("name", "hash", "path")
+        tree = ttk.Treeview(dialog, columns=columns, show="headings", selectmode="extended", style="Premium.Treeview")
+        for column, label in (("name", "Imagen"), ("hash", "SHA-256"), ("path", "Ruta")):
+            tree.heading(column, text=label)
+        tree.column("name", width=190)
+        tree.column("hash", width=110, stretch=False)
+        tree.column("path", width=500)
+        tree_scroll_y = ttk.Scrollbar(dialog, orient="vertical", command=tree.yview)
+        tree_scroll_x = ttk.Scrollbar(dialog, orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=tree_scroll_y.set, xscrollcommand=tree_scroll_x.set)
+        tree.grid(row=0, column=0, sticky="nsew", padx=(14, 0), pady=(14, 0))
+        tree_scroll_y.grid(row=0, column=1, sticky="ns", padx=(0, 14), pady=(14, 0))
+        tree_scroll_x.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 6))
+        for asset in assets:
+            tree.insert("", "end", iid=str(asset["id"]), values=(asset["display_name"], asset["asset_hash"][:12], asset["source_path"]))
+        actions = ctk.CTkFrame(dialog, fg_color="transparent")
+        actions.grid(row=2, column=0, columnspan=2, sticky="ew", padx=14, pady=(4, 14))
+
+        def accept():
+            selected_assets = [self.db.get_vault_asset(int(item)) for item in tree.selection()]
+            selected_assets = [asset for asset in selected_assets if asset and os.path.isfile(asset["source_path"])]
+            current = [self.photo_forge_sources.get(i) for i in range(self.photo_forge_sources.size())]
+            known = {path.casefold() for path in current}
+            added_indices = []
+            for asset in selected_assets:
+                source_path = asset["source_path"]
+                if source_path.casefold() in known:
+                    continue
+                self.photo_forge_sources.insert("end", source_path)
+                added_indices.append(self.photo_forge_sources.size() - 1)
+                known.add(source_path.casefold())
+            if added_indices:
+                self.photo_forge_sources.selection_clear(0, "end")
+                for index in added_indices:
+                    self.photo_forge_sources.selection_set(index)
+                self._photo_forge_show_preview()
+            if len(selected_assets) != len(tree.selection()):
+                messagebox.showwarning("Biblioteca", "Algunas imágenes seleccionadas ya no existen en su ruta y se omitieron.", parent=dialog)
+            dialog.destroy()
+
+        GhostButton(actions, text="Cancelar", command=dialog.destroy).pack(side="right", padx=(8, 0))
+        PrimaryButton(actions, text="Usar en Photo Forge", command=accept).pack(side="right")
 
     def _photo_forge_reload_accounts(self):
         if not hasattr(self, "photo_forge_accounts"):
@@ -6556,6 +6744,8 @@ class InstagramAutoPro(ctk.CTk):
         self.photo_forge_result.insert("end", f"Validando fuentes y generando {total} finales...")
         self.photo_forge_result.configure(state="disabled")
 
+        database_path = self.db.db_path
+
         def task():
             import photo_forge
             plan = photo_forge.plan_photo_copies(
@@ -6564,18 +6754,43 @@ class InstagramAutoPro(ctk.CTk):
                 parameter_ranges=parameter_ranges, variant_indices=selected_variants,
                 variant_selections=variant_selections,
             )
-            return photo_forge.create_photo_copies(plan, output_root, batch_name)
+            result = photo_forge.create_photo_copies(plan, output_root, batch_name)
+            from database import DatabaseManager
+            lineage_errors = []
+            lineage_count = 0
+            try:
+                vault_db = DatabaseManager(database_path)
+                try:
+                    for row in [*result["created"], *result["existing"]]:
+                        try:
+                            source_asset = vault_db.upsert_vault_asset(row["source_path"])
+                            vault_db.register_vault_derivative(
+                                source_asset["id"], row["output_path"], "photo_forge",
+                            )
+                            lineage_count += 1
+                        except Exception as error:
+                            lineage_errors.append(str(error))
+                finally:
+                    vault_db.close()
+            except Exception as error:
+                lineage_errors.append(str(error))
+            result["vault_lineage_count"] = lineage_count
+            result["vault_lineage_errors"] = lineage_errors
+            return result
 
         def done(success, result):
             self.photo_forge_run_button.configure(state="normal")
             self.photo_forge_result.configure(state="normal")
             self.photo_forge_result.delete("1.0", "end")
             if success:
+                self.refresh_vault_table()
                 self.photo_forge_result.insert(
                     "end",
                     f"Finales nuevos: {len(result['created'])} · Ya existentes: {len(result['existing'])}\n"
                     f"Manifiesto: {result['manifest_path']}\n"
-                    "Cada variante pertenece a una identidad; no se copiaron archivos al calendario.",
+                    "Cada variante pertenece a una identidad; no se copiaron archivos al calendario.\n"
+                    f"Biblioteca: {result['vault_lineage_count']} relaciones registradas."
+                    + (f"\nAvisos de Biblioteca: {'; '.join(result['vault_lineage_errors'][:3])}" if result["vault_lineage_errors"] else ""),
                 )
                 self.acct_lane_root.delete(0, "end")
                 self.acct_lane_root.insert(0, result["batch_dir"])

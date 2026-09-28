@@ -106,13 +106,17 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   imagen/identidad; las parejas sin selección propia heredan el ajuste global.
   La receta de cada ejecución registra índices efectivos por identidad, fuente
   y hash, y el generador conserva carpetas físicas separadas por identidad.
+  La pantalla Biblioteca registra imágenes/videos por hash y ruta, permite
+  elegir imágenes en Photo Forge y conserva relaciones de origen a cada salida
+  por ruta de cuenta. La migración es aditiva y no mueve medios. La integración
+  de Forge de video, familias/colecciones del Vault y captions sigue pendiente.
   Las tandas conservan recetas por ejecución y un resumen agregado al añadir
   más perfiles/subconjuntos sin borrar las salidas anteriores; el historial
   separa rutas solicitadas, nuevas y reutilizadas. Los totales que manifiestos
   antiguos no registraron, y el perfil/índice que falte en entradas legacy,
   se muestran como desconocidos.
   Sigue pendiente perspectiva, perfiles
-  de metadata configurables, conexión con Vault/captions, cola de jobs persistente,
+  de metadata configurables, captions, cola de jobs persistente,
   selección posterior por salida y repetición
   de receta como objeto separado de una ejecución. No presentar Photo Forge
   como implementación completa del prototipo mientras esos puntos sigan pendientes.
