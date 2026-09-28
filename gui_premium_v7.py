@@ -6033,6 +6033,9 @@ class InstagramAutoPro(ctk.CTk):
         )
         self.photo_forge_strength.set("Estándar")
         self.photo_forge_strength.grid(row=2, column=1, padx=6, pady=(0, 10), sticky="ew")
+        self.photo_forge_parameter_ranges = {}
+        GhostButton(form, text="Ajustar efectos", command=self._photo_forge_effect_ranges_dialog).grid(
+            row=2, column=2, padx=6, pady=(0, 10), sticky="w")
         ToggleRow(form, "Espejo horizontal", variable=self.photo_forge_mirror_var).grid(
             row=2, column=3, padx=6, pady=(0, 10), sticky="w")
 
@@ -6157,6 +6160,7 @@ class InstagramAutoPro(ctk.CTk):
                 strength=strength, mirror_horizontal=bool(self.photo_forge_mirror_var.get()),
                 account=account, batch_name=self.photo_forge_batch.get().strip() or "preview",
                 variants_per_image=max(1, min(20, variant_index)),
+                parameter_ranges=getattr(self, "photo_forge_parameter_ranges", {}),
             )
             with Image.open(path) as source:
                 dimensions = source.size
@@ -6184,6 +6188,85 @@ class InstagramAutoPro(ctk.CTk):
     def _photo_forge_selected_accounts(self):
         return [self.photo_forge_account_rows[index] for index in self.photo_forge_accounts.curselection()]
 
+    def _photo_forge_effect_ranges_dialog(self):
+        import photo_forge
+
+        parameters = (
+            ("brightness", "Luminosidad", 0.1, 3.0),
+            ("contrast", "Contraste", 0.1, 3.0),
+            ("color", "Color", 0.0, 3.0),
+            ("sharpness", "Nitidez", 0.0, 4.0),
+            ("gamma", "Gamma", 0.1, 3.0),
+            ("rotation_degrees", "Rotación (grados)", -45.0, 45.0),
+            ("crop_center_x", "Encuadre horizontal", 0.0, 1.0),
+            ("crop_center_y", "Encuadre vertical", 0.0, 1.0),
+            ("grain_amount", "Grano", 0.0, 1.0),
+            ("jpeg_quality", "Calidad JPEG", 75.0, 100.0),
+            ("webp_quality", "Calidad WebP", 75.0, 100.0),
+        )
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Rangos de efectos Photo Forge")
+        dialog.geometry("560x600")
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            dialog,
+            text="Deja ambos campos vacíos para conservar el rango del preset.",
+            text_color=TEXT_MUTED,
+        ).grid(row=0, column=0, sticky="w", padx=18, pady=(16, 8))
+        table = ctk.CTkScrollableFrame(dialog, fg_color="transparent", height=450)
+        table.grid(row=1, column=0, sticky="nsew", padx=12)
+        table.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(table, text="Efecto", text_color=TEXT_MUTED).grid(
+            row=0, column=0, padx=8, pady=6, sticky="w")
+        ctk.CTkLabel(table, text="Mínimo", text_color=TEXT_MUTED).grid(
+            row=0, column=1, padx=8, pady=6)
+        ctk.CTkLabel(table, text="Máximo", text_color=TEXT_MUTED).grid(
+            row=0, column=2, padx=8, pady=6)
+        entries = {}
+        for row_index, (key, label, allowed_min, allowed_max) in enumerate(parameters, start=1):
+            ctk.CTkLabel(table, text=label, text_color=TEXT_BODY).grid(
+                row=row_index, column=0, padx=8, pady=4, sticky="w")
+            current = self.photo_forge_parameter_ranges.get(key, ["", ""])
+            minimum = ctk.CTkEntry(table, width=110, placeholder_text=f">= {allowed_min:g}")
+            maximum = ctk.CTkEntry(table, width=110, placeholder_text=f"<= {allowed_max:g}")
+            if current[0] != "":
+                minimum.insert(0, str(current[0]))
+            if current[1] != "":
+                maximum.insert(0, str(current[1]))
+            minimum.grid(row=row_index, column=1, padx=8, pady=4)
+            maximum.grid(row=row_index, column=2, padx=8, pady=4)
+            entries[key] = (minimum, maximum)
+
+        def save_ranges():
+            configured = {}
+            try:
+                for key, (minimum_entry, maximum_entry) in entries.items():
+                    minimum_text = minimum_entry.get().strip()
+                    maximum_text = maximum_entry.get().strip()
+                    if not minimum_text and not maximum_text:
+                        continue
+                    if not minimum_text or not maximum_text:
+                        raise ValueError(f"{key}: completa mínimo y máximo o deja ambos vacíos.")
+                    configured[key] = [float(minimum_text), float(maximum_text)]
+                self.photo_forge_parameter_ranges = photo_forge.normalize_parameter_ranges(configured)
+            except ValueError as error:
+                return messagebox.showwarning("Rangos Photo Forge", str(error), parent=dialog)
+            dialog.destroy()
+            self._photo_forge_show_preview()
+
+        actions = ctk.CTkFrame(dialog, fg_color="transparent")
+        actions.grid(row=2, column=0, sticky="e", padx=18, pady=14)
+
+        def reset_ranges():
+            self.photo_forge_parameter_ranges = {}
+            dialog.destroy()
+            self._photo_forge_show_preview()
+
+        GhostButton(actions, text="Restablecer", command=reset_ranges).pack(side="left", padx=(0, 8))
+        PrimaryButton(actions, text="Aplicar rangos", command=save_ranges).pack(side="left")
+
     def _photo_forge_preview(self):
         source_count = self.photo_forge_sources.size()
         accounts = self._photo_forge_selected_accounts()
@@ -6195,6 +6278,10 @@ class InstagramAutoPro(ctk.CTk):
                 raise ValueError("Usa entre 1 y 20 variantes por imagen.")
             if self.photo_forge_profile.get() not in self.photo_forge_profile_labels:
                 raise ValueError("Selecciona un placement válido.")
+            import photo_forge
+            parameter_ranges = photo_forge.normalize_parameter_ranges(
+                getattr(self, "photo_forge_parameter_ranges", {})
+            )
         except ValueError as error:
             return messagebox.showwarning("Photo Forge", str(error), parent=self)
         if not self.photo_forge_sources.curselection() and source_count:
@@ -6206,7 +6293,7 @@ class InstagramAutoPro(ctk.CTk):
             "end",
             f"Lote: {self.photo_forge_batch.get().strip()}\n"
             f"Perfil: {self.photo_forge_profile.get()} · Variantes/foto: {variant_count} · "
-            f"Intensidad: {self.photo_forge_strength.get()}\n"
+            f"Intensidad: {self.photo_forge_strength.get()} · Rangos manuales: {len(parameter_ranges)}\n"
             f"Imágenes: {source_count} · Identidades: {len(accounts)} · Finales: "
             f"{source_count * len(accounts) * variant_count}\n"
             f"Salida: {os.path.join(self.photo_forge_output.get().strip(), self.photo_forge_batch.get().strip())}\n"
@@ -6235,12 +6322,17 @@ class InstagramAutoPro(ctk.CTk):
             strength = self.photo_forge_strength_labels[strength_label]
             if strength not in {"subtle", "standard", "strong"}:
                 raise ValueError("Selecciona una intensidad válida.")
+            import photo_forge
+            parameter_ranges = photo_forge.normalize_parameter_ranges(
+                getattr(self, "photo_forge_parameter_ranges", {})
+            )
         except (KeyError, ValueError) as error:
             return messagebox.showwarning("Photo Forge", str(error), parent=self)
         total = len(source_paths) * len(accounts) * variants_per_image
         confirmation = (
             f"Se crearán hasta {total} variantes en carpetas separadas por identidad.\n"
             f"Placement: {self.photo_forge_profile.get()} · Intensidad: {strength}.\n"
+            f"Efectos con rangos manuales: {len(parameter_ranges)}.\n"
             f"Espejo horizontal: {'sí' if mirror_horizontal else 'no'}.\n"
             "La receta, parámetros y hashes se guardarán en el manifiesto.\n"
             "Las imágenes fuente se conservarán sin modificar.\n\n¿Continuar?"
@@ -6263,6 +6355,7 @@ class InstagramAutoPro(ctk.CTk):
             plan = photo_forge.plan_photo_copies(
                 source_paths, account_rows, output_root, batch_name, mirror_horizontal,
                 profile=profile, variants_per_image=variants_per_image, strength=strength,
+                parameter_ranges=parameter_ranges,
             )
             return photo_forge.create_photo_copies(plan, output_root, batch_name)
 

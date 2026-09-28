@@ -25,6 +25,19 @@ PHOTO_PROFILES = {
     "photo_reel": (None, 2048),
 }
 VARIATION_STRENGTHS = {"subtle": 0.025, "standard": 0.06, "strong": 0.12}
+PARAMETER_LIMITS = {
+    "brightness": (0.1, 3.0),
+    "contrast": (0.1, 3.0),
+    "color": (0.0, 3.0),
+    "sharpness": (0.0, 4.0),
+    "gamma": (0.1, 3.0),
+    "rotation_degrees": (-45.0, 45.0),
+    "crop_center_x": (0.0, 1.0),
+    "crop_center_y": (0.0, 1.0),
+    "grain_amount": (0.0, 1.0),
+    "jpeg_quality": (75.0, 100.0),
+    "webp_quality": (75.0, 100.0),
+}
 
 
 def _sha256(path: Path) -> str:
@@ -62,10 +75,41 @@ def validate_sources(source_paths: list[str | os.PathLike], mirror_horizontal: b
     return paths
 
 
-def _variation_parameters(source_hash: str, account: dict, batch: str, index: int, strength: float) -> dict:
+def normalize_parameter_ranges(parameter_ranges: dict | None) -> dict:
+    if parameter_ranges is None:
+        return {}
+    if not isinstance(parameter_ranges, dict):
+        raise ValueError("Los rangos Photo Forge deben ser un objeto de parámetros.")
+    normalized = {}
+    for key, bounds in parameter_ranges.items():
+        if key not in PARAMETER_LIMITS:
+            raise ValueError(f"Parámetro Photo Forge no reconocido: {key}")
+        if not isinstance(bounds, (list, tuple)) or len(bounds) != 2:
+            raise ValueError(f"El rango de {key} debe incluir mínimo y máximo.")
+        try:
+            minimum, maximum = (float(value) for value in bounds)
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"El rango de {key} debe ser numérico.") from error
+        allowed_minimum, allowed_maximum = PARAMETER_LIMITS[key]
+        if not math.isfinite(minimum) or not math.isfinite(maximum):
+            raise ValueError(f"El rango de {key} debe ser finito.")
+        if minimum > maximum:
+            raise ValueError(f"El mínimo de {key} no puede superar el máximo.")
+        if minimum < allowed_minimum or maximum > allowed_maximum:
+            raise ValueError(
+                f"El rango de {key} debe estar entre {allowed_minimum:g} y {allowed_maximum:g}."
+            )
+        normalized[key] = [minimum, maximum]
+    return normalized
+
+
+def _variation_parameters(
+    source_hash: str, account: dict, batch: str, index: int, strength: float,
+    parameter_ranges: dict | None = None,
+) -> dict:
     seed_text = f"{source_hash}:{account.get('id')}:{account.get('username')}:{batch}:{index}"
     rng = random.Random(int(hashlib.sha256(seed_text.encode("utf-8")).hexdigest()[:16], 16))
-    return {
+    parameters = {
         "brightness": round(rng.uniform(1 - strength, 1 + strength), 4),
         "contrast": round(rng.uniform(1 - strength, 1 + strength), 4),
         "color": round(rng.uniform(1 - strength * 1.35, 1 + strength * 1.35), 4),
@@ -79,6 +123,12 @@ def _variation_parameters(source_hash: str, account: dict, batch: str, index: in
         "jpeg_quality": max(75, min(99, round(100 - strength * 100 + rng.uniform(-2, 2)))),
         "webp_quality": max(75, min(99, round(100 - strength * 100 + rng.uniform(-2, 2)))),
     }
+    for key, (minimum, maximum) in (parameter_ranges or {}).items():
+        key_seed = f"{seed_text}:{key}"
+        key_rng = random.Random(int(hashlib.sha256(key_seed.encode("utf-8")).hexdigest()[:16], 16))
+        value = key_rng.uniform(minimum, maximum)
+        parameters[key] = round(value) if key.endswith("_quality") else round(value, 4)
+    return parameters
 
 
 def _crop_to_profile(image: Image.Image, profile: str, center_x: float, center_y: float) -> Image.Image:
@@ -190,6 +240,7 @@ def plan_photo_copies(
     profile: str = "original",
     variants_per_image: int = 1,
     strength: str = "standard",
+    parameter_ranges: dict | None = None,
 ) -> list[dict]:
     if profile not in PHOTO_PROFILES:
         raise ValueError("Selecciona un perfil de salida válido.")
@@ -197,6 +248,7 @@ def plan_photo_copies(
         raise ValueError("Las variantes por imagen deben estar entre 1 y 20.")
     if strength not in VARIATION_STRENGTHS:
         raise ValueError("Selecciona una intensidad de variación válida.")
+    parameter_ranges = normalize_parameter_ranges(parameter_ranges)
     sources = validate_sources(source_paths, mirror_horizontal=mirror_horizontal)
     if not accounts:
         raise ValueError("Selecciona al menos una identidad.")
@@ -215,9 +267,12 @@ def plan_photo_copies(
             for variant_index in range(1, int(variants_per_image) + 1):
                 parameters = _variation_parameters(
                     digest, account, _safe_name(batch_name), variant_index,
-                    VARIATION_STRENGTHS[strength],
+                    VARIATION_STRENGTHS[strength], parameter_ranges,
                 )
-                no_transform = variants_per_image == 1 and profile == "original" and not mirror_horizontal
+                no_transform = (
+                    variants_per_image == 1 and profile == "original"
+                    and not mirror_horizontal and not parameter_ranges
+                )
                 if no_transform:
                     parameters = {
                         "brightness": 1.0, "contrast": 1.0, "color": 1.0,
@@ -235,6 +290,8 @@ def plan_photo_copies(
                     "parameters": parameters,
                     "metadata_profile": "preserve_source" if no_transform else "strip_exif_keep_icc_if_compatible",
                 }
+                if parameter_ranges:
+                    recipe_payload["parameter_ranges"] = parameter_ranges
                 recipe_id = hashlib.sha256(
                     json.dumps(recipe_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
                 ).hexdigest()
@@ -259,6 +316,7 @@ def plan_photo_copies(
                     "recipe_version": 1,
                     "recipe_id": recipe_id,
                     "recipe_strength": strength,
+                    "parameter_ranges": parameter_ranges,
                     "metadata_profile": recipe_payload["metadata_profile"],
                     "parameters": parameters,
                     "output_path": str(destination),
@@ -277,6 +335,7 @@ def render_photo_preview(
     account: dict | None = None,
     batch_name: str = "preview",
     variants_per_image: int = 3,
+    parameter_ranges: dict | None = None,
 ) -> dict:
     source = Path(source_path).resolve()
     validate_sources([source], mirror_horizontal=mirror_horizontal)
@@ -284,8 +343,12 @@ def render_photo_preview(
         raise ValueError("Perfil o intensidad de Photo Forge no válido.")
     if not 1 <= int(variant_index) <= 20:
         raise ValueError("La variante debe estar entre 1 y 20.")
+    parameter_ranges = normalize_parameter_ranges(parameter_ranges)
     digest = _sha256(source)
-    if int(variants_per_image) == 1 and profile == "original" and not mirror_horizontal:
+    if (
+        int(variants_per_image) == 1 and profile == "original"
+        and not mirror_horizontal and not parameter_ranges
+    ):
         params = {
             "brightness": 1.0, "contrast": 1.0, "color": 1.0,
             "sharpness": 1.0, "rotation_degrees": 0.0,
@@ -294,7 +357,7 @@ def render_photo_preview(
     else:
         params = _variation_parameters(
             digest, account or {"id": 0, "username": "preview"}, _safe_name(batch_name), int(variant_index),
-            VARIATION_STRENGTHS[strength],
+            VARIATION_STRENGTHS[strength], parameter_ranges,
         )
     row = {
         "source_sha256": digest,
@@ -354,6 +417,7 @@ def create_photo_copies(plan: list[dict], output_root: str | os.PathLike, batch_
                 is_unchanged_copy = (
                     row.get("profile", "original") == "original"
                     and not row.get("mirror_horizontal")
+                    and not row.get("parameter_ranges")
                     and all(parameters.get(key) == value for key, value in {
                         "brightness": 1.0, "contrast": 1.0, "color": 1.0,
                         "sharpness": 1.0, "gamma": 1.0, "rotation_degrees": 0.0,
@@ -405,6 +469,7 @@ def create_photo_copies(plan: list[dict], output_root: str | os.PathLike, batch_
             "profile": plan[0].get("profile", "original") if plan else "original",
             "variants_per_image": max((int(row.get("variant_index", 1)) for row in plan), default=1),
             "strength": plan[0].get("recipe_strength", "standard") if plan else "standard",
+            "parameter_ranges": plan[0].get("parameter_ranges", {}) if plan else {},
             "recipe_ids": sorted({str(row.get("recipe_id", "")) for row in plan if row.get("recipe_id")}),
         },
         "entries": list(entries_by_path.values()),

@@ -29,13 +29,18 @@ Para fotos, abre **Photo Forge**:
    deterministas de encuadre, escala de salida, luz, contraste, color, gamma,
    nitidez, rotación y grano; los formatos con pérdida usan calidad registrada
    en la receta.
-5. **Espejo horizontal** es opcional. El preview muestra el placement y el
+5. **Ajustar efectos** permite definir mínimos y máximos independientes para
+   luminosidad, contraste, color, nitidez, gamma, rotación, encuadre, grano y
+   calidad JPEG/WebP. Dejar ambos campos vacíos conserva el rango del preset;
+   los límites se validan antes de renderizar. Preview y generación usan los
+   mismos rangos, guardados en la receta de cada resultado.
+6. **Espejo horizontal** es opcional. El preview muestra el placement y el
    primer resultado; vuelve a pulsar **Previsualizar** después de cambiar el
    número de variantes.
-6. Selecciona las identidades destino y confirma **Generar finales por cuenta**.
+7. Selecciona las identidades destino y confirma **Generar finales por cuenta**.
    Cada variante se genera físicamente bajo su identidad; las fotos originales
    no se modifican ni se copian al calendario.
-7. La tanda guarda perfil, intensidad, parámetros efectivos, procedencia y
+8. La tanda guarda perfil, intensidad, parámetros efectivos, procedencia y
    SHA-256 de cada resultado en `photo_forge_manifest.json`. Para los carriles
    de imagen, Logística valida esos hashes y mantiene el orden del manifiesto;
    El carril **Instagram Photo Reel** sólo admite el perfil Photo Reel de este

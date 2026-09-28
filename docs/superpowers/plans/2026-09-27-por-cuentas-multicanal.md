@@ -98,8 +98,10 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   aditivos del manifiesto v1 para conservar lectores anteriores; Logistica
   admite manifiestos v1/v2 y valida SHA-256 por identidad. Al terminar,
   Logistica abre con la carpeta de salida y las identidades elegidas.
-- Pendiente de LEG-53: rangos manuales por parámetro, perspectiva, perfiles de
-  metadata configurables, conexión con Vault/captions, cola de jobs persistente,
+- Implementado parcialmente de LEG-53: rangos manuales mínimos/máximos para 11
+  parámetros, usados por igual en preview y render y guardados en cada receta;
+  los campos vacíos conservan el preset. Sigue pendiente perspectiva, perfiles
+  de metadata configurables, conexión con Vault/captions, cola de jobs persistente,
   preview/selección individual de variantes y repetición de receta como objeto
   separado de una ejecución. No presentar Photo Forge como implementación
   completa del prototipo mientras esos puntos sigan pendientes.
