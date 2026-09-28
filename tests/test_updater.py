@@ -139,6 +139,27 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual((self.app_dir / "airtable_sync.py").read_text(), "new airtable sync code")
         self.assertFalse((self.app_dir / "airtable_config.json").exists())
 
+    def test_apply_package_rejects_unsupported_manifest_files_before_advancing_version(self):
+        package_path = self.app_dir / "release.zip"
+        package_path.write_bytes(
+            _zip_bytes(
+                {
+                    "version.json": json.dumps({"version": "1.0.1"}),
+                    "future_module.py": "not yet supported",
+                }
+            )
+        )
+
+        with self.assertRaisesRegex(updater.UpdateError, "no permite estos archivos"):
+            updater.apply_package(
+                self.app_dir,
+                package_path,
+                {"version": "1.0.1", "files": ["version.json", "future_module.py"]},
+            )
+
+        self.assertEqual(updater.read_local_version(self.app_dir), "1.0.0")
+        self.assertFalse((self.app_dir / "future_module.py").exists())
+
     def test_apply_package_can_install_default_database_template_and_history(self):
         package_path = self.app_dir / "release.zip"
         package_path.write_bytes(

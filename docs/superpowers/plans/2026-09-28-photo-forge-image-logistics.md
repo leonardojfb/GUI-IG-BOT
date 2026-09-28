@@ -74,18 +74,21 @@ Archivos: `updater.py`, `build_release.ps1`, documentacion y pruebas de upgrade.
 
 ### Secuencia de despliegue desde v1.0.48
 
-La release privada actual es v1.0.48 y su `updater.py` no permite copiar los
-modulos nuevos. Por eso no se puede anunciar directamente v1.0.50 a todos los
-launchers:
+La release privada actual es v1.0.48. Su `updater.py` filtra los archivos del
+ZIP por una allowlist antigua, pero aun asi instala el nuevo `version.json`.
+Una prueba local con el ZIP completo v1.0.50 confirmo que un cliente v1.0.48
+avanza a v1.0.50 y omite `image_logistics.py`; queda en una instalacion mixta y
+el chequeo normal no vuelve a ofrecer v1.0.50. Por eso el manifiesto remoto no
+debe apuntar directamente al paquete completo desde v1.0.48:
 
 1. Preparar paquete `-BootstrapUpdater` con `updater.py` y `version.json`
    v1.0.49. Verificar su SHA-256 y que el actualizador de v1.0.48 lo acepta.
 2. Publicar v1.0.49 y apuntar el manifiesto remoto solamente a ese bootstrap.
    Comprobar en instalaciones reales que actualizan sin perder DB/calendario.
 3. Tras confirmar que los clientes alcanzaron v1.0.49, publicar el paquete
-   completo v1.0.50 y cambiar el manifiesto remoto. Un cliente que salte
-   directamente de v1.0.48 a v1.0.50 seguira fallando; no hacer el cambio
-   de manifiesto inmediatamente despues del bootstrap.
+   completo v1.0.50 y cambiar el manifiesto remoto. No hacer el cambio de
+   manifiesto inmediatamente despues del bootstrap: un cliente v1.0.48 podria
+   saltarse el updater intermedio y quedar con modulos faltantes.
 4. El webhook de Telegram es un despliegue separado. La version ya instalada
    acepta el hash de la unidad en un mensaje de control; la mejora visual del
    texto `YA PUBLICADO` requiere actualizar ese servicio por separado.
@@ -96,3 +99,21 @@ launchers:
 - Nunca usar un mismo final fisico dos veces ni crear calendarios parciales.
 - Nunca sobrescribir datos runtime existentes ni alterar las tres logisticas heredadas.
 - Cada etapa debe dejar pruebas focalizadas verdes y la GUI anterior operativa antes de avanzar.
+
+### Evidencia local de empaquetado y actualizacion
+
+Validado el 2026-09-28 desde el commit `3373ea1` en un worktree temporal:
+
+- El bootstrap v1.0.49 contiene exactamente `updater.py` y `version.json`; el
+  updater real de v1.0.48 lo aplico correctamente.
+- El paquete v1.0.50 coincide con sus 37 rutas de manifiesto e incluye
+  `image_logistics.py`; no contiene DB, manifiestos/calendarios runtime,
+  configuracion privada ni tandas/media.
+- La secuencia v1.0.48 -> v1.0.49 -> v1.0.50 instalo el modulo nuevo y preservo
+  sentinelas de DB, calendario, estado Telegram, configuracion, carpeta
+  `CALENDARIO_POSTEO` y media de usuario.
+- El salto directo v1.0.48 -> v1.0.50 reprodujo la omision silenciosa del
+  modulo nuevo y avanzo la version, confirmando que la ventana de bootstrap
+  debe permanecer abierta hasta verificar clientes reales en v1.0.49.
+- La prueba de actualizacion en clientes reales y la publicacion remota siguen
+  pendientes; estas simulaciones no son evidencia de rollout.
