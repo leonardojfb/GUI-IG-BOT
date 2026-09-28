@@ -189,6 +189,25 @@ def test_hash_callback_upserts_before_caption_edit(monkeypatch):
     assert calls[-1][0] == "editMessageCaption"
 
 
+def test_album_control_marks_whole_publication_in_text(monkeypatch):
+    stored = []
+    calls = []
+    monkeypatch.setattr(webhook, "upsert_published_video", lambda fields: stored.append(fields) or True)
+    monkeypatch.setattr(webhook, "post_telegram_method",
+                        lambda _token, method, payload: calls.append((method, payload)) or {"ok": True})
+    aggregate_hash = bytes.fromhex("ab" * 32)
+    update = _callback(_hash_callback(aggregate_hash))
+    message = update["callback_query"]["message"]
+    message.pop("caption", None)
+    message.pop("video", None)
+    message["text"] = "Carrusel de dos imágenes"
+
+    assert webhook.handle_update(update, "token-123") == {"ok": True, "handled": True}
+    assert stored[0]["SHA-256"] == aggregate_hash.hex()
+    assert calls[-1][0] == "editMessageText"
+    assert calls[-1][1]["text"].endswith("✅ YA PUBLICADO")
+
+
 def test_hash_callback_keeps_button_when_airtable_write_fails(monkeypatch):
     calls = []
     monkeypatch.setattr(webhook, "upsert_published_video", lambda _fields: False, raising=False)

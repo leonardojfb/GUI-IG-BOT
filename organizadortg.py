@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from contextlib import ExitStack
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -147,6 +148,21 @@ def _account_publication_hash(username, publication_target, source_hash, media_k
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
+def _publication_content_hash(row):
+    media = row.get("media_items") or [{"source_path": row.get("path") or row.get("source_path")}]
+    hashes = []
+    for item in media:
+        path = item.get("source_path") or ""
+        digest = _source_sha256(path)
+        expected = item.get("sha256")
+        if expected and digest != expected:
+            raise ValueError(f"El final cambió después de calendarizarlo: {path}")
+        hashes.append(digest)
+    if len(hashes) == 1:
+        return hashes[0]
+    return hashlib.sha256(":".join(hashes).encode("ascii")).hexdigest()
+
+
 def _published_callback_data(source_hash):
     return "pub:" + base64.urlsafe_b64encode(
         bytes.fromhex(source_hash)
@@ -190,6 +206,9 @@ def _scan_manifest_calendar_structure(manifest_file=None):
     }
     rows = []
     for entry in load_entries(manifest_file or _calendar_manifest_file(), require_source=True):
+        for item in entry.get("media_items") or []:
+            if not Path(item.get("source_path") or "").is_file():
+                raise ValueError(f"Falta una imagen del carrusel: {item.get('source_path')}")
         publication_target = publication_target_for_entry(entry)
         day_number = int(entry.get("day") or 0)
         media_kind = str(entry.get("media_kind") or "").strip().lower()
@@ -219,6 +238,7 @@ def _scan_manifest_calendar_structure(manifest_file=None):
             "account_id": entry.get("account_id"),
             "transform_log_id": entry.get("transform_log_id"),
             "caption_mode": entry.get("caption_mode"),
+            "media_items": entry.get("media_items") or [],
         })
     rows.sort(key=lambda row: (int(str(row["day"]).split("_")[1]), row.get("slot", 0), row["username"], row["filename"]))
     return rows
@@ -1010,6 +1030,47 @@ def _send_image_to_topic(chat_id, topic_id, caption, image_path, topics_state, u
         return False, topic_id
     return False, topic_id
 
+
+def _send_album_to_topic(chat_id, topic_id, caption, media_items):
+    if not 2 <= len(media_items) <= 10:
+        raise ValueError("Un album de Telegram requiere entre 2 y 10 imagenes.")
+    paths = [_windows_long_path(item["source_path"]) for item in media_items]
+    use_documents = any(
+        Path(path).suffix.lower() not in {".jpg", ".jpeg", ".png"}
+        or os.path.getsize(path) > 10 * 1024 * 1024 for path in paths
+    )
+    media_type = "document" if use_documents else "photo"
+    media = []
+    for index, path in enumerate(paths):
+        item = {"type": media_type, "media": f"attach://file{index}"}
+        if index == 0 and caption:
+            item["caption"] = caption[:1024]
+        media.append(item)
+    for attempt in range(5):
+        with ExitStack() as stack:
+            files = {
+                f"file{index}": (Path(path).name, stack.enter_context(open(path, "rb")))
+                for index, path in enumerate(paths)
+            }
+            response = requests.post(
+                f"https://api.telegram.org/bot{TOKEN}/sendMediaGroup",
+                data={"chat_id": chat_id, "message_thread_id": topic_id,
+                      "media": json.dumps(media, ensure_ascii=False)},
+                files=files, timeout=TG_MEDIA_TIMEOUT,
+            )
+        if response.status_code == 200 and response.json().get("ok"):
+            return True, topic_id
+        if response.status_code == 429:
+            try:
+                delay = int(response.json().get("parameters", {}).get("retry_after", 15))
+            except (ValueError, TypeError):
+                delay = 15
+            time.sleep(delay + 1)
+            continue
+        print(f"Error Telegram sendMediaGroup: {_redact_telegram_token(response.text)}")
+        return False, topic_id
+    return False, topic_id
+
 def scan_calendar_structure():
     print(f"📂 Escaneando calendario en: {input_root}")
     print(f"📄 Archivo organizadortg cargado: {__file__}")
@@ -1200,7 +1261,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
         omitted_published = 0
         published_entry_statuses = {}
         for video in all_videos:
-            source_hash = _source_sha256(video["path"])
+            source_hash = _publication_content_hash(video)
             publication_hash = (
                 source_hash
                 if video.get("media_kind") == "video" and not video.get("lane_id")
@@ -1423,6 +1484,8 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
 
                 if vid.get("caption"):
                     cap = vid["caption"]
+                elif vid.get("media_items"):
+                    cap = vid.get("story_announcement_text") or ""
                 elif delivery_kind == "trial":
                     trial_map = trial_caption_maps.get(
                         extract_tanda_tag_from_calendar_filename(vid["filename"]), {}
@@ -1465,6 +1528,8 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     "attachment_caption": attachment_caption,
                     "story_link_url": vid.get("story_link_url") or "",
                     "path": vid["path"],
+                    "media_items": vid.get("media_items") or [],
+                    "manual_status": vid.get("manual_status") or "planned",
                     "meta": meta,
                     "hora_et": hora_et,
                     "dia_str": dia_str,
@@ -1518,10 +1583,28 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                 controller.paused.wait()
             print(f"📤 Enviando a @{job['username']} [{job['publication_target']}] ({job['dia_str']} {job['hora_et']})...")
             try:
-                topic_id = send_metadata(job)
+                is_album = len(job.get("media_items") or []) > 1
+                topic_id = job["topic_id"] if is_album else send_metadata(job)
                 if not topic_id:
                     continue
-                if job["media_kind"] == "image":
+                if is_album:
+                    if job.get("manual_status") != "media_sent_telegram":
+                        ok, topic_id = _send_album_to_topic(
+                            job["chat_id"], topic_id, job["attachment_caption"], job["media_items"],
+                        )
+                        if not ok:
+                            continue
+                        if job.get("entry_id"):
+                            update_entry_status(manifest_path(base_dir), job["entry_id"], "media_sent_telegram")
+                    control = call_tg("sendMessage", {
+                        "chat_id": job["chat_id"], "message_thread_id": topic_id,
+                        "text": job["meta"],
+                        "reply_markup": json.dumps(_publish_button_markup(
+                            job["caption"], job["source_hash"], job["story_link_url"]
+                        ), ensure_ascii=False),
+                    }, silent=True)
+                    ok = bool(control.get("ok"))
+                elif job["media_kind"] == "image":
                     ok, _topic_id = _send_image_to_topic(
                         job["chat_id"], topic_id, job["attachment_caption"], job["path"],
                         topics_state, job["username"], job["tag"], job["source_hash"],

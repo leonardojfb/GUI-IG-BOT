@@ -201,8 +201,37 @@ def append_scheduled_entries(
 
 
 @_serialized_manifest_mutation
+def append_scheduled_entries_from_plan(
+    path: str | os.PathLike,
+    plan_builder,
+) -> ScheduleMergeResult:
+    """Rebuild and validate a reservation against the latest calendar under one lock."""
+    manifest = Path(path)
+    current = list(_read_payload(manifest)["entries"])
+    candidates = list(plan_builder(current))
+    occupied_paths = {
+        os.path.normcase(os.path.abspath(str(item.get("source_path", "")))).casefold()
+        for entry in current
+        for item in (entry.get("media_items") or [entry])
+        if item.get("source_path")
+    }
+    for candidate in candidates:
+        for item in candidate.get("media_items") or [candidate]:
+            source = str(item.get("source_path") or "")
+            key = os.path.normcase(os.path.abspath(source)).casefold()
+            if not source or key in occupied_paths:
+                raise ValueError(f"El final ya esta reservado en el calendario: {source}")
+            occupied_paths.add(key)
+    result = merge_scheduled_entries(current, candidates)
+    if result.conflicts:
+        return result
+    _write_payload(manifest, result.entries)
+    return result
+
+
+@_serialized_manifest_mutation
 def update_entries_status(path: str | os.PathLike, statuses: dict[str, str]) -> set[str]:
-    allowed = {"planned", "sent_telegram", "published"}
+    allowed = {"planned", "media_sent_telegram", "sent_telegram", "published"}
     invalid = set(statuses.values()) - allowed
     if invalid:
         raise ValueError(f"Estado de publicación no soportado: {sorted(invalid)[0]}")

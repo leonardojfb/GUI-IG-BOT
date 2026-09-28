@@ -26,20 +26,22 @@ class ScheduledSlot:
     scheduled_time: str
 
 
-def _schedule_key(entry: dict) -> tuple[str, str, str] | None:
+def _schedule_key(entry: dict) -> tuple[str, str, str, str] | None:
     scheduled_date = str(entry.get("scheduled_date") or "").strip()
     scheduled_time = str(entry.get("scheduled_time") or "").strip()
     username = str(entry.get("username") or "").strip()
     if not scheduled_date or not scheduled_time or not username:
         return None
-    return username, scheduled_date, scheduled_time
+    target = str(entry.get("publication_target") or "")
+    platform = str(entry.get("platform") or ("facebook" if target.startswith("facebook_") else "instagram"))
+    return username, platform, scheduled_date, scheduled_time
 
 
 def _entry_sort_key(entry: dict) -> tuple[int, str, str, str, int, str]:
     key = _schedule_key(entry)
     if key is None:
         return (1, "", "", str(entry.get("username") or ""), int(entry.get("day") or 0), str(entry.get("id") or ""))
-    username, scheduled_date, scheduled_time = key
+    username, _platform, scheduled_date, scheduled_time = key
     return (0, scheduled_date, scheduled_time, username, 0, str(entry.get("id") or ""))
 
 
@@ -52,7 +54,7 @@ def merge_scheduled_entries(existing: Iterable[dict], candidates: Iterable[dict]
     for candidate in candidates:
         key = _schedule_key(candidate)
         if key is not None and key in occupied:
-            username, scheduled_date, scheduled_time = key
+            username, _platform, scheduled_date, scheduled_time = key
             conflicts.append(
                 ScheduleConflict(
                     username=username,

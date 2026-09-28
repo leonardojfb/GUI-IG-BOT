@@ -325,7 +325,6 @@ def plan_photo_copies(
     for account in accounts:
         username = _safe_name(account.get("username", ""))
         account_id = account.get("id")
-        account_dir = root / username
         for source in sources:
             digest = source_hashes[source]
             source_key = os.path.normcase(os.path.abspath(str(source))).casefold()
@@ -368,7 +367,7 @@ def plan_photo_copies(
                     f"{source.stem[:80]}__ACC{account_id or 0}_{username}__{digest[:10]}"
                     f"__V{variant_index:02d}{profile_suffix}{source.suffix.lower()}"
                 )
-                destination = account_dir / filename
+                destination = root / filename
                 key = str(destination).casefold()
                 if key in destinations:
                     raise ValueError(f"Dos salidas coinciden en el mismo destino: {destination}")
@@ -691,7 +690,6 @@ def validated_account_outputs(
     ):
         raise ValueError("El manifiesto existente de Photo Forge no es válido.")
 
-    expected_dir = (root / _safe_name(username)).resolve()
     outputs = []
     seen = set()
     for row in manifest["entries"]:
@@ -702,15 +700,16 @@ def validated_account_outputs(
         if profile is not None and row.get("profile", "original") != profile:
             continue
         try:
-            recorded_name = Path(str(row["output_path"])).name
+            output = Path(str(row["output_path"])).resolve()
             expected_hash = str(row["output_sha256"]).lower()
         except (KeyError, OSError, TypeError, ValueError) as error:
             raise ValueError("Una salida de Photo Forge tiene metadatos inválidos.") from error
-        if not recorded_name or recorded_name in {".", ".."}:
-            raise ValueError("Una salida de Photo Forge tiene un nombre inválido.")
-        output = (expected_dir / recorded_name).resolve()
-        if output.parent != expected_dir or output.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS:
-            raise ValueError(f"La salida de Photo Forge está fuera de la carpeta de @{username}.")
+        try:
+            output.relative_to(root)
+        except ValueError as error:
+            raise ValueError(f"La salida de Photo Forge está fuera de la tanda de @{username}.") from error
+        if output == root or output.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS:
+            raise ValueError(f"La ruta de salida Photo Forge de @{username} no es válida.")
         key = os.path.normcase(str(output)).casefold()
         if key in seen:
             raise ValueError(f"El manifiesto repite una salida de Photo Forge: {output.name}.")
@@ -723,6 +722,267 @@ def validated_account_outputs(
     if not outputs:
         raise ValueError(f"Photo Forge no registra finales para @{username} en esta tanda.")
     return outputs
+
+
+def plan_neutral_photo_batch(
+    source_paths: list[str | os.PathLike],
+    output_root: str | os.PathLike,
+    batch_name: str,
+    *,
+    finals_per_photo: int,
+    mirror_horizontal: bool = False,
+    profile: str = "original",
+    strength: str = "standard",
+    parameter_ranges: dict | None = None,
+) -> list[dict]:
+    """Plan account-free finals; each row is one physical output."""
+    if profile not in PHOTO_PROFILES:
+        raise ValueError("Selecciona un perfil de salida valido.")
+    if strength not in VARIATION_STRENGTHS:
+        raise ValueError("Selecciona una intensidad de variacion valida.")
+    if not 1 <= int(finals_per_photo) <= 1000:
+        raise ValueError("Finales por foto debe estar entre 1 y 1000.")
+    sources = validate_sources(source_paths, mirror_horizontal=mirror_horizontal)
+    if len({os.path.normcase(str(path)).casefold() for path in sources}) != len(sources):
+        raise ValueError("Una imagen fuente aparece mas de una vez.")
+    ranges = normalize_parameter_ranges(parameter_ranges)
+    batch = _safe_name(batch_name)
+    root = Path(output_root).resolve() / batch
+    rows = []
+    paths = set()
+    for source in sources:
+        digest = _sha256(source)
+        source_id = hashlib.sha256(f"{source}:{digest}".encode("utf-8")).hexdigest()[:16]
+        for index in range(1, int(finals_per_photo) + 1):
+            parameters = _variation_parameters(
+                digest, {"id": source_id, "username": ""}, batch, index,
+                VARIATION_STRENGTHS[strength], ranges,
+            )
+            unchanged = (
+                finals_per_photo == 1 and profile == "original"
+                and not mirror_horizontal and not ranges
+            )
+            if unchanged:
+                parameters = {
+                    "brightness": 1.0, "contrast": 1.0, "color": 1.0,
+                    "sharpness": 1.0, "gamma": 1.0, "rotation_degrees": 0.0,
+                    "crop_center_x": 0.5, "crop_center_y": 0.5,
+                    "grain_amount": 0.0, "grain_seed": 0,
+                    "jpeg_quality": 100, "webp_quality": 100,
+                }
+            recipe = {
+                "version": 3, "profile": profile, "strength": strength,
+                "mirror_horizontal": bool(mirror_horizontal),
+                "copy_index": index, "parameters": parameters,
+                "parameter_ranges": ranges,
+            }
+            recipe_id = hashlib.sha256(
+                json.dumps(recipe, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+            filename = f"{_safe_name(source.stem)}__{source_id}__F{index:04d}__{profile}{source.suffix.lower()}"
+            output = root / filename
+            key = os.path.normcase(str(output)).casefold()
+            if key in paths:
+                raise ValueError(f"Dos finales coinciden: {filename}")
+            paths.add(key)
+            rows.append({
+                "source_id": source_id, "source_path": str(source),
+                "source_sha256": digest, "copy_index": index,
+                "copy_total": int(finals_per_photo), "output_path": str(output),
+                "profile": profile, "recipe_strength": strength,
+                "mirror_horizontal": bool(mirror_horizontal),
+                "parameter_ranges": ranges, "parameters": parameters,
+                "recipe_id": recipe_id,
+            })
+    return rows
+
+
+def create_neutral_photo_batch(
+    plan: list[dict], output_root: str | os.PathLike, batch_name: str,
+) -> dict:
+    if not plan:
+        raise ValueError("La tanda no tiene finales planificados.")
+    root = Path(output_root).resolve() / _safe_name(batch_name)
+    manifest_path = root / MANIFEST_NAME
+    if manifest_path.exists():
+        with manifest_path.open("r", encoding="utf-8") as stream:
+            prior = json.load(stream)
+        if prior.get("version") != 3:
+            raise ValueError("Esta carpeta contiene una tanda Photo Forge de legado; elige otro nombre.")
+        raise FileExistsError("La tanda neutral ya existe; elige otro nombre.")
+    if root.exists() and any(root.iterdir()):
+        raise FileExistsError("La carpeta de tanda ya contiene archivos; elige otro nombre.")
+    root.mkdir(parents=True, exist_ok=True)
+    created = []
+    entries = []
+    hashes = set()
+    manifest = {
+        "version": 3, "batch_id": str(uuid.uuid4()), "batch": _safe_name(batch_name),
+        "status": "incomplete", "planned_count": len(plan),
+        "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "sources": list({row["source_id"]: {
+            "source_id": row["source_id"], "path": row["source_path"],
+            "sha256": row["source_sha256"],
+        } for row in plan}.values()),
+        "recipe": {"profile": plan[0]["profile"], "strength": plan[0]["recipe_strength"],
+                   "mirror_horizontal": plan[0]["mirror_horizontal"],
+                   "parameter_ranges": plan[0]["parameter_ranges"],
+                   "finals_per_photo": plan[0]["copy_total"]},
+        "planned_outputs": [row["output_path"] for row in plan],
+        "entries": entries,
+    }
+
+    def save_manifest():
+        fd, temp_name = tempfile.mkstemp(prefix=f".{MANIFEST_NAME}.", suffix=".tmp", dir=root)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(manifest, stream, ensure_ascii=False, indent=2)
+                stream.write("\n")
+            os.replace(temp_name, manifest_path)
+        finally:
+            Path(temp_name).unlink(missing_ok=True)
+
+    save_manifest()
+    try:
+        for row in plan:
+            source = Path(row["source_path"])
+            output = Path(row["output_path"])
+            if output.parent != root or output.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS:
+                raise ValueError("El plan contiene una salida fuera de la tanda.")
+            if output.exists():
+                raise FileExistsError(f"La salida ya existe: {output.name}")
+            if _sha256(source) != row["source_sha256"]:
+                raise ValueError(f"La fuente cambio desde la previsualizacion: {source.name}")
+            fd, temp_name = tempfile.mkstemp(prefix=f".{output.stem}.", suffix=output.suffix, dir=root)
+            os.close(fd)
+            try:
+                if row["copy_total"] == 1 and row["profile"] == "original" and not row["mirror_horizontal"] and not row["parameter_ranges"]:
+                    shutil.copy2(source, temp_name)
+                else:
+                    _render_variant(source, Path(temp_name), row)
+                if _sha256(source) != row["source_sha256"]:
+                    raise ValueError(f"La fuente cambio durante el render: {source.name}")
+                output_hash = _sha256(Path(temp_name))
+                if output_hash in hashes:
+                    raise ValueError(f"Dos finales son identicos; ajusta la receta: {source.name}")
+                hashes.add(output_hash)
+                with Image.open(temp_name) as image:
+                    image.load()
+                    info = {"width": image.width, "height": image.height, "format": image.format}
+                ratio = PHOTO_PROFILES[row["profile"]][0]
+                if ratio is not None and abs(info["width"] / info["height"] - ratio) > 0.01:
+                    raise ValueError(f"El final no cumple el perfil: {output.name}")
+                if output.exists():
+                    raise FileExistsError(f"La salida aparecio durante el render: {output.name}")
+                os.rename(temp_name, output)
+                created.append(output)
+                entries.append({**row, "output_sha256": output_hash, "output_info": info})
+            finally:
+                Path(temp_name).unlink(missing_ok=True)
+        manifest["status"] = "validated"
+        save_manifest()
+    except Exception:
+        for output in created:
+            output.unlink(missing_ok=True)
+        manifest["status"] = "failed"
+        manifest["entries"] = []
+        save_manifest()
+        raise
+    return {"created": entries, "manifest_path": str(manifest_path), "batch_dir": str(root)}
+
+
+def validated_neutral_outputs(batch_dir: str | os.PathLike) -> list[dict]:
+    root = Path(batch_dir).resolve()
+    try:
+        with (root / MANIFEST_NAME).open("r", encoding="utf-8") as stream:
+            manifest = json.load(stream)
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("El manifiesto neutral de Photo Forge no se puede leer.") from error
+    if not isinstance(manifest, dict) or manifest.get("version") != 3 or manifest.get("status") != "validated" or not isinstance(manifest.get("entries"), list):
+        raise ValueError("La tanda neutral no esta validada.")
+    if manifest.get("planned_count") != len(manifest["entries"]):
+        raise ValueError("La tanda neutral no contiene todos los finales planificados.")
+    outputs = []
+    seen = set()
+    seen_copies = set()
+    seen_hashes = set()
+    for row in manifest["entries"]:
+        if not isinstance(row, dict):
+            raise ValueError("El manifiesto neutral contiene una entrada invalida.")
+        try:
+            output = Path(row["output_path"]).resolve()
+            output.relative_to(root)
+            digest = row["output_sha256"]
+            copy_key = (str(row["source_id"]), int(row["copy_index"]))
+            if copy_key in seen_copies or not copy_key[0] or copy_key[1] < 1:
+                raise ValueError("La tanda neutral repite un indice de final.")
+            seen_copies.add(copy_key)
+            if digest in seen_hashes:
+                raise ValueError("La tanda neutral repite el contenido de un final.")
+            seen_hashes.add(digest)
+            if output == root or output.parent != root or output.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS:
+                raise ValueError("La salida no pertenece a la tanda plana.")
+            if str(output).casefold() in seen:
+                raise ValueError("El manifiesto neutral repite una salida.")
+            seen.add(str(output).casefold())
+            if not output.is_file() or len(digest) != 64 or _sha256(output) != digest:
+                raise ValueError(f"El final cambio o falta: {output.name}")
+            with Image.open(output) as image:
+                image.verify()
+            outputs.append(row)
+        except (KeyError, OSError, TypeError, ValueError) as error:
+            raise ValueError("El manifiesto neutral contiene una salida invalida.") from error
+    if not outputs:
+        raise ValueError("La tanda neutral no contiene finales.")
+    return outputs
+
+
+def discover_photo_batches(output_root: str | os.PathLike) -> list[dict]:
+    root = Path(output_root).resolve()
+    if not root.is_dir():
+        return []
+    batches = []
+    for path in sorted(root.iterdir(), key=lambda item: item.name.casefold()):
+        manifest_path = path / MANIFEST_NAME
+        if not path.is_dir() or not manifest_path.is_file():
+            continue
+        try:
+            with manifest_path.open("r", encoding="utf-8") as stream:
+                manifest = json.load(stream)
+            if not isinstance(manifest, dict):
+                raise ValueError("El manifiesto Photo Forge no es un objeto.")
+            version = manifest.get("version")
+            if version == 3:
+                status = str(manifest.get("status") or "incomplete")
+                if status == "validated":
+                    try:
+                        capacity = len(validated_neutral_outputs(path))
+                    except ValueError:
+                        status = "incomplete"
+                if status in {"incomplete", "failed"}:
+                    capacity = 0
+                    rows = manifest.get("entries") or []
+                    planned = rows or [{"output_path": value} for value in manifest.get("planned_outputs") or []]
+                    for row in planned:
+                        output = Path(row.get("output_path") or "").resolve()
+                        expected = row.get("output_sha256")
+                        if output.parent == path and output.is_file() and (not expected or _sha256(output) == expected):
+                            try:
+                                with Image.open(output) as image:
+                                    image.verify()
+                                capacity += 1
+                            except (OSError, ValueError):
+                                pass
+                elif status != "validated":
+                    status, capacity = "invalid", 0
+            else:
+                status = "legacy" if version in {1, 2} else "invalid"
+                capacity = 0
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            version, status, capacity = None, "incomplete", 0
+        batches.append({"name": path.name, "path": str(path), "version": version,
+                        "status": status, "capacity": capacity})
+    return batches
 
 
 def _render_mirrored_image(source_path: Path, output_path: Path) -> None:

@@ -521,7 +521,7 @@ def test_calendar_view_orders_mixed_posts_and_shows_story_link_and_image(tmp_pat
         cleanup()
 
 
-def test_photo_forge_gui_generates_per_identity_and_prepares_logistics(tmp_path, monkeypatch):
+def test_photo_forge_gui_generates_neutral_batch(tmp_path, monkeypatch):
     app, cleanup = _make_app()
     try:
         import gui_premium_v7 as gui
@@ -535,10 +535,6 @@ def test_photo_forge_gui_generates_per_identity_and_prepares_logistics(tmp_path,
         monkeypatch.setattr(gui.messagebox, "askyesno", lambda *args, **kwargs: True)
         monkeypatch.setattr(gui.messagebox, "showinfo", lambda *args, **kwargs: None)
         monkeypatch.setattr(gui.messagebox, "showerror", lambda *args, **kwargs: pytest.fail(str(args)))
-        app.db.add_category("PHOTO_FORGE_CAT")
-        app.db.add_virtual_account("photo_forge_a", "PHOTO_FORGE_CAT")
-        app.db.add_virtual_account("photo_forge_b", "PHOTO_FORGE_CAT")
-        app._photo_forge_reload_accounts()
 
         source = tmp_path / "source.png"
         image = Image.new("RGB", (180, 320), (30, 90, 150))
@@ -548,9 +544,9 @@ def test_photo_forge_gui_generates_per_identity_and_prepares_logistics(tmp_path,
         draw.rectangle((18, 42, 159, 278), outline=(250, 240, 20), width=5)
         image.save(source)
         source_bytes = source.read_bytes()
-
         app.photo_forge_sources.insert("end", str(source))
         app.photo_forge_sources.selection_set(0)
+
         app.photo_forge_batch.delete(0, "end")
         app.photo_forge_batch.insert(0, "GUI_PHOTO_BATCH")
         app.photo_forge_output.delete(0, "end")
@@ -558,56 +554,115 @@ def test_photo_forge_gui_generates_per_identity_and_prepares_logistics(tmp_path,
         app.photo_forge_profile.set("Post 4:5")
         app.photo_forge_variant_count.delete(0, "end")
         app.photo_forge_variant_count.insert(0, "2")
-        app.photo_forge_variant_selection.delete(0, "end")
-        app.photo_forge_variant_selection.insert(0, "1,2")
         app.photo_forge_strength.set("Estándar")
-        app.photo_forge_accounts.selection_set(0, "end")
+        assert "photo_forge_accounts" not in app.__dict__
+        assert "photo_forge_variant_selection" not in app.__dict__
 
         app._photo_forge_run()
 
         batch_dir = output_root / "GUI_PHOTO_BATCH"
         manifest_path = batch_dir / photo_forge.MANIFEST_NAME
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        outputs = photo_forge.validated_account_outputs(batch_dir, "photo_forge_a", "post_4_5")
-        outputs_b = photo_forge.validated_account_outputs(batch_dir, "photo_forge_b", "post_4_5")
-        assert len(outputs) == len(outputs_b) == 2
+        outputs = photo_forge.validated_neutral_outputs(batch_dir)
+        assert len(outputs) == 2
         assert source.read_bytes() == source_bytes
-        assert len(manifest["entries"]) == 4
-        assert len(manifest["recipe_runs"]) == 1
-        assert {row["username"] for row in manifest["entries"]} == {"photo_forge_a", "photo_forge_b"}
-        for output in [*outputs, *outputs_b]:
-            with Image.open(output) as rendered:
+        assert manifest["version"] == 3
+        assert len(manifest["entries"]) == 2
+        assert all("username" not in row for row in manifest["entries"])
+        assert all(Path(row["output_path"]).parent == batch_dir for row in manifest["entries"])
+        for output in outputs:
+            with Image.open(output["output_path"]) as rendered:
                 assert abs(rendered.width / rendered.height - (4 / 5)) < 0.01
-        assert len({path.resolve() for path in [*outputs, *outputs_b]}) == 4
-        assert "4 relaciones registradas" in app.photo_forge_result.get("1.0", "end")
-        assert app.acct_lane_root.get() == str(batch_dir)
-        assert set(app.acct_dist_list.get("1.0", "end").split()) == {"photo_forge_a", "photo_forge_b"}
-        assert app._active_nav == "Logistica"
+        assert "2 relaciones registradas" in app.photo_forge_result.get("1.0", "end")
+        assert not (tmp_path / "CALENDARIO_POSTEO").exists()
+    finally:
+        cleanup()
 
-        app.acct_lane_target.set("instagram_post")
-        app.acct_lane_photo_profile.set("Automático por destino")
-        app.acct_lane_start_date.delete(0, "end")
-        app.acct_lane_start_date.insert(0, "2030-01-02")
-        app.acct_lane_horizon.delete(0, "end")
-        app.acct_lane_horizon.insert(0, "1")
-        app.acct_lane_every_days.delete(0, "end")
-        app.acct_lane_every_days.insert(0, "1")
-        app.acct_lane_times.delete(0, "end")
-        app.acct_lane_times.insert(0, "12:00")
-        app._acct_multichannel_run(preview_only=False)
 
+def test_photo_forge_preview_only_requires_source_images(tmp_path, monkeypatch):
+    app, cleanup = _make_app()
+    try:
+        import gui_premium_v7 as gui
+
+        from PIL import Image
+
+        source = tmp_path / "selected.png"
+        Image.new("RGB", (40, 50), "red").save(source)
+        app.photo_forge_sources.insert("end", str(source))
+        preview_calls = []
+        warnings = []
+        app._photo_forge_show_preview = lambda: preview_calls.append(True)
+        monkeypatch.setattr(
+            gui.messagebox, "showwarning",
+            lambda title, text, **_kwargs: warnings.append((title, text)),
+        )
+
+        app._photo_forge_preview()
+
+        assert preview_calls == [True]
+        assert warnings == []
+        assert "Imágenes: 1 · Finales totales: 3" in app.photo_forge_result.get("1.0", "end")
+    finally:
+        cleanup()
+
+
+def test_image_logistics_tab_uses_neutral_batch_and_category(tmp_path, monkeypatch):
+    app, cleanup = _make_app()
+    try:
+        import gui_premium_v7 as gui
+        import photo_forge
+        from PIL import Image
         from calendar_manifest import load_entries, manifest_path
 
-        calendar_rows = [
-            row for row in load_entries(manifest_path(base_dir))
-            if row.get("publication_target") == "instagram_post"
-        ]
-        assert len(calendar_rows) == 2
-        assert {row["username"] for row in calendar_rows} == {"photo_forge_a", "photo_forge_b"}
-        assert {row["scheduled_date"] for row in calendar_rows} == {"2030-01-02"}
-        assert {row["scheduled_time"] for row in calendar_rows} == {"12:00"}
-        assert len({row["source_path"] for row in calendar_rows}) == 2
-        assert all(Path(row["source_path"]).is_file() for row in calendar_rows)
+        monkeypatch.setattr(gui, "_BASE_DIR", str(tmp_path))
+        monkeypatch.setattr(gui.messagebox, "showwarning", lambda *args, **kwargs: pytest.fail(str(args)))
+        monkeypatch.setattr(gui.messagebox, "showerror", lambda *args, **kwargs: pytest.fail(str(args)))
+        source = tmp_path / "source.png"
+        image = Image.new("RGB", (40, 50))
+        image.putdata([((x * 5) % 256, (y * 7) % 256, (x + y) % 256)
+                       for y in range(50) for x in range(40)])
+        image.save(source)
+        root = tmp_path / "imagenes_finales"
+        plan = photo_forge.plan_neutral_photo_batch([source], root, "GUI_BATCH", finals_per_photo=2)
+        photo_forge.create_neutral_photo_batch(plan, root, "GUI_BATCH")
+        app.db.add_category("IMAGENES_CAT")
+        app.db.add_virtual_account("image_a", "IMAGENES_CAT")
+        app.db.add_virtual_account("image_b", "IMAGENES_CAT")
+
+        app._image_refresh_inventory()
+        app.image_category_combo.set("IMAGENES_CAT")
+        app.image_inventory.selection_set(0)
+        app._image_add_source()
+        app.image_target.set("instagram_post")
+        app._image_target_changed()
+        app.image_start_date.delete(0, "end")
+        app.image_start_date.insert(0, "2030-01-02")
+        app.image_horizon.delete(0, "end")
+        app.image_horizon.insert(0, "1")
+        app._image_add_block()
+        app.image_block_list.selection_set(0)
+        app._image_load_block()
+        app.image_caption.insert(0, "Caption editado")
+        app._image_update_block()
+        app._image_preview()
+        assert "2 publicaciones" in app.image_result.get("1.0", "end")
+        app._image_commit()
+
+        rows = [row for row in load_entries(manifest_path(tmp_path))
+                if row.get("photo_batch") == str(root / "GUI_BATCH")]
+        assert len(rows) == 2
+        assert {row["username"] for row in rows} == {"image_a", "image_b"}
+        assert len({row["source_path"] for row in rows}) == 2
+        assert {row["caption"] for row in rows} == {"Caption editado"}
         assert not (tmp_path / "CALENDARIO_POSTEO").exists()
+        app.calendar_start.delete(0, "end")
+        app.calendar_start.insert(0, "2030-01-02")
+        app._refresh_calendar_view()
+        assert len(app.calendar_tree.get_children()) == 2
+        first = app.calendar_tree.get_children()[0]
+        assert app.calendar_tree.item(first, "values")[5] == "1"
+        app.calendar_tree.selection_set(first)
+        app._show_calendar_entry()
+        assert app.calendar_media_position.cget("text") == "1 / 1"
     finally:
         cleanup()

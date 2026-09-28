@@ -15,6 +15,7 @@ import random
 import time
 import threading
 import uuid
+import hashlib
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
@@ -2736,11 +2737,13 @@ class InstagramAutoPro(ctk.CTk):
         t1 = tabs.add("🚀  Por Tandas")
         t2 = tabs.add("📤  Por Cuentas")
         t3 = tabs.add("TRIALS")
+        t4 = tabs.add("IMÁGENES")
         tabs.set("📤  Por Cuentas")
 
         self._build_dist_tandas_tab(t1)
         self._build_dist_cuentas_tab(t2)
         self._build_dist_trials_tab(t3)
+        self._build_dist_images_tab(t4)
 
         # Cargar datos iniciales
         self.reload_dist_lists()
@@ -3277,11 +3280,11 @@ class InstagramAutoPro(ctk.CTk):
         )
         self.acct_lane_target.set("instagram_story")
         self.acct_lane_target.grid(row=0, column=1, padx=6, pady=(12, 6), sticky="ew")
-        ctk.CTkLabel(lane, text="Carpeta de finales por cuenta:", text_color=TEXT_MUTED).grid(
+        ctk.CTkLabel(lane, text="Tanda de finales / manifiesto:", text_color=TEXT_MUTED).grid(
             row=0, column=2, padx=(10, 6), pady=(12, 6), sticky="e")
         self.acct_lane_root = ctk.CTkEntry(
             lane, fg_color=BG_INPUT, border_color=BORDER,
-            placeholder_text="Raíz con una subcarpeta por cuenta",
+            placeholder_text="Carpeta de tanda; Photo Forge usa su manifiesto",
         )
         self.acct_lane_root.grid(row=0, column=3, padx=6, pady=(12, 6), sticky="ew")
         GhostButton(
@@ -3374,11 +3377,462 @@ class InstagramAutoPro(ctk.CTk):
             lane_buttons, text="Agregar al calendario",
             command=lambda: self._acct_multichannel_run(preview_only=False),
         ).pack(side="left", padx=6)
+        lane_card.grid_remove()
 
         # ── Resultados ───────────────────────────────────────────────────
         self.acct_dist_result = ctk.CTkTextbox(parent, fg_color=BG_CARD2, height=200,
                                                 text_color=NEON_CYAN, font=FONT_MONO)
         self.acct_dist_result.grid(row=5, column=0, sticky="nsew", padx=16, pady=(0, 16))
+
+    def _build_dist_images_tab(self, parent):
+        parent.grid_rowconfigure(0, weight=1)
+        parent.grid_columnconfigure(0, weight=1)
+        body = ctk.CTkScrollableFrame(parent, fg_color="transparent")
+        body.grid(row=0, column=0, sticky="nsew")
+        body.grid_columnconfigure(0, weight=1)
+        self.image_blocks = []
+        self.image_preview_signature = None
+        self.image_batch_paths = {}
+        self.image_source_rows = []
+
+        select = ctk.CTkFrame(body, fg_color="transparent")
+        select.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 6))
+        select.grid_columnconfigure((1, 3), weight=1)
+        ctk.CTkLabel(select, text="Tanda:").grid(row=0, column=0, padx=(0, 6), sticky="e")
+        self.image_batch_combo = ctk.CTkComboBox(select, values=[""], command=lambda _: self._image_load_batch())
+        self.image_batch_combo.grid(row=0, column=1, padx=(0, 10), sticky="ew")
+        ctk.CTkLabel(select, text="Categoría:").grid(row=0, column=2, padx=(0, 6), sticky="e")
+        self.image_category_combo = ctk.CTkComboBox(
+            select, values=[""], command=lambda _: self._image_category_changed())
+        self.image_category_combo.grid(row=0, column=3, padx=(0, 10), sticky="ew")
+        GhostButton(select, text="Actualizar", command=self._image_refresh_inventory).grid(row=0, column=4)
+        self.image_accounts_label = ctk.CTkLabel(select, text="", text_color=TEXT_MUTED)
+        self.image_accounts_label.grid(row=1, column=0, columnspan=5, sticky="w", pady=(4, 0))
+
+        lists = ctk.CTkFrame(body, fg_color="transparent")
+        lists.grid(row=1, column=0, sticky="nsew", padx=16, pady=6)
+        lists.grid_columnconfigure((0, 2), weight=1)
+        ctk.CTkLabel(lists, text="Fuentes de la tanda").grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(lists, text="Publicación (orden de imágenes)").grid(row=0, column=2, sticky="w")
+        self.image_inventory = tk.Listbox(lists, height=7, selectmode=tk.SINGLE,
+                                           bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
+                                           selectbackground=self.themed(ACCENT))
+        self.image_inventory.grid(row=1, column=0, sticky="nsew")
+        self.image_inventory.bind("<<ListboxSelect>>", self._image_show_source_preview)
+        source_actions = ctk.CTkFrame(lists, fg_color="transparent")
+        source_actions.grid(row=1, column=1, padx=8)
+        GhostButton(source_actions, text="→", width=45, command=self._image_add_source).pack(pady=4)
+        GhostButton(source_actions, text="←", width=45, command=self._image_remove_source).pack(pady=4)
+        self.image_order = tk.Listbox(lists, height=7, selectmode=tk.SINGLE,
+                                       bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
+                                       selectbackground=self.themed(ACCENT))
+        self.image_order.grid(row=1, column=2, sticky="nsew")
+        order_actions = ctk.CTkFrame(lists, fg_color="transparent")
+        order_actions.grid(row=1, column=3, padx=(8, 0))
+        GhostButton(order_actions, text="↑", width=45, command=lambda: self._image_move_source(-1)).pack(pady=4)
+        GhostButton(order_actions, text="↓", width=45, command=lambda: self._image_move_source(1)).pack(pady=4)
+        self.image_order_ids = []
+        self.image_source_preview = ctk.CTkLabel(lists, text="", height=110, fg_color=BG_CARD2)
+        self.image_source_preview.grid(row=2, column=0, columnspan=4, sticky="ew", pady=(6, 0))
+        self.image_source_preview_ref = None
+
+        form = ctk.CTkFrame(body, fg_color="transparent")
+        form.grid(row=2, column=0, sticky="ew", padx=16, pady=6)
+        form.grid_columnconfigure((1, 3), weight=1)
+        ctk.CTkLabel(form, text="Destino:").grid(row=0, column=0, sticky="e", padx=6, pady=5)
+        self.image_target = ctk.CTkComboBox(
+            form, values=["instagram_story", "instagram_post", "instagram_photo_reel",
+                          "facebook_story", "facebook_page_post", "facebook_marketplace_listing"],
+            command=lambda _: self._image_target_changed(),
+        )
+        self.image_target.set("instagram_story")
+        self.image_target.grid(row=0, column=1, sticky="ew", padx=6, pady=5)
+        self.image_both_var = tk.BooleanVar(value=False)
+        self.image_both = ctk.CTkCheckBox(form, text="Instagram y Facebook", variable=self.image_both_var)
+        self.image_both.grid(row=0, column=2, columnspan=2, sticky="w", padx=6, pady=5)
+        ctk.CTkLabel(form, text="Fecha inicial:").grid(row=1, column=0, sticky="e", padx=6, pady=5)
+        self.image_start_date = ctk.CTkEntry(form)
+        self.image_start_date.insert(0, datetime.now().strftime("%Y-%m-%d"))
+        self.image_start_date.grid(row=1, column=1, sticky="ew", padx=6, pady=5)
+        ctk.CTkLabel(form, text="Zona horaria:").grid(row=1, column=2, sticky="e", padx=6, pady=5)
+        self.image_timezone = ctk.CTkEntry(form)
+        self.image_timezone.insert(0, "America/Buenos_Aires")
+        self.image_timezone.grid(row=1, column=3, sticky="ew", padx=6, pady=5)
+        ctk.CTkLabel(form, text="Días de período:").grid(row=2, column=0, sticky="e", padx=6, pady=5)
+        self.image_horizon = ctk.CTkEntry(form)
+        self.image_horizon.insert(0, "7")
+        self.image_horizon.grid(row=2, column=1, sticky="ew", padx=6, pady=5)
+        ctk.CTkLabel(form, text="Cada N días:").grid(row=2, column=2, sticky="e", padx=6, pady=5)
+        self.image_every = ctk.CTkEntry(form)
+        self.image_every.insert(0, "1")
+        self.image_every.grid(row=2, column=3, sticky="ew", padx=6, pady=5)
+        ctk.CTkLabel(form, text="Horas (HH:MM):").grid(row=3, column=0, sticky="e", padx=6, pady=5)
+        self.image_times = ctk.CTkEntry(form)
+        self.image_times.insert(0, "12:00")
+        self.image_times.grid(row=3, column=1, sticky="ew", padx=6, pady=5)
+        ctk.CTkLabel(form, text="Cantidad diaria:").grid(row=3, column=2, sticky="e", padx=6, pady=5)
+        self.image_daily = ctk.CTkEntry(form)
+        self.image_daily.insert(0, "1")
+        self.image_daily.grid(row=3, column=3, sticky="ew", padx=6, pady=5)
+        ctk.CTkLabel(form, text="Total (opcional):").grid(row=10, column=0, sticky="e", padx=6, pady=5)
+        self.image_total = ctk.CTkEntry(form, placeholder_text="Todo el período")
+        self.image_total.grid(row=10, column=1, sticky="ew", padx=6, pady=5)
+        ctk.CTkLabel(form, text="Caption:").grid(row=4, column=0, sticky="e", padx=6, pady=5)
+        self.image_caption = ctk.CTkEntry(form)
+        self.image_caption.grid(row=4, column=1, columnspan=3, sticky="ew", padx=6, pady=5)
+        self.image_story_label = ctk.CTkLabel(form, text="Texto Story:")
+        self.image_story_label.grid(row=5, column=0, sticky="e", padx=6, pady=5)
+        self.image_story_text = ctk.CTkEntry(form)
+        self.image_story_text.grid(row=5, column=1, columnspan=3, sticky="ew", padx=6, pady=5)
+        self.image_market_widgets = []
+        for row, label, attr in (
+            (6, "Título:", "image_market_title"), (7, "Precio:", "image_market_price"),
+            (8, "Condición:", "image_market_condition"), (9, "Descripción:", "image_market_description"),
+        ):
+            caption = ctk.CTkLabel(form, text=label)
+            caption.grid(row=row, column=0, sticky="e", padx=6, pady=5)
+            widget = ctk.CTkEntry(form)
+            widget.grid(row=row, column=1, columnspan=3, sticky="ew", padx=6, pady=5)
+            setattr(self, attr, widget)
+            self.image_market_widgets.extend((caption, widget))
+        self._image_target_changed()
+        self._image_load_defaults()
+
+        actions = ctk.CTkFrame(parent, fg_color="transparent")
+        actions.grid(row=1, column=0, sticky="ew", padx=16, pady=(4, 10))
+        GhostButton(actions, text="Añadir bloque", command=self._image_add_block).grid(row=0, column=0, padx=(0, 6), pady=2)
+        GhostButton(actions, text="Cargar bloque", command=self._image_load_block).grid(row=0, column=1, padx=(0, 6), pady=2)
+        GhostButton(actions, text="Actualizar bloque", command=self._image_update_block).grid(row=0, column=2, padx=(0, 6), pady=2)
+        GhostButton(actions, text="Quitar bloque", command=self._image_remove_block).grid(row=0, column=3, padx=(0, 6), pady=2)
+        GhostButton(actions, text="Previsualizar", command=self._image_preview).grid(row=1, column=0, padx=(0, 6), pady=2)
+        GhostButton(actions, text="Guardar defaults", command=self._image_save_defaults).grid(row=1, column=1, padx=(0, 6), pady=2)
+        PrimaryButton(actions, text="Añadir al calendario", command=self._image_commit).grid(row=1, column=2, columnspan=2, sticky="ew", padx=(0, 6), pady=2)
+        self.image_block_list = tk.Listbox(body, height=5, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
+                                           selectbackground=self.themed(ACCENT))
+        self.image_block_list.grid(row=4, column=0, sticky="ew", padx=16, pady=6)
+        self.image_result = ctk.CTkTextbox(body, height=190, fg_color=BG_CARD2, text_color=TEXT_BODY)
+        self.image_result.grid(row=5, column=0, sticky="ew", padx=16, pady=(6, 16))
+        self._image_refresh_inventory()
+
+    def _image_target_changed(self):
+        target = self.image_target.get()
+        self.image_both.configure(state="normal" if target in {
+            "instagram_story", "facebook_story", "instagram_post", "facebook_page_post"
+        } else "disabled")
+        if target not in {"instagram_story", "facebook_story", "instagram_post", "facebook_page_post"}:
+            self.image_both_var.set(False)
+        for widget in (self.image_story_label, self.image_story_text):
+            widget.grid() if target.endswith("_story") else widget.grid_remove()
+        for widget in self.image_market_widgets:
+            widget.grid() if target == "facebook_marketplace_listing" else widget.grid_remove()
+
+    def _image_load_defaults(self):
+        try:
+            values = json.loads(self.db.get_social_publishing_setting("image_logistics_defaults", "{}"))
+        except (ValueError, TypeError):
+            values = {}
+        for attr, key in (("image_timezone", "timezone"), ("image_horizon", "horizon_days"),
+                          ("image_every", "every_days"), ("image_times", "times"),
+                          ("image_daily", "quantity_daily")):
+            if key in values:
+                widget = getattr(self, attr)
+                widget.delete(0, "end")
+                widget.insert(0, str(values[key]))
+
+    def _image_save_defaults(self):
+        from zoneinfo import ZoneInfo
+        try:
+            ZoneInfo(self.image_timezone.get().strip())
+            horizon, every, daily = (int(widget.get()) for widget in
+                                      (self.image_horizon, self.image_every, self.image_daily))
+            times = [item.strip() for item in self.image_times.get().split(",") if item.strip()]
+            if horizon < 1 or every < 1 or daily != len(times):
+                raise ValueError("Revisa días, frecuencia y horas.")
+            from publication_schedule import expand_lane_slots
+            expand_lane_slots(datetime.now().strftime("%Y-%m-%d"), horizon, every, times)
+            values = {"timezone": self.image_timezone.get().strip(), "horizon_days": horizon,
+                      "every_days": every, "times": ",".join(times), "quantity_daily": daily}
+            self.db.set_social_publishing_setting("image_logistics_defaults", json.dumps(values))
+        except (ValueError, KeyError) as error:
+            messagebox.showwarning("Defaults Imágenes", str(error), parent=self)
+
+    def _image_refresh_inventory(self):
+        import photo_forge
+        root = Path(_BASE_DIR) / "imagenes_finales"
+        batches = photo_forge.discover_photo_batches(root)
+        self.image_batch_paths = {}
+        self.image_batch_status = {}
+        for row in batches:
+            label = row["name"] if row["status"] == "validated" else (
+                f"{row['name']} [{row['status']}: {row['capacity']} finales]")
+            self.image_batch_paths[label] = row["path"]
+            self.image_batch_status[label] = row["status"]
+        try:
+            extra = json.loads(self.db.get_social_publishing_setting("photo_forge_batch_dirs", "[]"))
+            for item in extra if isinstance(extra, list) else []:
+                path = Path(item).resolve()
+                if path.is_dir() and path.parent != root.resolve():
+                    try:
+                        photo_forge.validated_neutral_outputs(path)
+                    except ValueError:
+                        continue
+                    label = path.name if path.name not in self.image_batch_paths else str(path)
+                    self.image_batch_paths[label] = str(path)
+                    self.image_batch_status[label] = "validated"
+        except (ValueError, TypeError):
+            pass
+        names = list(self.image_batch_paths)
+        self.image_batch_combo.configure(values=names or [""])
+        if self.image_batch_combo.get() not in names:
+            first_valid = next((name for name in names if self.image_batch_status[name] == "validated"), "")
+            self.image_batch_combo.set(first_valid or (names[0] if names else ""))
+        categories = self.db.get_categories()
+        self.image_category_combo.configure(values=categories or [""])
+        if self.image_category_combo.get() not in categories:
+            self.image_category_combo.set(categories[0] if categories else "")
+        self._image_load_batch()
+
+    def _image_category_changed(self):
+        self.image_preview_signature = None
+        count = len(self.db.get_accounts_by_type(self.image_category_combo.get()))
+        self.image_accounts_label.configure(text=f"{count} cuentas en categoría")
+
+    def _image_load_batch(self):
+        import photo_forge
+        from calendar_manifest import load_entries, manifest_path
+        self.image_preview_signature = None
+        self.image_inventory.delete(0, "end")
+        self.image_order.delete(0, "end")
+        self.image_order_ids = []
+        self.image_source_rows = []
+        path = self.image_batch_paths.get(self.image_batch_combo.get())
+        if not path:
+            return
+        if self.image_batch_status.get(self.image_batch_combo.get()) != "validated":
+            row = next((item for item in photo_forge.discover_photo_batches(Path(path).parent)
+                        if item["path"] == path), None)
+            self.image_result.delete("1.0", "end")
+            self.image_result.insert("end", f"Tanda {self.image_batch_combo.get()} no calendarizable. "
+                                            f"Capacidad física: {row['capacity'] if row else 0}.")
+            return
+        try:
+            outputs = photo_forge.validated_neutral_outputs(path)
+            used = {str(Path(item.get("source_path", "")).resolve()).casefold()
+                    for entry in load_entries(manifest_path(_BASE_DIR), require_source=False)
+                    for item in (entry.get("media_items") or [entry]) if item.get("source_path")}
+            grouped = {}
+            for row in outputs:
+                source = grouped.setdefault(row["source_id"], {"source_id": row["source_id"],
+                    "path": row["source_path"], "preview_path": row["output_path"],
+                    "total": 0, "available": 0})
+                source["total"] += 1
+                source["available"] += str(Path(row["output_path"]).resolve()).casefold() not in used
+            self.image_source_rows = list(grouped.values())
+            for row in self.image_source_rows:
+                self.image_inventory.insert("end", f"{Path(row['path']).name}  |  {row['available']}/{row['total']} libres")
+            self._image_category_changed()
+        except Exception as error:
+            self.image_result.delete("1.0", "end")
+            self.image_result.insert("end", str(error))
+
+    def _image_show_source_preview(self, _event=None):
+        selection = self.image_inventory.curselection()
+        if not selection:
+            return
+        row = self.image_source_rows[selection[0]]
+        try:
+            from PIL import Image, ImageOps
+            with Image.open(row["preview_path"]) as source:
+                image = ImageOps.exif_transpose(source).convert("RGB")
+                image.thumbnail((260, 105), Image.Resampling.LANCZOS)
+                self.image_source_preview_ref = ctk.CTkImage(light_image=image, dark_image=image, size=image.size)
+            self.image_source_preview.configure(image=self.image_source_preview_ref,
+                                                text=f"{row['available']} disponibles de {row['total']}", compound="left")
+        except Exception as error:
+            self.image_source_preview_ref = None
+            self.image_source_preview.configure(image=None, text=str(error))
+
+    def _image_add_source(self):
+        selection = self.image_inventory.curselection()
+        if selection:
+            row = self.image_source_rows[selection[0]]
+            self.image_order_ids.append(row["source_id"])
+            self.image_order.insert("end", Path(row["path"]).name)
+
+    def _image_remove_source(self):
+        selection = self.image_order.curselection()
+        if selection:
+            index = selection[0]
+            del self.image_order_ids[index]
+            self.image_order.delete(index)
+
+    def _image_move_source(self, direction):
+        selection = self.image_order.curselection()
+        if not selection:
+            return
+        index = selection[0]
+        other = index + direction
+        if not 0 <= other < len(self.image_order_ids):
+            return
+        self.image_order_ids[index], self.image_order_ids[other] = self.image_order_ids[other], self.image_order_ids[index]
+        label = self.image_order.get(index)
+        self.image_order.delete(index)
+        self.image_order.insert(other, label)
+        self.image_order.selection_set(other)
+
+    def _image_form_block(self):
+        target = self.image_target.get()
+        paired = {"instagram_story": "facebook_story", "facebook_story": "instagram_story",
+                  "instagram_post": "facebook_page_post", "facebook_page_post": "instagram_post"}
+        if self.image_both_var.get() and target not in paired:
+            raise ValueError("El destino seleccionado no admite ambas plataformas.")
+        targets = [target, paired[target]] if self.image_both_var.get() else [target]
+        block = {
+                "source_ids": list(self.image_order_ids), "targets": targets,
+                "start_date": self.image_start_date.get().strip(),
+                "horizon_days": int(self.image_horizon.get()), "every_days": int(self.image_every.get()),
+                "times": [item.strip() for item in self.image_times.get().split(",") if item.strip()],
+                "quantity_daily": int(self.image_daily.get()), "timezone": self.image_timezone.get().strip(),
+                "total": int(self.image_total.get()) if self.image_total.get().strip() else None,
+                "caption": self.image_caption.get().strip(),
+                "story_announcement_text": self.image_story_text.get().strip(),
+                "marketplace": {"title": self.image_market_title.get().strip(),
+                                "price": self.image_market_price.get().strip(),
+                                "condition": self.image_market_condition.get().strip(),
+                                "description": self.image_market_description.get().strip()},
+        }
+        if not block["source_ids"]:
+            raise ValueError("Añade al menos una fuente a la publicación.")
+        return block
+
+    @staticmethod
+    def _image_block_label(index, block):
+        return (f"{index + 1}. {', '.join(block['targets'])} | "
+                f"{len(block['source_ids'])} fotos | cada {block['every_days']} días")
+
+    def _image_add_block(self):
+        try:
+            block = self._image_form_block()
+            self.image_blocks.append(block)
+            self.image_block_list.insert("end", self._image_block_label(len(self.image_blocks) - 1, block))
+            self.image_preview_signature = None
+        except ValueError as error:
+            messagebox.showwarning("Imágenes", str(error), parent=self)
+
+    def _image_load_block(self):
+        selection = self.image_block_list.curselection()
+        if not selection:
+            return
+        block = self.image_blocks[selection[0]]
+        self.image_target.set(block["targets"][0])
+        self._image_target_changed()
+        self.image_both_var.set(len(block["targets"]) == 2)
+        self.image_order.delete(0, "end")
+        self.image_order_ids = list(block["source_ids"])
+        names = {row["source_id"]: Path(row["path"]).name for row in self.image_source_rows}
+        for source_id in self.image_order_ids:
+            self.image_order.insert("end", names.get(source_id, source_id))
+        for widget, value in (
+            (self.image_start_date, block["start_date"]), (self.image_horizon, block["horizon_days"]),
+            (self.image_every, block["every_days"]), (self.image_times, ",".join(block["times"])),
+            (self.image_daily, block["quantity_daily"]), (self.image_timezone, block["timezone"]),
+            (self.image_total, block.get("total") or ""), (self.image_caption, block.get("caption") or ""),
+            (self.image_story_text, block.get("story_announcement_text") or ""),
+            (self.image_market_title, (block.get("marketplace") or {}).get("title") or ""),
+            (self.image_market_price, (block.get("marketplace") or {}).get("price") or ""),
+            (self.image_market_condition, (block.get("marketplace") or {}).get("condition") or ""),
+            (self.image_market_description, (block.get("marketplace") or {}).get("description") or ""),
+        ):
+            widget.delete(0, "end")
+            widget.insert(0, str(value))
+
+    def _image_update_block(self):
+        selection = self.image_block_list.curselection()
+        if not selection:
+            return messagebox.showwarning("Imágenes", "Selecciona un bloque para actualizar.", parent=self)
+        try:
+            index = selection[0]
+            block = self._image_form_block()
+            self.image_blocks[index] = block
+            self.image_block_list.delete(index)
+            self.image_block_list.insert(index, self._image_block_label(index, block))
+            self.image_block_list.selection_set(index)
+            self.image_preview_signature = None
+        except ValueError as error:
+            messagebox.showwarning("Imágenes", str(error), parent=self)
+
+    def _image_remove_block(self):
+        selection = self.image_block_list.curselection()
+        if selection:
+            index = selection[0]
+            del self.image_blocks[index]
+            self.image_block_list.delete(index)
+            for row_index in range(index, len(self.image_blocks)):
+                self.image_block_list.delete(row_index)
+                self.image_block_list.insert(row_index, self._image_block_label(row_index, self.image_blocks[row_index]))
+            self.image_preview_signature = None
+
+    def _image_plan(self, current):
+        from image_logistics import build_image_plan
+        category = self.image_category_combo.get().strip()
+        accounts = [row for row in self.db.get_all_accounts() if row.get("account_type") == category]
+        blocks = []
+        for block in self.image_blocks:
+            resolved = dict(block)
+            if any(target.endswith("_story") for target in block["targets"]):
+                resolved["story_links"] = {row["username"]: self.db.resolve_story_link_for_account(row["username"])
+                                           for row in accounts}
+            blocks.append(resolved)
+        return build_image_plan(self.image_batch_paths[self.image_batch_combo.get()], category, accounts, blocks, current)
+
+    @staticmethod
+    def _image_signature(entries):
+        return tuple((row["username"], row["account_id"], row["publication_target"],
+                      row["scheduled_date"], row["scheduled_time"],
+                      row["category"], row["timezone"], row["caption"], row["story_link_url"],
+                      row["story_announcement_text"], json.dumps(row["platform_payload"], sort_keys=True),
+                      tuple((item["source_path"], item["sha256"]) for item in row["media_items"]))
+                     for row in entries)
+
+    def _image_preview(self):
+        from calendar_manifest import load_entries, manifest_path
+        try:
+            entries = self._image_plan(load_entries(manifest_path(_BASE_DIR), require_source=False))
+            self.image_preview_signature = self._image_signature(entries)
+            lines = [f"{len(entries)} publicaciones para {len({row['username'] for row in entries})} cuentas."]
+            lines.extend(f"{row['scheduled_date']} {row['scheduled_time']}  @{row['username']}  "
+                         f"{row['publication_target']}  {len(row['media_items'])} fotos"
+                         + (f"  {row['story_link_url']}" if row.get("story_link_url") else "")
+                         for row in entries[:200])
+            if len(entries) > 200:
+                lines.append(f"... y {len(entries) - 200} publicaciones más")
+            self.image_result.delete("1.0", "end")
+            self.image_result.insert("end", "\n".join(lines))
+        except Exception as error:
+            self.image_preview_signature = None
+            messagebox.showwarning("Imágenes", str(error), parent=self)
+
+    def _image_commit(self):
+        from calendar_manifest import append_scheduled_entries_from_plan, manifest_path
+        if self.image_preview_signature is None:
+            return messagebox.showwarning("Imágenes", "Previsualiza el plan antes de confirmar.", parent=self)
+        expected = self.image_preview_signature
+        try:
+            def checked_plan(current):
+                entries = self._image_plan(current)
+                if self._image_signature(entries) != expected:
+                    raise ValueError("El calendario o la tanda cambió; vuelve a previsualizar.")
+                return entries
+            result = append_scheduled_entries_from_plan(manifest_path(_BASE_DIR), checked_plan)
+            if result.conflicts:
+                raise ValueError("Hay un choque de horario; vuelve a previsualizar.")
+            self.image_preview_signature = None
+            self._image_load_batch()
+            self.image_result.delete("1.0", "end")
+            self.image_result.insert("end", f"Se añadieron {len(expected)} publicaciones al calendario.")
+        except Exception as error:
+            self.image_preview_signature = None
+            messagebox.showerror("Imágenes", str(error), parent=self)
 
     # ── Lógica Logística ─────────────────────────────────────────────────────
     def reload_dist_lists(self, event=None):
@@ -3765,15 +4219,8 @@ class InstagramAutoPro(ctk.CTk):
             extension_filter = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"}
         for username in accounts:
             account_dir = root / username
-            if not account_dir.is_dir() and len(accounts) == 1:
-                account_dir = root
-            if not account_dir.is_dir():
-                messagebox.showwarning(
-                    "Carril", f"Falta la subcarpeta de finales para @{username}: {root / username}", parent=self
-                )
-                return
             photo_batch_root = root
-            if account_dir == root and not (photo_batch_root / "photo_forge_manifest.json").is_file():
+            if not (photo_batch_root / "photo_forge_manifest.json").is_file():
                 photo_batch_root = root.parent
             photo_manifest = photo_batch_root / "photo_forge_manifest.json"
             if target == "instagram_photo_reel" and not photo_manifest.is_file():
@@ -3799,6 +4246,13 @@ class InstagramAutoPro(ctk.CTk):
                     messagebox.showwarning("Photo Forge", str(error), parent=self)
                     return
             else:
+                if not account_dir.is_dir() and len(accounts) == 1:
+                    account_dir = root
+                if not account_dir.is_dir():
+                    messagebox.showwarning(
+                        "Carril", f"No hay finales válidos para @{username} en {root}.", parent=self
+                    )
+                    return
                 account_finals = sorted(
                     (path for path in account_dir.rglob("*") if path.is_file() and path.suffix.lower() in extension_filter),
                     key=lambda path: str(path).casefold(),
@@ -4296,25 +4750,30 @@ class InstagramAutoPro(ctk.CTk):
         content.grid(row=2, column=0, sticky="nsew", padx=24, pady=(0, 18))
         content.grid_rowconfigure(0, weight=1)
         content.grid_columnconfigure(0, weight=3)
-        content.grid_columnconfigure(1, weight=2)
+        content.grid_columnconfigure(1, weight=2, minsize=390)
         table_card = Card(content, title="Publicaciones calendarizadas")
         table_card.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         table = table_card.body
         table.grid_rowconfigure(0, weight=1)
         table.grid_columnconfigure(0, weight=1)
-        columns = ("Fecha", "Hora", "Cuenta", "Destino", "Medio", "Estado")
+        columns = ("Fecha", "Hora", "Cuenta", "Destino", "Medio", "Fotos", "Caption", "Estado")
         self.calendar_tree = ttk.Treeview(
             table, columns=columns, show="headings", style="Premium.Treeview", selectmode="browse"
         )
-        widths = {"Fecha": 100, "Hora": 65, "Cuenta": 120, "Destino": 185, "Medio": 70, "Estado": 90}
+        widths = {"Fecha": 90, "Hora": 55, "Cuenta": 95, "Destino": 130, "Medio": 55,
+                  "Fotos": 45, "Caption": 85, "Estado": 70}
         for column in columns:
             self.calendar_tree.heading(column, text=column)
-            self.calendar_tree.column(column, width=widths[column], anchor="w" if column in {"Destino", "Cuenta"} else "center")
+            self.calendar_tree.column(column, width=widths[column], minwidth=widths[column], stretch=False,
+                                      anchor="w" if column in {"Destino", "Cuenta", "Caption"} else "center")
         self.calendar_tree.bind("<<TreeviewSelect>>", self._show_calendar_entry)
         tree_scroll = ttk.Scrollbar(table, orient="vertical", command=self.calendar_tree.yview)
         self.calendar_tree.configure(yscrollcommand=tree_scroll.set)
         self.calendar_tree.grid(row=0, column=0, sticky="nsew", padx=(8, 0), pady=8)
         tree_scroll.grid(row=0, column=1, sticky="ns", pady=8, padx=(0, 6))
+        horizontal_scroll = ttk.Scrollbar(table, orient="horizontal", command=self.calendar_tree.xview)
+        self.calendar_tree.configure(xscrollcommand=horizontal_scroll.set)
+        horizontal_scroll.grid(row=1, column=0, sticky="ew", padx=(8, 0), pady=(0, 6))
 
         detail_card = Card(content, title="Detalle y vista previa")
         detail_card.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
@@ -4328,6 +4787,14 @@ class InstagramAutoPro(ctk.CTk):
             fg_color=BG_CARD2, corner_radius=4, height=250,
         )
         self.calendar_preview.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        media_nav = ctk.CTkFrame(detail, fg_color="transparent")
+        media_nav.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 8))
+        GhostButton(media_nav, text="◀", width=40, command=lambda: self._calendar_step_media(-1)).pack(side="left")
+        self.calendar_media_position = ctk.CTkLabel(media_nav, text="", text_color=TEXT_MUTED)
+        self.calendar_media_position.pack(side="left", padx=10)
+        GhostButton(media_nav, text="▶", width=40, command=lambda: self._calendar_step_media(1)).pack(side="left")
+        self.calendar_selected_media = []
+        self.calendar_media_index = 0
         self.calendar_view_entries = {}
 
     def _refresh_calendar_view(self):
@@ -4415,7 +4882,11 @@ class InstagramAutoPro(ctk.CTk):
         for index, row in enumerate(rows):
             iid = str(index)
             self.calendar_view_entries[iid] = row[6]
-            self.calendar_tree.insert("", "end", iid=iid, values=(row[7], row[1], "@" + row[2], row[3], row[4], row[5]))
+            entry = row[6]
+            media_count = len(entry.get("media_items") or [entry])
+            caption = str(entry.get("caption") or "").replace("\n", " ")[:45]
+            self.calendar_tree.insert("", "end", iid=iid, values=(
+                row[7], row[1], "@" + row[2], row[3], row[4], media_count, caption, row[5]))
         self.calendar_detail.configure(state="normal")
         self.calendar_detail.delete("1.0", "end")
         self.calendar_detail.insert("end", f"{len(rows)} publicaciones en el periodo")
@@ -4436,8 +4907,13 @@ class InstagramAutoPro(ctk.CTk):
             f"Destino: {target}",
             f"Fecha: {entry.get('scheduled_date') or 'según día legacy'} {entry.get('scheduled_time') or ''} {entry.get('timezone') or ''}",
             f"Estado: {entry.get('manual_status') or 'planned'}",
-            f"Archivo: {entry.get('source_path', '')}",
+            f"Archivo: {Path(entry.get('source_path', '')).name}",
         ]
+        media_items = entry.get("media_items") or [entry]
+        if len(media_items) > 1:
+            details.extend(["", f"Carrusel / álbum: {len(media_items)} imágenes"])
+            details.extend(f"{index + 1}. {Path(item['source_path']).name}"
+                           for index, item in enumerate(media_items))
         if entry.get("caption"):
             details.extend(["", "Caption:", entry["caption"]])
         if entry.get("story_link_url"):
@@ -4448,12 +4924,29 @@ class InstagramAutoPro(ctk.CTk):
             value = (entry.get("platform_payload") or {}).get(key)
             if value:
                 details.append(f"{label}: {value}")
+        details.extend(["", f"Ruta: {entry.get('source_path', '')}"])
         self.calendar_detail.configure(state="normal")
         self.calendar_detail.delete("1.0", "end")
         self.calendar_detail.insert("end", "\n".join(details))
         self.calendar_detail.configure(state="disabled")
+        self.calendar_selected_media = media_items
+        self.calendar_media_index = 0
+        self._calendar_show_media()
+
+    def _calendar_step_media(self, direction):
+        if not self.calendar_selected_media:
+            return
+        self.calendar_media_index = (self.calendar_media_index + direction) % len(self.calendar_selected_media)
+        self._calendar_show_media()
+
+    def _calendar_show_media(self):
         self.calendar_image_ref = None
-        path = entry.get("source_path", "")
+        if not self.calendar_selected_media:
+            self.calendar_media_position.configure(text="")
+            return
+        self.calendar_media_position.configure(
+            text=f"{self.calendar_media_index + 1} / {len(self.calendar_selected_media)}")
+        path = self.calendar_selected_media[self.calendar_media_index].get("source_path", "")
         if Path(path).suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}:
             try:
                 from PIL import Image, ImageOps
@@ -4485,7 +4978,7 @@ class InstagramAutoPro(ctk.CTk):
                 path = entry.get("source_path") or entry.get("path")
                 if not entry_id or not path or not Path(path).is_file():
                     continue
-                content_hash = organizadortg._source_sha256(path)
+                content_hash = organizadortg._publication_content_hash(entry)
                 media_kind = entry.get("media_kind") or (
                     "video" if Path(path).suffix.lower() in {".mp4", ".mov", ".m4v"} else "image"
                 )
@@ -4571,15 +5064,15 @@ class InstagramAutoPro(ctk.CTk):
         ctk.CTkLabel(topic_mode_row, text="Topics:", text_color=TEXT_MUTED).pack(side="left", padx=(0, 6))
         self.tg_topic_mode = ctk.CTkComboBox(
             topic_mode_row,
-            values=["Por identidad y fecha", "Separados por tipo"],
-            width=190,
+            values=["Por identidad (orden diario)", "Separados por tipo"],
+            width=225,
             fg_color=BG_INPUT,
             border_color=BORDER,
             command=self._save_tg_topic_mode,
         )
         saved_topic_mode = self.db.get_social_publishing_setting("telegram_topic_mode", "account_by_day")
         self.tg_topic_mode.set(
-            "Separados por tipo" if saved_topic_mode == "separate_by_type" else "Por identidad y fecha"
+            "Separados por tipo" if saved_topic_mode == "separate_by_type" else "Por identidad (orden diario)"
         )
         self.tg_topic_mode.pack(side="left")
 
@@ -5998,12 +6491,16 @@ class InstagramAutoPro(ctk.CTk):
     # FORGE DE METADATA
     # ══════════════════════════════════════════════════════════════════════
     def _build_photo_forge_frame(self):
-        f = self._frames["PhotoForge"]
-        f.grid_rowconfigure(2, weight=1)
+        root = self._frames["PhotoForge"]
+        root.grid_rowconfigure(0, weight=1)
+        root.grid_columnconfigure(0, weight=1)
+        f = ctk.CTkScrollableFrame(root, fg_color="transparent")
+        f.grid(row=0, column=0, sticky="nsew")
+        f.grid_rowconfigure(2, weight=0)
         f.grid_columnconfigure(0, weight=1)
         PageHeader(
             f, "CONTENIDO", "Photo Forge",
-            "Genera finales independientes por identidad sin modificar las imágenes fuente.",
+            "Genera tandas de imágenes finales sin modificar las fuentes.",
         ).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 10))
 
         settings = Card(f, title="Lote de imágenes")
@@ -6047,7 +6544,7 @@ class InstagramAutoPro(ctk.CTk):
         )
         self.photo_forge_profile.set("Original")
         self.photo_forge_profile.grid(row=1, column=1, padx=6, pady=(0, 8), sticky="ew")
-        ctk.CTkLabel(form, text="Variantes por imagen:", text_color=TEXT_MUTED).grid(
+        ctk.CTkLabel(form, text="Finales por foto:", text_color=TEXT_MUTED).grid(
             row=1, column=2, padx=(14, 6), pady=(0, 8), sticky="e")
         self.photo_forge_variant_count = ctk.CTkEntry(
             form, width=70, fg_color=BG_INPUT, border_color=BORDER,
@@ -6063,78 +6560,47 @@ class InstagramAutoPro(ctk.CTk):
         self.photo_forge_strength.set("Estándar")
         self.photo_forge_strength.grid(row=2, column=1, padx=6, pady=(0, 10), sticky="ew")
         self.photo_forge_parameter_ranges = {}
-        self.photo_forge_variant_selections = {}
         GhostButton(form, text="Ajustar efectos", command=self._photo_forge_effect_ranges_dialog).grid(
             row=2, column=2, padx=6, pady=(0, 10), sticky="w")
         ToggleRow(form, "Espejo horizontal", variable=self.photo_forge_mirror_var).grid(
             row=2, column=3, padx=6, pady=(0, 10), sticky="w")
-        ctk.CTkLabel(form, text="Variantes elegidas:", text_color=TEXT_MUTED).grid(
-            row=3, column=0, padx=(14, 6), pady=(0, 12), sticky="e")
-        self.photo_forge_variant_selection = ctk.CTkEntry(
-            form, fg_color=BG_INPUT, border_color=BORDER,
-            placeholder_text="Todas o una lista como 1,3-5",
-        )
-        self.photo_forge_variant_selection.grid(
-            row=3, column=1, columnspan=3, padx=6, pady=(0, 12), sticky="ew")
-
         content = ctk.CTkFrame(f, fg_color="transparent")
         content.grid(row=2, column=0, sticky="nsew", padx=24, pady=(0, 10))
         content.grid_rowconfigure(0, weight=1)
-        content.grid_columnconfigure((0, 1), weight=1)
+        content.grid_columnconfigure(0, weight=1)
         source_card = Card(content, title="Imágenes fuente")
         source_card.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         source = source_card.body
-        source.grid_rowconfigure(0, weight=1)
+        source.grid_rowconfigure(1, weight=0)
         source.grid_columnconfigure(0, weight=1)
         self.photo_forge_sources = tk.Listbox(
             source, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
             selectbackground=self.themed(ACCENT), selectforeground=self.themed(ACCENT_TEXT),
-            selectmode=tk.EXTENDED, borderwidth=0, highlightthickness=1,
+            selectmode=tk.EXTENDED, height=6, borderwidth=0, highlightthickness=1,
             highlightbackground=self.themed(BORDER), font=FONT_BODY,
         )
-        self.photo_forge_sources.grid(row=0, column=0, sticky="nsew", padx=12, pady=(12, 6))
+        self.photo_forge_sources.grid(row=1, column=0, sticky="nsew", padx=12, pady=(6, 6))
         self.photo_forge_sources.bind("<<ListboxSelect>>", self._photo_forge_show_preview)
         self.photo_forge_preview = ctk.CTkLabel(
             source, text="Selecciona una imagen", text_color=TEXT_MUTED,
-            fg_color=BG_CARD2, corner_radius=4, height=170,
+            fg_color=BG_CARD2, corner_radius=4, height=140,
         )
-        self.photo_forge_preview.grid(row=1, column=0, sticky="ew", padx=12, pady=6)
+        self.photo_forge_preview.grid(row=2, column=0, sticky="ew", padx=12, pady=6)
         source_buttons = ctk.CTkFrame(source, fg_color="transparent")
-        source_buttons.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 12))
+        source_buttons.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 0))
         PrimaryButton(source_buttons, text="Agregar imágenes", command=self._photo_forge_add_images).pack(side="left", padx=(0, 6))
         GhostButton(source_buttons, text="Desde Biblioteca", command=self.vault_select_for_photo_forge).pack(side="left", padx=(0, 6))
         GhostButton(source_buttons, text="Quitar seleccionadas", command=self._photo_forge_remove_images).pack(side="left")
 
-        account_card = Card(content, title="Identidades destino")
-        account_card.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
-        account = account_card.body
-        account.grid_rowconfigure(0, weight=1)
-        account.grid_columnconfigure(0, weight=1)
-        self.photo_forge_accounts = tk.Listbox(
-            account, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
-            selectbackground=self.themed(ACCENT), selectforeground=self.themed(ACCENT_TEXT),
-            selectmode=tk.EXTENDED, borderwidth=0, highlightthickness=1,
-            highlightbackground=self.themed(BORDER), font=FONT_BODY,
-        )
-        self.photo_forge_accounts.grid(row=0, column=0, sticky="nsew", padx=12, pady=(12, 6))
-        account_buttons = ctk.CTkFrame(account, fg_color="transparent")
-        account_buttons.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 12))
-        GhostButton(account_buttons, text="Todas", command=lambda: self.photo_forge_accounts.select_set(0, "end")).pack(side="left", padx=(0, 6))
-        GhostButton(account_buttons, text="Ninguna", command=lambda: self.photo_forge_accounts.selection_clear(0, "end")).pack(side="left")
-        GhostButton(account_buttons, text="Actualizar", command=self._photo_forge_reload_accounts).pack(side="right")
-        self.photo_forge_account_rows = []
-        self._photo_forge_reload_accounts()
-
         actions = ctk.CTkFrame(f, fg_color="transparent")
         actions.grid(row=3, column=0, sticky="ew", padx=24, pady=(0, 8))
         GhostButton(actions, text="Previsualizar", command=self._photo_forge_preview).pack(side="left", padx=(0, 8))
-        GhostButton(actions, text="Comparar variantes", command=self._photo_forge_compare_variants).pack(side="left", padx=(0, 8))
-        self.photo_forge_run_button = PrimaryButton(actions, text="Generar variantes por identidad", command=self._photo_forge_run)
+        self.photo_forge_run_button = PrimaryButton(actions, text="Generar tanda", command=self._photo_forge_run)
         self.photo_forge_run_button.pack(side="left")
         self.photo_forge_result = ctk.CTkTextbox(f, height=95, fg_color=BG_CARD2, text_color=TEXT_BODY)
         self.photo_forge_result.grid(row=4, column=0, sticky="ew", padx=24, pady=(0, 16))
         self.photo_forge_result.insert(
-            "end", "Photo Forge crea variantes de imagen por identidad; receta y SHA-256 quedan en el manifiesto."
+            "end", "Los finales se guardarán en una tanda neutral con manifiesto y SHA-256."
         )
 
     def _build_vault_frame(self):
@@ -6710,23 +7176,20 @@ class InstagramAutoPro(ctk.CTk):
             import photo_forge
             fd, preview_path = tempfile.mkstemp(prefix="photo-forge-preview-", suffix=".png")
             os.close(fd)
-            selected_accounts = self._photo_forge_selected_accounts()
-            account = dict(selected_accounts[0]) if selected_accounts else {"id": 0, "username": "preview"}
             profile = self.photo_forge_profile_labels.get(self.photo_forge_profile.get(), "original")
             variant_index = int(self.photo_forge_variant_count.get())
-            if not 1 <= variant_index <= 20:
-                raise ValueError("Usa entre 1 y 20 variantes por imagen.")
-            selected_variants = photo_forge.normalize_variant_indices(
-                variant_index,
-                self.photo_forge_variant_selection.get().strip() or None,
-            )
+            if not 1 <= variant_index <= 1000:
+                raise ValueError("Usa entre 1 y 1000 finales por foto.")
+            source_id = hashlib.sha256(
+                f"{Path(path).resolve()}:{photo_forge._sha256(Path(path))}".encode("utf-8")
+            ).hexdigest()[:16]
             strength = self.photo_forge_strength_labels.get(
                 self.photo_forge_strength.get(), "standard"
             ) if hasattr(self, "photo_forge_strength") else "standard"
             preview = photo_forge.render_photo_preview(
-                path, preview_path, profile=profile, variant_index=selected_variants[0],
+                path, preview_path, profile=profile, variant_index=1,
                 strength=strength, mirror_horizontal=bool(self.photo_forge_mirror_var.get()),
-                account=account, batch_name=self.photo_forge_batch.get().strip() or "preview",
+                account={"id": source_id, "username": ""}, batch_name=self.photo_forge_batch.get().strip() or "preview",
                 variants_per_image=variant_index,
                 parameter_ranges=getattr(self, "photo_forge_parameter_ranges", {}),
             )
@@ -6735,21 +7198,19 @@ class InstagramAutoPro(ctk.CTk):
             with Image.open(preview_path) as rendered:
                 image = ImageOps.exif_transpose(rendered).convert("RGB")
                 image.thumbnail((520, 250), Image.Resampling.LANCZOS)
-                self.photo_forge_preview_ref = ctk.CTkImage(
-                    light_image=image, dark_image=image, size=image.size
-                )
+                self.photo_forge_preview_ref = ctk.CTkImage(light_image=image, dark_image=image, size=image.size)
             self.photo_forge_preview.configure(
                 image=self.photo_forge_preview_ref,
                 text=(f"{os.path.basename(path)} · {dimensions[0]}×{dimensions[1]} → "
                       f"{preview['width']}×{preview['height']} · {self.photo_forge_profile.get()} "
-                      f"· V{selected_variants[0]}"),
+                      "· F1"),
                 compound="top",
             )
         except Exception as error:
+            self.photo_forge_preview_ref = None
             self.photo_forge_preview.configure(
                 image=None, text=f"Preview no disponible: {os.path.basename(path)} · {error}"
             )
-            self.photo_forge_preview_ref = None
         finally:
             if preview_path:
                 Path(preview_path).unlink(missing_ok=True)
@@ -7006,58 +7467,61 @@ class InstagramAutoPro(ctk.CTk):
 
     def _photo_forge_preview(self):
         source_count = self.photo_forge_sources.size()
-        accounts = self._photo_forge_selected_accounts()
-        if not source_count or not accounts:
-            return messagebox.showwarning("Photo Forge", "Selecciona imágenes e identidades.", parent=self)
+        if not source_count:
+            return messagebox.showwarning("Photo Forge", "Agrega al menos una imagen fuente.", parent=self)
         try:
             variant_count = int(self.photo_forge_variant_count.get())
-            if not 1 <= variant_count <= 20:
-                raise ValueError("Usa entre 1 y 20 variantes por imagen.")
+            if not 1 <= variant_count <= 1000:
+                raise ValueError("Usa entre 1 y 1000 finales por foto.")
             if self.photo_forge_profile.get() not in self.photo_forge_profile_labels:
                 raise ValueError("Selecciona un placement válido.")
             import photo_forge
             parameter_ranges = photo_forge.normalize_parameter_ranges(
                 getattr(self, "photo_forge_parameter_ranges", {})
             )
-            selected_variants = photo_forge.normalize_variant_indices(
-                variant_count, self.photo_forge_variant_selection.get().strip() or None,
+            source_paths = [self.photo_forge_sources.get(index) for index in range(source_count)]
+            plan = photo_forge.plan_neutral_photo_batch(
+                source_paths, self.photo_forge_output.get().strip(), self.photo_forge_batch.get().strip(),
+                finals_per_photo=variant_count, mirror_horizontal=bool(self.photo_forge_mirror_var.get()),
+                profile=self.photo_forge_profile_labels[self.photo_forge_profile.get()],
+                strength=self.photo_forge_strength_labels[self.photo_forge_strength.get()],
+                parameter_ranges=parameter_ranges,
             )
         except ValueError as error:
             return messagebox.showwarning("Photo Forge", str(error), parent=self)
         if not self.photo_forge_sources.curselection() and source_count:
             self.photo_forge_sources.selection_set(0)
         self._photo_forge_show_preview()
-        self.photo_forge_result.configure(state="normal")
-        self.photo_forge_result.delete("1.0", "end")
-        self.photo_forge_result.insert(
-            "end",
+        result_text = (
             f"Lote: {self.photo_forge_batch.get().strip()}\n"
-            f"Perfil: {self.photo_forge_profile.get()} · Variantes/foto: {variant_count} · "
+            f"Perfil: {self.photo_forge_profile.get()} · Finales/foto: {variant_count} · "
             f"Intensidad: {self.photo_forge_strength.get()} · Rangos manuales: {len(parameter_ranges)}\n"
-            f"Variantes elegidas: {', '.join(map(str, selected_variants))}\n"
-            f"Imágenes: {source_count} · Identidades: {len(accounts)} · Finales: "
-            f"{source_count * len(accounts) * len(selected_variants)}\n"
-            f"Salida: {os.path.join(self.photo_forge_output.get().strip(), self.photo_forge_batch.get().strip())}\n"
+            f"Imágenes: {source_count} · Finales totales: {len(plan)}\n"
+            f"Salida: {os.path.dirname(plan[0]['output_path'])}\n"
             + (
                 "Se aplicará espejo horizontal además del perfil y las variaciones elegidas. Los originales no cambian."
                 if self.photo_forge_mirror_var.get()
                 else "Se aplicará recorte de placement y variaciones deterministas. Los originales no cambian."
-            ),
+            )
         )
+        self.photo_forge_result.configure(state="normal")
+        self.photo_forge_result.delete("1.0", "end")
+        self.photo_forge_result.insert("end", result_text)
         self.photo_forge_result.configure(state="disabled")
 
     def _photo_forge_run(self):
         source_paths = [self.photo_forge_sources.get(index) for index in range(self.photo_forge_sources.size())]
-        accounts = self._photo_forge_selected_accounts()
         output_root = self.photo_forge_output.get().strip()
         batch_name = self.photo_forge_batch.get().strip()
         mirror_horizontal = bool(self.photo_forge_mirror_var.get())
-        if not source_paths or not accounts or not output_root or not batch_name:
-            return messagebox.showwarning("Photo Forge", "Completa imágenes, identidades, lote y salida.", parent=self)
+        if not source_paths:
+            return messagebox.showwarning("Photo Forge", "Agrega al menos una imagen fuente.", parent=self)
+        if not output_root or not batch_name:
+            return messagebox.showwarning("Photo Forge", "Completa el nombre de tanda y la carpeta de salida.", parent=self)
         try:
             variants_per_image = int(self.photo_forge_variant_count.get())
-            if not 1 <= variants_per_image <= 20:
-                raise ValueError("Usa entre 1 y 20 variantes por imagen.")
+            if not 1 <= variants_per_image <= 1000:
+                raise ValueError("Usa entre 1 y 1000 finales por foto.")
             profile = self.photo_forge_profile_labels[self.photo_forge_profile.get()]
             strength_label = self.photo_forge_strength.get()
             strength = self.photo_forge_strength_labels[strength_label]
@@ -7067,33 +7531,18 @@ class InstagramAutoPro(ctk.CTk):
             parameter_ranges = photo_forge.normalize_parameter_ranges(
                 getattr(self, "photo_forge_parameter_ranges", {})
             )
-            selected_variants = photo_forge.normalize_variant_indices(
-                variants_per_image, self.photo_forge_variant_selection.get().strip() or None,
+            plan = photo_forge.plan_neutral_photo_batch(
+                source_paths, output_root, batch_name, finals_per_photo=variants_per_image,
+                mirror_horizontal=mirror_horizontal, profile=profile, strength=strength,
+                parameter_ranges=parameter_ranges,
             )
         except (KeyError, ValueError) as error:
             return messagebox.showwarning("Photo Forge", str(error), parent=self)
-        variant_selections = {}
-        total = 0
-        for account in accounts:
-            username = str(account.get("username", ""))
-            account_map = {}
-            for source in source_paths:
-                source_key = os.path.normcase(os.path.abspath(source)).casefold()
-                override = self.photo_forge_variant_selections.get(username, {}).get(source_key)
-                effective = photo_forge.normalize_variant_indices(
-                    variants_per_image, override if override is not None else selected_variants,
-                )
-                total += len(effective)
-                if override is not None:
-                    account_map[source] = effective
-            if account_map:
-                variant_selections[username] = account_map
+        total = len(plan)
         confirmation = (
-            f"Se crearán hasta {total} variantes en carpetas separadas por identidad.\n"
+            f"Se crearán {total} finales independientes en una tanda neutral.\n"
             f"Placement: {self.photo_forge_profile.get()} · Intensidad: {strength}.\n"
             f"Efectos con rangos manuales: {len(parameter_ranges)}.\n"
-            f"Selecciones personalizadas por imagen/identidad: {sum(len(value) for value in variant_selections.values())}.\n"
-            f"Selección global de respaldo: {', '.join(map(str, selected_variants))}.\n"
             f"Espejo horizontal: {'sí' if mirror_horizontal else 'no'}.\n"
             "La receta, parámetros y hashes se guardarán en el manifiesto.\n"
             "Las imágenes fuente se conservarán sin modificar.\n\n¿Continuar?"
@@ -7104,7 +7553,6 @@ class InstagramAutoPro(ctk.CTk):
             parent=self,
         ):
             return
-        account_rows = [dict(row) for row in accounts]
         self.photo_forge_run_button.configure(state="disabled")
         self.photo_forge_result.configure(state="normal")
         self.photo_forge_result.delete("1.0", "end")
@@ -7115,20 +7563,14 @@ class InstagramAutoPro(ctk.CTk):
 
         def task():
             import photo_forge
-            plan = photo_forge.plan_photo_copies(
-                source_paths, account_rows, output_root, batch_name, mirror_horizontal,
-                profile=profile, variants_per_image=variants_per_image, strength=strength,
-                parameter_ranges=parameter_ranges, variant_indices=selected_variants,
-                variant_selections=variant_selections,
-            )
-            result = photo_forge.create_photo_copies(plan, output_root, batch_name)
+            result = photo_forge.create_neutral_photo_batch(plan, output_root, batch_name)
             from database import DatabaseManager
             lineage_errors = []
             lineage_count = 0
             try:
                 vault_db = DatabaseManager(database_path)
                 try:
-                    for row in [*result["created"], *result["existing"]]:
+                    for row in result["created"]:
                         try:
                             source_asset = vault_db.upsert_vault_asset(row["source_path"])
                             vault_db.register_vault_derivative(
@@ -7151,23 +7593,24 @@ class InstagramAutoPro(ctk.CTk):
             self.photo_forge_result.delete("1.0", "end")
             if success:
                 self.refresh_vault_table()
+                try:
+                    saved = json.loads(self.db.get_social_publishing_setting("photo_forge_batch_dirs", "[]"))
+                    if not isinstance(saved, list):
+                        saved = []
+                    if result["batch_dir"] not in saved:
+                        saved.append(result["batch_dir"])
+                        self.db.set_social_publishing_setting("photo_forge_batch_dirs", json.dumps(saved))
+                    self._image_refresh_inventory()
+                except (ValueError, OSError) as error:
+                    result["vault_lineage_errors"].append(f"Inventario Imágenes: {error}")
                 self.photo_forge_result.insert(
                     "end",
-                    f"Finales nuevos: {len(result['created'])} · Ya existentes: {len(result['existing'])}\n"
+                    f"Finales nuevos: {len(result['created'])}\n"
                     f"Manifiesto: {result['manifest_path']}\n"
-                    "Cada variante pertenece a una identidad; no se copiaron archivos al calendario.\n"
+                    "Tanda neutral lista para Logística > Imágenes. No se copiaron archivos al calendario.\n"
                     f"Biblioteca: {result['vault_lineage_count']} relaciones registradas."
                     + (f"\nAvisos de Biblioteca: {'; '.join(result['vault_lineage_errors'][:3])}" if result["vault_lineage_errors"] else ""),
                 )
-                self.acct_lane_root.delete(0, "end")
-                self.acct_lane_root.insert(0, result["batch_dir"])
-                self.acct_dist_list.delete("1.0", "end")
-                self.acct_dist_list.insert(
-                    "end",
-                    "\n".join(str(account.get("username", "")) for account in account_rows)
-                    + "\n",
-                )
-                self.show_frame("Logistica")
                 messagebox.showinfo(
                     "Photo Forge",
                     f"Finales generados: {len(result['created'])}\n{result['batch_dir']}",

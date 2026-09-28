@@ -235,6 +235,18 @@ def handle_update(update: dict, token: str) -> dict:
             },
         )
         method = "editMessageCaption"
+    elif message.get("text") is not None:
+        result = post_telegram_method(
+            token,
+            "editMessageText",
+            {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "text": mark_caption_published(message["text"]),
+                "reply_markup": safe_markup,
+            },
+        )
+        method = "editMessageText"
     else:
         result = post_telegram_method(
             token,

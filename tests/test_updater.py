@@ -89,6 +89,35 @@ class UpdaterTest(unittest.TestCase):
         }.items():
             self.assertEqual((self.app_dir / name).read_text(), expected)
 
+    def test_image_logistics_upgrade_preserves_calendar_and_photo_batches(self):
+        calendar = self.app_dir / "calendar_manifest.json"
+        calendar.write_text('{"version":1,"entries":[{"id":"old"}]}', encoding="utf-8")
+        batch = self.app_dir / "imagenes_finales" / "existing_batch"
+        batch.mkdir(parents=True)
+        (batch / "photo_forge_manifest.json").write_text(
+            '{"version":1,"entries":[]}', encoding="utf-8")
+        (batch / "final.png").write_bytes(b"user photo")
+        before = {path: path.read_bytes() for path in (
+            calendar, self.app_dir / "organizador.db", batch / "photo_forge_manifest.json",
+            batch / "final.png",
+        )}
+        package = self.app_dir / "release.zip"
+        package.write_bytes(_zip_bytes({
+            "version.json": json.dumps({"version": "1.0.50"}),
+            "gui_premium_v7.py": "new GUI code",
+            "photo_forge.py": "new photo forge code",
+            "image_logistics.py": "new image logistics code",
+        }))
+
+        updater.apply_package(self.app_dir, package, {
+            "version": "1.0.50",
+            "files": ["version.json", "gui_premium_v7.py", "photo_forge.py", "image_logistics.py"],
+        })
+
+        self.assertTrue((self.app_dir / "image_logistics.py").is_file())
+        for path, contents in before.items():
+            self.assertEqual(path.read_bytes(), contents)
+
     def test_apply_package_can_install_airtable_sync_module_without_local_config(self):
         package_path = self.app_dir / "release.zip"
         package_path.write_bytes(

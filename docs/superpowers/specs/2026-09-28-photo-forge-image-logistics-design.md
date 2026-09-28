@@ -181,8 +181,9 @@ unidades separadas incluso cuando parten del mismo bloque logistico.
 
 La combinacion con Reels se ordena por cuenta, fecha local, hora local y
 secuencia estable. Una Story de las 12:00 queda entre Reels de las 10:00 y
-13:00. Un choque exacto de cuenta, fecha y hora bloquea la confirmacion; el
-sistema no cambia horarios silenciosamente.
+13:00. Un choque exacto de cuenta, plataforma, fecha y hora bloquea la
+confirmacion; Instagram y Facebook pueden compartir hora porque son acciones
+independientes. El sistema no cambia horarios silenciosamente.
 
 La escritura del calendario es atomica. Un error de validacion o escritura no
 deja reservas ni entradas parciales.
@@ -204,8 +205,9 @@ enlaces de Story o metadatos de Marketplace.
 
 ## Telegram
 
-El modo predeterminado sigue siendo un topic por identidad y dia. El operador
-puede elegir topics separados por tipo.
+El modo predeterminado sigue siendo un topic por identidad con todas sus
+publicaciones ordenadas por dia y hora. El operador puede elegir topics
+separados por tipo.
 
 Telegram entrega toda la agenda en orden cronologico:
 

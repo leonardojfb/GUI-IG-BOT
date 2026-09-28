@@ -47,6 +47,7 @@ $ReleaseFiles = @(
     "publication_schedule.py",
     "por_cuentas_lanes.py",
     "photo_forge.py",
+    "image_logistics.py",
     "telegram_core.py",
     "cleaner.py",
     "vercuentas.py",
