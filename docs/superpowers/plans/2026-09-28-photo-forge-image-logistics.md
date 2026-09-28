@@ -72,6 +72,24 @@ Archivos: `updater.py`, `build_release.ps1`, documentacion y pruebas de upgrade.
 3. Ejecutar pruebas focalizadas y suite amplia, `compileall`, recorrido GUI y emisor Telegram falso. Registrar limites ambientales de FFmpeg sin presentarlos como exito.
 4. Dejar commits por etapa validada. Publicar release solo despues de prueba de instalacion/actualizacion y autorizacion explicita.
 
+### Secuencia de despliegue desde v1.0.48
+
+La release privada actual es v1.0.48 y su `updater.py` no permite copiar los
+modulos nuevos. Por eso no se puede anunciar directamente v1.0.50 a todos los
+launchers:
+
+1. Preparar paquete `-BootstrapUpdater` con `updater.py` y `version.json`
+   v1.0.49. Verificar su SHA-256 y que el actualizador de v1.0.48 lo acepta.
+2. Publicar v1.0.49 y apuntar el manifiesto remoto solamente a ese bootstrap.
+   Comprobar en instalaciones reales que actualizan sin perder DB/calendario.
+3. Tras confirmar que los clientes alcanzaron v1.0.49, publicar el paquete
+   completo v1.0.50 y cambiar el manifiesto remoto. Un cliente que salte
+   directamente de v1.0.48 a v1.0.50 seguira fallando; no hacer el cambio
+   de manifiesto inmediatamente despues del bootstrap.
+4. El webhook de Telegram es un despliegue separado. La version ya instalada
+   acepta el hash de la unidad en un mensaje de control; la mejora visual del
+   texto `YA PUBLICADO` requiere actualizar ese servicio por separado.
+
 ## Invariantes de cada etapa
 
 - Nunca copiar a `CALENDARIO_POSTEO` ni publicar por API Meta.
