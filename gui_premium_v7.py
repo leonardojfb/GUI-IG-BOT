@@ -1213,6 +1213,8 @@ class InstagramAutoPro(ctk.CTk):
             getattr(self, "forge_lst", None),
             getattr(self, "photo_forge_sources", None),
             getattr(self, "photo_forge_accounts", None),
+            getattr(self, "vault_roots_list", None),
+            getattr(self, "vault_collections_list", None),
         ):
             if lb is not None:
                 lb.configure(
@@ -2699,7 +2701,7 @@ class InstagramAutoPro(ctk.CTk):
         # ── Header ──────────────────────────────────────────────────────
         PageHeader(
             f, "DISTRIBUCIÓN", "Logística",
-            "Reparto anti-colisión de tandas entre cuentas y días."
+            "Calendarización manual de publicaciones por identidad."
         ).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 10))
 
         # ── TabView: Por Tandas / Por Cuentas ───────────────────────────
@@ -2716,6 +2718,7 @@ class InstagramAutoPro(ctk.CTk):
         t1 = tabs.add("🚀  Por Tandas")
         t2 = tabs.add("📤  Por Cuentas")
         t3 = tabs.add("TRIALS")
+        tabs.set("📤  Por Cuentas")
 
         self._build_dist_tandas_tab(t1)
         self._build_dist_cuentas_tab(t2)
@@ -2734,14 +2737,21 @@ class InstagramAutoPro(ctk.CTk):
             parent, values=[], fg_color=BG_INPUT, border_color=BORDER,
             command=self._refresh_tanda_caption_label,
         )
+        self.c_tandas.set("")
         self.c_tandas.grid(row=0, column=1, padx=10, pady=(20, 10), sticky="ew")
 
         ctk.CTkLabel(parent, text="2da tanda (opcional):", text_color=TEXT_MUTED).grid(row=0, column=2, padx=20, pady=(20, 10), sticky="e")
-        self.c_tandas_2 = ctk.CTkComboBox(parent, values=[""], fg_color=BG_INPUT, border_color=BORDER)
+        self.c_tandas_2 = ctk.CTkComboBox(
+            parent, values=[""], fg_color=BG_INPUT, border_color=BORDER,
+        )
+        self.c_tandas_2.set("")
         self.c_tandas_2.grid(row=0, column=3, padx=10, pady=(20, 10), sticky="ew")
 
         ctk.CTkLabel(parent, text="Categoría Destino:", text_color=TEXT_MUTED).grid(row=1, column=0, padx=20, pady=10, sticky="e")
-        self.c_dest = ctk.CTkComboBox(parent, values=[], fg_color=BG_INPUT, border_color=BORDER)
+        self.c_dest = ctk.CTkComboBox(
+            parent, values=[], fg_color=BG_INPUT, border_color=BORDER,
+        )
+        self.c_dest.set("")
         self.c_dest.grid(row=1, column=1, padx=10, pady=10, sticky="ew")
 
         # Fila 2: Cuota y Días
@@ -3079,7 +3089,7 @@ class InstagramAutoPro(ctk.CTk):
 
         # ── Diagrama visual ──────────────────────────────────────────────
         diag = Card(parent, title="Flujo de distribución por cuentas")
-        diag.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 6))
+        diag.grid(row=1, column=0, sticky="ew", padx=16, pady=(12, 6))
         diag_txt = ctk.CTkTextbox(diag.body, height=85, font=FONT_MONO,
                                   fg_color="transparent", text_color=NEON_CYAN)
         diag_txt.pack(fill="x")
@@ -3096,7 +3106,7 @@ class InstagramAutoPro(ctk.CTk):
 
         # ── Config ──────────────────────────────────────────────────────
         cfg = Card(parent, title="Configuración")
-        cfg.grid(row=1, column=0, sticky="ew", padx=16, pady=6)
+        cfg.grid(row=2, column=0, sticky="ew", padx=16, pady=6)
         cfg = cfg.body
         cfg.grid_columnconfigure((1, 3, 5), weight=1)
 
@@ -3107,6 +3117,7 @@ class InstagramAutoPro(ctk.CTk):
             cfg, values=[], fg_color=BG_INPUT, border_color=BORDER,
             command=self._acct_on_tanda_selection_changed,
         )
+        self.acct_dist_tanda.set("")
         self.acct_dist_tanda.grid(row=0, column=1, columnspan=2, padx=(0, 16), pady=(16, 8), sticky="ew")
 
         ctk.CTkLabel(cfg, text="2da tanda:", text_color=TEXT_MUTED).grid(
@@ -3115,6 +3126,7 @@ class InstagramAutoPro(ctk.CTk):
             cfg, values=[""], fg_color=BG_INPUT, border_color=BORDER,
             command=self._acct_on_tanda_selection_changed,
         )
+        self.acct_dist_tanda_2.set("")
         self.acct_dist_tanda_2.grid(row=0, column=4, columnspan=2, padx=(0, 16), pady=(16, 8), sticky="ew")
 
         self._build_logistica_caption_controls(
@@ -3177,7 +3189,7 @@ class InstagramAutoPro(ctk.CTk):
 
         # ── Cuentas ──────────────────────────────────────────────────────
         acc_card = Card(parent, title="Cuentas destino")
-        acc_card.grid(row=2, column=0, sticky="ew", padx=16, pady=6)
+        acc_card.grid(row=3, column=0, sticky="ew", padx=16, pady=6)
         acc = acc_card.body
         acc.grid_columnconfigure(0, weight=1)
 
@@ -3199,6 +3211,7 @@ class InstagramAutoPro(ctk.CTk):
                                               fg_color=BG_INPUT, border_color=BORDER,
                                               button_color=BORDER, text_color=TEXT_BODY,
                                               dropdown_fg_color=BG_CARD2)
+        self.acct_dist_cat.set("")
         self.acct_dist_cat.pack(side="left", padx=(0, 8))
         GhostButton(cat_row, text="+ Cargar categoría",
                     command=self._acct_dist_load_category).pack(side="left")
@@ -3219,7 +3232,7 @@ class InstagramAutoPro(ctk.CTk):
 
         # ── Botones principales ──────────────────────────────────────────
         btn_row = ctk.CTkFrame(parent, fg_color="transparent")
-        btn_row.grid(row=3, column=0, pady=16)
+        btn_row.grid(row=4, column=0, pady=16)
         GhostButton(btn_row, text="Resetear todo", height=BTN_H_LG,
                     command=self._acct_dist_reset).pack(side="left", padx=(0, 20))
         GhostButton(btn_row, text="PREVISUALIZAR", height=BTN_H_LG,
@@ -3228,7 +3241,7 @@ class InstagramAutoPro(ctk.CTk):
                       command=lambda: self._acct_dist_run(preview_only=False)).pack(side="left", padx=10)
 
         lane_card = Card(parent, title="Agregar carril al calendario existente")
-        lane_card.grid(row=4, column=0, sticky="ew", padx=16, pady=(2, 8))
+        lane_card.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 8))
         lane = lane_card.body
         lane.grid_columnconfigure(1, weight=1)
         lane.grid_columnconfigure(3, weight=1)
@@ -4167,7 +4180,6 @@ class InstagramAutoPro(ctk.CTk):
                 total_copiados = 0
                 for acc, day_lists in plan.items():
                     for day_idx, day_vids in enumerate(day_lists):
-                        day_path = os.path.join(cal_root, f"Dia_{day_idx + 1}", acc)
                         for slot_idx, item in enumerate(day_vids, 1):
                             vid_name = item["name"]
                             item_tanda = item["tanda"]
@@ -4179,7 +4191,6 @@ class InstagramAutoPro(ctk.CTk):
                                 day_idx + 1,
                                 slot_idx,
                             )
-                            dst = os.path.join(day_path, dst_name)
                             if dst_name in logical_names:
                                 dst_name = build_calendar_video_filename(
                                     vid_name,
@@ -4189,7 +4200,6 @@ class InstagramAutoPro(ctk.CTk):
                                     slot_idx,
                                     collision_suffix=random.randint(1000, 9999),
                                 )
-                                dst = os.path.join(day_path, dst_name)
                             logical_names.add(dst_name)
                             entries.append(
                                 build_entry(
@@ -6120,21 +6130,92 @@ class InstagramAutoPro(ctk.CTk):
         toolbar = ctk.CTkFrame(frame, fg_color="transparent")
         toolbar.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 8))
         toolbar.grid_columnconfigure(0, weight=1)
+        self.vault_page_size = 200
+        self.vault_page = 0
+        self.vault_total = 0
+        self._vault_search_after = None
         self.vault_search_var = tk.StringVar(value="")
-        self.vault_search_var.trace_add("write", lambda *_: self.refresh_vault_table())
+        self.vault_search_var.trace_add("write", lambda *_: self._vault_search_changed())
         ctk.CTkEntry(
             toolbar, textvariable=self.vault_search_var, fg_color=BG_INPUT,
             border_color=BORDER, placeholder_text="Buscar nombre, hash o ruta",
         ).grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        PrimaryButton(toolbar, text="Importar medios", command=self.vault_import_files).grid(row=0, column=1)
+        GhostButton(toolbar, text="Mostrar todos", command=self.vault_show_all).grid(row=0, column=1, padx=(0, 8))
+        self.vault_import_button = PrimaryButton(toolbar, text="Importar medios", command=self.vault_import_files)
+        self.vault_import_button.grid(row=0, column=2)
+        self.vault_import_status = ctk.CTkLabel(toolbar, text="", text_color=TEXT_MUTED, anchor="w")
+        self.vault_import_status.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(4, 0))
 
         body = ctk.CTkFrame(frame, fg_color="transparent")
         body.grid(row=2, column=0, sticky="nsew", padx=24, pady=(0, 18))
-        body.grid_columnconfigure(0, weight=3)
-        body.grid_columnconfigure(1, weight=2)
+        body.grid_columnconfigure(0, weight=1)
+        body.grid_columnconfigure(1, weight=3)
+        body.grid_columnconfigure(2, weight=2)
         body.grid_rowconfigure(0, weight=1)
+
+        library_panel = ctk.CTkFrame(body, fg_color="transparent")
+        library_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        library_panel.grid_columnconfigure(0, weight=1)
+        library_panel.grid_columnconfigure(1, weight=0)
+        library_panel.grid_rowconfigure(1, weight=1)
+        library_panel.grid_rowconfigure(5, weight=1)
+        ctk.CTkLabel(library_panel, text="FAMILIAS", anchor="w", text_color=TEXT_MUTED).grid(
+            row=0, column=0, columnspan=2, sticky="ew", pady=(4, 4),
+        )
+        self.vault_roots_list = tk.Listbox(
+            library_panel, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
+            selectbackground=self.themed(ACCENT), selectforeground=self.themed(ACCENT_TEXT),
+            selectmode=tk.SINGLE, borderwidth=0, highlightthickness=1,
+            highlightbackground=self.themed(BORDER), font=FONT_BODY,
+        )
+        root_scroll = ttk.Scrollbar(library_panel, orient="vertical", command=self.vault_roots_list.yview)
+        self.vault_roots_list.configure(yscrollcommand=root_scroll.set)
+        self.vault_roots_list.grid(row=1, column=0, sticky="nsew", pady=(0, 6))
+        root_scroll.grid(row=1, column=1, sticky="ns", pady=(0, 6))
+        self.vault_roots_list.bind("<<ListboxSelect>>", self._vault_filter_by_root)
+        root_actions = ctk.CTkFrame(library_panel, fg_color="transparent")
+        root_actions.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+        GhostButton(root_actions, text="Nueva familia", command=self.vault_create_root).pack(fill="x", pady=(0, 4))
+        GhostButton(root_actions, text="Agregar asset", command=self.vault_assign_selected_asset).pack(fill="x")
+
+        ctk.CTkLabel(library_panel, text="COLECCIONES", anchor="w", text_color=TEXT_MUTED).grid(
+            row=3, column=0, columnspan=2, sticky="ew", pady=(2, 4),
+        )
+        self.vault_collections_list = tk.Listbox(
+            library_panel, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
+            selectbackground=self.themed(ACCENT), selectforeground=self.themed(ACCENT_TEXT),
+            selectmode=tk.SINGLE, borderwidth=0, highlightthickness=1,
+            highlightbackground=self.themed(BORDER), font=FONT_BODY,
+        )
+        collection_scroll = ttk.Scrollbar(library_panel, orient="vertical", command=self.vault_collections_list.yview)
+        self.vault_collections_list.configure(yscrollcommand=collection_scroll.set)
+        self.vault_collections_list.grid(row=5, column=0, sticky="nsew", pady=(0, 6))
+        collection_scroll.grid(row=5, column=1, sticky="ns", pady=(0, 6))
+        self.vault_collections_list.bind("<<ListboxSelect>>", self._vault_filter_by_collection)
+        collection_actions = ctk.CTkFrame(library_panel, fg_color="transparent")
+        collection_actions.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        GhostButton(collection_actions, text="Nueva colección", command=self.vault_create_collection).pack(fill="x", pady=(0, 4))
+        GhostButton(collection_actions, text="Agregar asset", command=self.vault_add_selected_to_collection).pack(fill="x")
+        ctk.CTkLabel(library_panel, text="Rol:", text_color=TEXT_MUTED).grid(
+            row=7, column=0, columnspan=2, sticky="w", pady=(4, 2),
+        )
+        self.vault_role_labels = {
+            "Imagen original": "original_image", "Video original": "original_video",
+            "Overlay": "overlay", "P1": "p1", "P2": "p2",
+            "Salida Forge": "forge_output", "Salida editada": "edited_output",
+            "Salida de tanda": "tanda_output", "Referencia": "reference",
+        }
+        self.vault_role_var = ctk.StringVar(value="Imagen original")
+        ctk.CTkComboBox(
+            library_panel, values=list(self.vault_role_labels), variable=self.vault_role_var,
+            state="readonly", fg_color=BG_INPUT, border_color=BORDER,
+        ).grid(row=8, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+        self.vault_root_rows = []
+        self.vault_collection_rows = []
+        self._vault_updating_filter = False
+
         table_frame = ctk.CTkFrame(body, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
-        table_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        table_frame.grid(row=0, column=1, sticky="nsew", padx=(0, 8))
         table_frame.grid_rowconfigure(0, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
         columns = ("name", "type", "role", "hash", "path")
@@ -6158,15 +6239,25 @@ class InstagramAutoPro(ctk.CTk):
         scroll.grid(row=0, column=1, sticky="ns", padx=(0, 10), pady=(10, 0))
         hscroll.grid(row=1, column=0, sticky="ew", padx=(10, 0), pady=(0, 10))
         self.vault_tree.bind("<<TreeviewSelect>>", lambda _event: self.vault_refresh_detail())
+        pagebar = ctk.CTkFrame(table_frame, fg_color="transparent")
+        pagebar.grid(row=2, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 8))
+        pagebar.grid_columnconfigure(1, weight=1)
+        self.vault_page_prev = GhostButton(pagebar, text="Anterior", command=self._vault_page_previous)
+        self.vault_page_prev.grid(row=0, column=0, sticky="w")
+        self.vault_page_status = ctk.CTkLabel(pagebar, text="", text_color=TEXT_MUTED)
+        self.vault_page_status.grid(row=0, column=1, sticky="ew")
+        self.vault_page_next = GhostButton(pagebar, text="Siguiente", command=self._vault_page_next)
+        self.vault_page_next.grid(row=0, column=2, sticky="e")
 
         detail = Card(body, title="Detalle y procedencia")
-        detail.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        detail.grid(row=0, column=2, sticky="nsew", padx=(8, 0))
         detail.body.grid_columnconfigure(0, weight=1)
         detail.body.grid_rowconfigure(0, weight=1)
         self.vault_detail = ctk.CTkTextbox(detail.body, fg_color=BG_CARD2, text_color=TEXT_BODY)
         self.vault_detail.grid(row=0, column=0, sticky="nsew", padx=12, pady=12)
         self.vault_detail.insert("1.0", "Selecciona un asset para ver su hash, ubicación y derivados.")
         self.vault_detail.configure(state="disabled")
+        self.refresh_vault_roots()
         self.refresh_vault_table()
 
     def vault_import_files(self):
@@ -6180,27 +6271,68 @@ class InstagramAutoPro(ctk.CTk):
         )
         if not paths:
             return
-        imported = 0
-        errors = []
-        for path in paths:
+        database_path = self.db.db_path
+        self.vault_import_button.configure(state="disabled")
+        self.vault_import_status.configure(text=f"Calculando SHA-256 de {len(paths)} archivos...")
+
+        def task():
+            from database import DatabaseManager
+            db = DatabaseManager(database_path)
+            imported = 0
+            errors = []
             try:
-                self.db.upsert_vault_asset(path)
-                imported += 1
-            except (OSError, ValueError) as error:
-                errors.append(f"{os.path.basename(path)}: {error}")
-        self.refresh_vault_table()
-        message = f"Assets registrados: {imported}. Los originales no se movieron."
-        if errors:
-            message += "\n\nNo se pudieron registrar:\n" + "\n".join(errors[:8])
-        messagebox.showinfo("Biblioteca", message, parent=self)
+                for path in paths:
+                    try:
+                        db.upsert_vault_asset(path)
+                        imported += 1
+                    except Exception as error:
+                        errors.append(f"{os.path.basename(path)}: {error}")
+            finally:
+                db.close()
+            return imported, errors
+
+        def done(success, result):
+            self.vault_import_button.configure(state="normal")
+            self.vault_import_status.configure(text="")
+            if not success:
+                return messagebox.showerror("Biblioteca", str(result), parent=self)
+            imported, errors = result
+            self.refresh_vault_roots()
+            self.vault_show_all()
+            message = f"Assets registrados: {imported}. Los originales no se movieron."
+            if errors:
+                message += "\n\nNo se pudieron registrar:\n" + "\n".join(errors[:8])
+            messagebox.showinfo("Biblioteca", message, parent=self)
+
+        WorkerThread(self, done, task).start()
 
     def refresh_vault_table(self):
         if not hasattr(self, "vault_tree"):
             return
+        root_selection = self.vault_roots_list.curselection()
+        collection_selection = self.vault_collections_list.curselection()
+        allowed_ids = None
+        if root_selection and root_selection[0] < len(self.vault_root_rows):
+            root_id = self.vault_root_rows[root_selection[0]]["id"]
+            allowed_ids = [row["id"] for row in self.db.list_root_assets(root_id)]
+        elif collection_selection and collection_selection[0] < len(self.vault_collection_rows):
+            collection_id = self.vault_collection_rows[collection_selection[0]]["id"]
+            allowed_ids = [row["id"] for row in self.db.list_collection_assets(collection_id)]
+        query = self.db.query_vault_assets(
+            search=self.vault_search_var.get(), asset_ids=allowed_ids,
+            offset=self.vault_page * self.vault_page_size, limit=self.vault_page_size,
+        )
+        self.vault_total = query["total"]
+        last_page = max(0, (self.vault_total - 1) // self.vault_page_size)
+        if self.vault_page > last_page:
+            self.vault_page = last_page
+            query = self.db.query_vault_assets(
+                search=self.vault_search_var.get(), asset_ids=allowed_ids,
+                offset=self.vault_page * self.vault_page_size, limit=self.vault_page_size,
+            )
         for item in self.vault_tree.get_children():
             self.vault_tree.delete(item)
-        search = self.vault_search_var.get() if hasattr(self, "vault_search_var") else ""
-        for asset in self.db.list_vault_assets(search=search):
+        for asset in query["items"]:
             self.vault_tree.insert(
                 "", "end", iid=str(asset["id"]),
                 values=(
@@ -6209,6 +6341,37 @@ class InstagramAutoPro(ctk.CTk):
                     asset["asset_hash"][:12], asset["source_path"],
                 ),
             )
+        if self.vault_total:
+            first = self.vault_page * self.vault_page_size + 1
+            last = min(first + self.vault_page_size - 1, self.vault_total)
+            status = f"{first}–{last} de {self.vault_total}"
+        else:
+            status = "Sin resultados"
+        self.vault_page_status.configure(text=status)
+        self.vault_page_prev.configure(state="normal" if self.vault_page else "disabled")
+        self.vault_page_next.configure(
+            state="normal" if (self.vault_page + 1) * self.vault_page_size < self.vault_total else "disabled",
+        )
+
+    def _vault_search_changed(self):
+        self.vault_page = 0
+        if self._vault_search_after:
+            self.after_cancel(self._vault_search_after)
+        self._vault_search_after = self.after(250, self._vault_search_refresh)
+
+    def _vault_search_refresh(self):
+        self._vault_search_after = None
+        self.refresh_vault_table()
+
+    def _vault_page_previous(self):
+        if self.vault_page > 0:
+            self.vault_page -= 1
+            self.refresh_vault_table()
+
+    def _vault_page_next(self):
+        if (self.vault_page + 1) * self.vault_page_size < self.vault_total:
+            self.vault_page += 1
+            self.refresh_vault_table()
 
     def vault_refresh_detail(self):
         if not hasattr(self, "vault_tree") or not hasattr(self, "vault_detail"):
@@ -6217,11 +6380,27 @@ class InstagramAutoPro(ctk.CTk):
         asset = self.db.get_vault_asset(int(selection[0])) if selection else None
         lines = []
         if asset:
+            if asset["media_type"] == "video":
+                self.vault_role_var.set("Video original")
+            elif self.vault_role_var.get() == "Video original":
+                self.vault_role_var.set("Imagen original")
+            roots = self.db.list_asset_roots(asset["id"])
+            role_names = {value: label for label, value in self.vault_role_labels.items()}
+            family_roles = {}
+            for root in roots:
+                family_roles.setdefault(root["name"], set()).add(role_names.get(root["role"], root["role"]))
+            family_details = "; ".join(
+                f"{name} ({', '.join(sorted(roles))})" for name, roles in family_roles.items()
+            )
+            collections = self.db.list_asset_collections(asset["id"])
             lines.extend([
                 asset["display_name"],
                 f"Tipo: {asset['media_type']} · {'derivado' if asset['asset_role'] == 'generated' else 'original'}",
                 f"SHA-256: {asset['asset_hash']}",
                 f"Ruta: {asset['source_path']}",
+                "",
+                "Familias y roles: " + (family_details if family_details else "ninguna"),
+                "Colecciones: " + (", ".join(collection["name"] for collection in collections) if collections else "ninguna"),
                 "",
                 "Relaciones:",
             ])
@@ -6241,9 +6420,125 @@ class InstagramAutoPro(ctk.CTk):
         self.vault_detail.insert("1.0", "\n".join(lines))
         self.vault_detail.configure(state="disabled")
 
+    def refresh_vault_roots(self):
+        if not hasattr(self, "vault_roots_list"):
+            return
+        selected_root_id = None
+        selected_collection_id = None
+        root_selection = self.vault_roots_list.curselection()
+        collection_selection = self.vault_collections_list.curselection()
+        if root_selection and root_selection[0] < len(self.vault_root_rows):
+            selected_root_id = self.vault_root_rows[root_selection[0]]["id"]
+        if collection_selection and collection_selection[0] < len(self.vault_collection_rows):
+            selected_collection_id = self.vault_collection_rows[collection_selection[0]]["id"]
+        self.vault_root_rows = self.db.list_content_roots(status="active")
+        self.vault_roots_list.delete(0, "end")
+        for root in self.vault_root_rows:
+            self.vault_roots_list.insert("end", f"{root['name']}  ·  {root['asset_count']}")
+        self.vault_collection_rows = self.db.list_vault_collections()
+        self.vault_collections_list.delete(0, "end")
+        for collection in self.vault_collection_rows:
+            self.vault_collections_list.insert("end", collection["name"])
+        self._vault_updating_filter = True
+        try:
+            for index, root in enumerate(self.vault_root_rows):
+                if root["id"] == selected_root_id:
+                    self.vault_roots_list.selection_set(index)
+                    break
+            for index, collection in enumerate(self.vault_collection_rows):
+                if collection["id"] == selected_collection_id:
+                    self.vault_collections_list.selection_set(index)
+                    break
+        finally:
+            self._vault_updating_filter = False
+
+    def _vault_filter_by_root(self, _event=None):
+        if self._vault_updating_filter:
+            return
+        if not self.vault_roots_list.curselection() and self.vault_collections_list.curselection():
+            return
+        self._vault_updating_filter = True
+        try:
+            self.vault_collections_list.selection_clear(0, "end")
+        finally:
+            self._vault_updating_filter = False
+        self.vault_page = 0
+        self.refresh_vault_table()
+
+    def _vault_filter_by_collection(self, _event=None):
+        if self._vault_updating_filter:
+            return
+        if not self.vault_collections_list.curselection() and self.vault_roots_list.curselection():
+            return
+        self._vault_updating_filter = True
+        try:
+            self.vault_roots_list.selection_clear(0, "end")
+        finally:
+            self._vault_updating_filter = False
+        self.vault_page = 0
+        self.refresh_vault_table()
+
+    def vault_show_all(self):
+        self._vault_updating_filter = True
+        try:
+            self.vault_roots_list.selection_clear(0, "end")
+            self.vault_collections_list.selection_clear(0, "end")
+        finally:
+            self._vault_updating_filter = False
+        self.vault_page = 0
+        self.refresh_vault_table()
+
+    def vault_create_root(self):
+        name = simpledialog.askstring("Nueva familia", "Nombre de la familia:", parent=self)
+        if name is None:
+            return
+        try:
+            self.db.create_content_root(name)
+        except Exception as error:
+            return messagebox.showwarning("Biblioteca", str(error), parent=self)
+        self.refresh_vault_roots()
+
+    def vault_create_collection(self):
+        name = simpledialog.askstring("Nueva colección", "Nombre de la colección:", parent=self)
+        if name is None:
+            return
+        try:
+            self.db.create_vault_collection(name)
+        except Exception as error:
+            return messagebox.showwarning("Biblioteca", str(error), parent=self)
+        self.refresh_vault_roots()
+
+    def vault_assign_selected_asset(self):
+        root_selection = self.vault_roots_list.curselection()
+        asset_selection = self.vault_tree.selection()
+        if not root_selection or not asset_selection:
+            return messagebox.showwarning("Biblioteca", "Selecciona una familia y un asset.", parent=self)
+        root = self.vault_root_rows[root_selection[0]]
+        asset_id = int(asset_selection[0])
+        role = self.vault_role_labels[self.vault_role_var.get()]
+        if not messagebox.askyesno(
+            "Agregar a familia",
+            f"¿Agregar este asset a '{root['name']}' como {self.vault_role_var.get()}? El archivo no se moverá.",
+            parent=self,
+        ):
+            return
+        self.db.add_asset_to_content_root(root["id"], asset_id, role)
+        self.refresh_vault_roots()
+        self.vault_refresh_detail()
+
+    def vault_add_selected_to_collection(self):
+        collection_selection = self.vault_collections_list.curselection()
+        asset_selection = self.vault_tree.selection()
+        if not collection_selection or not asset_selection:
+            return messagebox.showwarning("Biblioteca", "Selecciona una colección y un asset.", parent=self)
+        collection = self.vault_collection_rows[collection_selection[0]]
+        asset_id = int(asset_selection[0])
+        self.db.add_asset_to_collection(collection["id"], asset_id)
+        self.refresh_vault_roots()
+        self.vault_refresh_detail()
+
     def vault_select_for_photo_forge(self):
-        assets = self.db.list_vault_assets(media_type="image")
-        if not assets:
+        if self.db.query_vault_assets(media_type="image", limit=1)["total"] == 0:
             return messagebox.showinfo("Biblioteca", "No hay imágenes registradas. Importa imágenes desde Biblioteca.", parent=self)
         dialog = ctk.CTkToplevel(self)
         dialog.title("Seleccionar imágenes de Biblioteca")
@@ -6251,7 +6546,12 @@ class InstagramAutoPro(ctk.CTk):
         dialog.minsize(680, 420)
         dialog.transient(self)
         dialog.grid_columnconfigure(0, weight=1)
-        dialog.grid_rowconfigure(0, weight=1)
+        dialog.grid_rowconfigure(1, weight=1)
+        search_var = tk.StringVar(value="")
+        ctk.CTkEntry(
+            dialog, textvariable=search_var, fg_color=BG_INPUT, border_color=BORDER,
+            placeholder_text="Buscar nombre, hash o ruta",
+        ).grid(row=0, column=0, columnspan=2, sticky="ew", padx=14, pady=(14, 8))
         columns = ("name", "hash", "path")
         tree = ttk.Treeview(dialog, columns=columns, show="headings", selectmode="extended", style="Premium.Treeview")
         for column, label in (("name", "Imagen"), ("hash", "SHA-256"), ("path", "Ruta")):
@@ -6262,16 +6562,65 @@ class InstagramAutoPro(ctk.CTk):
         tree_scroll_y = ttk.Scrollbar(dialog, orient="vertical", command=tree.yview)
         tree_scroll_x = ttk.Scrollbar(dialog, orient="horizontal", command=tree.xview)
         tree.configure(yscrollcommand=tree_scroll_y.set, xscrollcommand=tree_scroll_x.set)
-        tree.grid(row=0, column=0, sticky="nsew", padx=(14, 0), pady=(14, 0))
-        tree_scroll_y.grid(row=0, column=1, sticky="ns", padx=(0, 14), pady=(14, 0))
-        tree_scroll_x.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 6))
-        for asset in assets:
-            tree.insert("", "end", iid=str(asset["id"]), values=(asset["display_name"], asset["asset_hash"][:12], asset["source_path"]))
+        tree.grid(row=1, column=0, sticky="nsew", padx=(14, 0), pady=(0, 0))
+        tree_scroll_y.grid(row=1, column=1, sticky="ns", padx=(0, 14), pady=(0, 0))
+        tree_scroll_x.grid(row=2, column=0, sticky="ew", padx=14, pady=(0, 6))
+        selected_ids = set()
+        state = {"page": 0, "total": 0, "after": None}
         actions = ctk.CTkFrame(dialog, fg_color="transparent")
-        actions.grid(row=2, column=0, columnspan=2, sticky="ew", padx=14, pady=(4, 14))
+        actions.grid(row=4, column=0, columnspan=2, sticky="ew", padx=14, pady=(4, 14))
+        pagebar = ctk.CTkFrame(dialog, fg_color="transparent")
+        pagebar.grid(row=3, column=0, columnspan=2, sticky="ew", padx=14, pady=(0, 4))
+        pagebar.grid_columnconfigure(1, weight=1)
+
+        def refresh_page():
+            selected_ids.update(int(item) for item in tree.selection())
+            result = self.db.query_vault_assets(
+                search=search_var.get(), media_type="image", offset=state["page"] * 200, limit=200,
+            )
+            state["total"] = result["total"]
+            last_page = max(0, (state["total"] - 1) // 200)
+            if state["page"] > last_page:
+                state["page"] = last_page
+                result = self.db.query_vault_assets(
+                    search=search_var.get(), media_type="image", offset=state["page"] * 200, limit=200,
+                )
+            for item in tree.get_children():
+                tree.delete(item)
+            for asset in result["items"]:
+                iid = str(asset["id"])
+                tree.insert("", "end", iid=iid, values=(asset["display_name"], asset["asset_hash"][:12], asset["source_path"]))
+                if asset["id"] in selected_ids:
+                    tree.selection_add(iid)
+            first = state["page"] * 200 + 1 if state["total"] else 0
+            last = min(first + 199, state["total"])
+            status.configure(text=f"{first}–{last} de {state['total']} · {len(selected_ids)} seleccionadas")
+            previous.configure(state="normal" if state["page"] else "disabled")
+            following.configure(state="normal" if (state["page"] + 1) * 200 < state["total"] else "disabled")
+
+        def schedule_search(*_args):
+            state["page"] = 0
+            if state["after"]:
+                dialog.after_cancel(state["after"])
+            state["after"] = dialog.after(250, refresh_page)
+
+        def change_page(delta):
+            selected_ids.update(int(item) for item in tree.selection())
+            state["page"] = max(0, state["page"] + delta)
+            refresh_page()
+
+        previous = GhostButton(pagebar, text="Anterior", command=lambda: change_page(-1))
+        previous.grid(row=0, column=0, sticky="w")
+        status = ctk.CTkLabel(pagebar, text="", text_color=TEXT_MUTED)
+        status.grid(row=0, column=1, sticky="ew")
+        following = GhostButton(pagebar, text="Siguiente", command=lambda: change_page(1))
+        following.grid(row=0, column=2, sticky="e")
+        search_var.trace_add("write", schedule_search)
+        refresh_page()
 
         def accept():
-            selected_assets = [self.db.get_vault_asset(int(item)) for item in tree.selection()]
+            selected_ids.update(int(item) for item in tree.selection())
+            selected_assets = [self.db.get_vault_asset(asset_id) for asset_id in sorted(selected_ids)]
             selected_assets = [asset for asset in selected_assets if asset and os.path.isfile(asset["source_path"])]
             current = [self.photo_forge_sources.get(i) for i in range(self.photo_forge_sources.size())]
             known = {path.casefold() for path in current}

@@ -22,6 +22,16 @@ importación no mueve ni copia los archivos. Los resultados de Photo Forge se
 añaden como derivados con relaciones a su origen; conserva un registro propio
 por ruta/cuenta aunque dos finales tengan los mismos bytes.
 
+1. En Biblioteca, usa **Importar medios**; el estado muestra cuándo está
+   calculando hashes y la lista se actualiza al terminar.
+2. Crea una **familia** para agrupar assets relacionados o una **colección**
+   para una selección organizativa. Selecciona un asset y una familia/colección,
+   elige el rol para la familia y pulsa **Agregar asset**. Esto solo guarda una
+   relación; nunca mueve el archivo.
+3. Seleccionar una familia o colección filtra la tabla. **Mostrar todos** quita
+   el filtro. El detalle indica hash, ruta, pertenencias y relaciones de origen
+   y derivados.
+
 Para video, usa los finales validados de Forge en `videos_finales/<tanda>`.
 Para fotos, abre **Photo Forge** y agrega imágenes desde disco o usa **Desde
 Biblioteca** para elegir imágenes previamente registradas:
@@ -72,7 +82,9 @@ imágenes fijas JPG, PNG, WebP y TIFF; no procesa GIF ni imágenes animadas.
 
 ## 3. Crear un carril
 
-En **Logistica > Por Cuentas > Agregar carril al calendario**:
+Logística abre por defecto en **Por Cuentas**, con el formulario de carriles al
+inicio; el distribuidor secuencial legacy queda debajo. En **Agregar carril al
+calendario**:
 
 - **Destino**: Instagram Reel/Photo Reel/Trial/Story/Post o Facebook
   Story/Post/Reel/Marketplace. Instagram Photo Reel requiere imágenes Photo

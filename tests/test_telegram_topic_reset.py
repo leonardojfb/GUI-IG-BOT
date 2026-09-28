@@ -12,7 +12,7 @@ def test_call_tg_prints_clear_message_for_missing_forum_topic(monkeypatch, capsy
                 "description": "Bad Request: TOPIC_ID_INVALID",
             }
 
-    def fake_post(url, json):
+    def fake_post(url, json, **_kwargs):
         return FakeResponse()
 
     monkeypatch.setattr(organizadortg.requests, "post", fake_post)
@@ -250,6 +250,10 @@ def test_execute_plan_resets_selected_account_topics_before_recreating(monkeypat
                 "filename": "ALPHA__TANDA_NEW__ACC__D1__S1.mp4",
                 "category": "promo",
                 "day": "Dia_1",
+                "slot": 1,
+                "scheduled_date": "2026-07-27",
+                "scheduled_time": "09:00",
+                "timezone": "America/Argentina/Buenos_Aires",
                 "username": "alpha",
             },
             {
@@ -257,12 +261,18 @@ def test_execute_plan_resets_selected_account_topics_before_recreating(monkeypat
                 "filename": "BETA__TANDA_OLD__ACC__D1__S1.mp4",
                 "category": "promo",
                 "day": "Dia_1",
+                "slot": 1,
+                "scheduled_date": "2026-07-27",
+                "scheduled_time": "09:00",
+                "timezone": "America/Argentina/Buenos_Aires",
                 "username": "beta",
             },
         ],
     )
     monkeypatch.setattr(organizadortg, "load_json", lambda _path: state)
     monkeypatch.setattr(organizadortg, "save_json", lambda _path, _data: None)
+    monkeypatch.setattr(organizadortg, "load_airtable_config", lambda: object())
+    monkeypatch.setattr(organizadortg, "fetch_published_video_hashes", lambda _config: set())
     monkeypatch.setattr(organizadortg, "time", type("TimeStub", (), {"sleep": staticmethod(lambda _seconds: None)}))
 
     def fake_delete(account_names, topics_state):
@@ -270,10 +280,14 @@ def test_execute_plan_resets_selected_account_topics_before_recreating(monkeypat
         topics_state.pop("-1001_alpha", None)
         return {"deleted": 1, "missing": 0, "failed": 0, "failures": []}
 
-    def fake_get_or_create(chat_id, username, tag, topics_state, is_admin=False, force_recreate=False):
+    def fake_get_or_create(
+        chat_id, username, tag, topics_state, is_admin=False,
+        force_recreate=False, delivery_kind="normal", topic_group="account",
+    ):
         order.append(("create", chat_id, username, dict(topics_state)))
-        topics_state[f"{chat_id}_{username}"] = 500 + len(order)
-        return topics_state[f"{chat_id}_{username}"]
+        state_key = organizadortg.topic_state_key(chat_id, username, delivery_kind, topic_group)
+        topics_state[state_key] = 500 + len(order)
+        return topics_state[state_key]
 
     monkeypatch.setattr(organizadortg, "delete_known_topics_for_accounts", fake_delete)
     monkeypatch.setattr(organizadortg, "get_or_create_topic", fake_get_or_create)
@@ -297,12 +311,16 @@ def test_execute_plan_resets_selected_account_topics_before_recreating(monkeypat
 def test_controller_passes_reset_topics_to_execute_plan(monkeypatch):
     captured = {}
 
-    def fake_execute(start_date, selected_accounts=None, controller=None, reset_topics=False, express_mode=False):
+    def fake_execute(
+        start_date, selected_accounts=None, controller=None, reset_topics=False,
+        express_mode=False, topic_mode="account_by_day",
+    ):
         captured["start_date"] = start_date
         captured["selected_accounts"] = selected_accounts
         captured["controller"] = controller
         captured["reset_topics"] = reset_topics
         captured["express_mode"] = express_mode
+        captured["topic_mode"] = topic_mode
         return "done"
 
     monkeypatch.setattr(organizadortg, "execute_telegram_plan", fake_execute)

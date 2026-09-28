@@ -106,10 +106,11 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   imagen/identidad; las parejas sin selección propia heredan el ajuste global.
   La receta de cada ejecución registra índices efectivos por identidad, fuente
   y hash, y el generador conserva carpetas físicas separadas por identidad.
-  La pantalla Biblioteca registra imágenes/videos por hash y ruta, permite
-  elegir imágenes en Photo Forge y conserva relaciones de origen a cada salida
-  por ruta de cuenta. La migración es aditiva y no mueve medios. La integración
-  de Forge de video, familias/colecciones del Vault y captions sigue pendiente.
+  La Biblioteca registra imágenes/videos por hash y ruta, permite elegir
+  imágenes en Photo Forge, crear familias/colecciones y asignar roles sin mover
+  medios; los finales preservan relaciones de origen por ruta de cuenta. La
+  migración es aditiva. La integración de Forge de video, captions y linaje de
+  calendario/envío en Vault sigue pendiente.
   Las tandas conservan recetas por ejecución y un resumen agregado al añadir
   más perfiles/subconjuntos sin borrar las salidas anteriores; el historial
   separa rutas solicitadas, nuevas y reutilizadas. Los totales que manifiestos
@@ -140,6 +141,28 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
 - Logistica Por Cuentas muestra un aviso en la previsualizacion si incluye
   salidas validadas de tandas Forge parciales; tandas con inventario invalido
   o estados no distribuibles siguen bloqueadas.
+- Regresion detectada y corregida al validar el distribuidor legacy: quedaba
+  un calculo muerto de destino bajo `CALENDARIO_POSTEO` que referenciaba
+  `cal_root` sin definir, aunque la escritura ya era solo al manifiesto. Se
+  eliminaron esas rutas no utilizadas; Por Cuentas legacy vuelve a calendarizar
+  sin copiar archivos, conservando sus nombres de entrega. Verificacion:
+  `tests/test_calendar_manifest.py`, `tests/test_por_cuentas_lanes.py` y
+  `tests/test_logistica_por_cuentas_e2e.py`: 15 passed. La prueba de UI crea
+  una DB/manifiesto temporal y comprueba orden Reel 10:00, Story 12:00 y
+  Marketplace 13:00, filtro de identidad, enlace de Story y preview de imagen.
+  Compilacion de modulos y `git diff --check` correctos.
+- Telegram fallaba al entregar Reels legacy sin fecha: el escaner exponia el
+  dia como `Dia_1`, pero el resolvedor esperaba un entero. Ahora acepta tanto
+  el dia numerico del manifiesto como el formato de carpeta `Dia_N`. La prueba
+  unitaria cubre ambos valores. Se actualizaron stubs Telegram obsoletos para
+  timeout, topics por tipo, Airtable fail-closed y metadata de slot; el test de
+  escaneo ahora exige conservar Stories/Posts/Marketplace para su entrega
+  manual. Un E2E temporal crea una cuenta SQLite y un manifiesto con Reel,
+  Story y Marketplace, simula solo el borde Telegram y verifica el orden
+  10:00/12:00/13:00, el enlace Story, metadatos de Marketplace y estado
+  `sent_telegram`, sin red ni publicación real. Resultado conjunto de
+  calendario, Photo Forge, Por Cuentas y Telegram: 71 passed, 1 skipped (un
+  caso GUI no obtuvo display); `py_compile` y `git diff --check` correctos.
 - Los carriles de video aplican el mismo gate de inventario por cuenta antes
   de calendarizar: solo aceptan finales presentes y validados, con warning y
   conteo de pendientes para tandas `incomplete`. La ruta aceptada debe ser un
@@ -161,15 +184,20 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   tambien se conserva visible en los metadatos enviados al topic.
 - Los carriles rechazan finales que ya esten en el manifiesto o repetidos
   dentro de la tanda candidata, aunque la nueva fecha/destino no choque.
-- Verificacion reciente de Photo Forge: `py_compile`, smoke de imports y
-  ejecucion funcional temporal con seis salidas para dos identidades, hashes
-  distintos, original intacto, preview igual a variante 1, transparencia,
-  lectura legacy e idempotencia. No se ejecutaron tests automatizados. El
-  formulario modificado aún no tuvo revisión visual; no hubo envío real a
-  Telegram. `docs/GUIA_LOGISTICA_MULTICANAL.md` documenta el flujo de usuario
-  y las limitaciones actuales.
-- Pendiente antes de release: ejecutar las validaciones del plan, revisar el
-  flujo en la GUI instalada y hacer un envio controlado a Telegram.
+- Photo Forge tiene ahora una prueba de integracion en la GUI con DB, medios y
+  manifiestos temporales: selecciona dos identidades, genera finales distintos
+  por cuenta del perfil Post 4:5, verifica hashes y receta, conserva intacta la
+  fuente, registra cuatro relaciones de linaje y abre Logistica con la carpeta
+  y cuentas correctas. Luego calendariza un final propio para cada cuenta en
+  Instagram Post y confirma que no crea `CALENDARIO_POSTEO`. Se conserva además
+  el smoke anterior de seis salidas, preview, transparencia, compatibilidad e
+  idempotencia. `docs/GUIA_LOGISTICA_MULTICANAL.md` documenta el uso; siguen
+  pendientes perspectiva y la receta como objeto persistente independiente de
+  cada ejecucion.
+- Pendiente antes de release: validar el launcher realmente instalado y hacer
+  un envio controlado a Telegram. El upgrade en staging y la GUI empaquetada
+  estan verificados, pero no sustituyen esas dos pruebas; tampoco se ha
+  publicado la release.
 - Actualizador: como la release agrega modulos locales, publicar primero una
   release bootstrap solo con `updater.py` y `version.json`; publicar el codigo
   de la funcion en una version posterior para que instalaciones antiguas
@@ -177,3 +205,20 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   El checkout compartido actualmente anuncia `1.0.48`; por tanto, al llegar
   a release, usar `1.0.49` para el bootstrap y `1.0.50` para la funcionalidad.
   No rebajar ni reemplazar los datos locales del launcher durante este puente.
+  El updater ahora rechaza manifiestos que pidan archivos no permitidos o que
+  falten en el ZIP, evitando subir `version.json` con una instalación parcial;
+  `console_encoding.py` también está en su allowlist porque forma parte del
+  paquete de release. Smoke temporal: el updater 1.0.48 omitía módulos nuevos
+  y subía versión; tras el bootstrap, el updater actualizado instaló la fase
+  funcional completa y preservó `organizador.db`.
+  `build_release.ps1 -BootstrapUpdater` tampoco necesita localizar ni copiar
+  FFmpeg: el bootstrap solo empaqueta `updater.py` y `version.json`.
+  Staging validado sin publicar: bootstrap `1.0.49` con exactamente esos dos
+  archivos; paquete funcional `1.0.50` con 36 archivos, lista del manifiesto y
+  SHA-256 coincidentes, módulos nuevos presentes y base/manifiestos/media de
+  usuario excluidos. Integración temporal: apliqué ambos ZIP en orden sobre
+  una instalación `1.0.48` con el updater anterior; la DB centinela se preservó
+  y aparecieron los módulos nuevos. Arranqué además la GUI directamente desde
+  esa copia actualizada y verifiqué Logística Por Cuentas, Biblioteca y Photo
+  Forge, junto con el valor centinela de SQLite. No es una instalación del
+  launcher real ni una release publicada.

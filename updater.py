@@ -34,6 +34,7 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "launch_gui.bat",
         "launcher.py",
         "updater.py",
+        "console_encoding.py",
         "organizador.db",
         "organizador.default.db",
         "version.json",
@@ -270,11 +271,23 @@ def apply_package(
             with zipfile.ZipFile(package_path) as archive:
                 entries = _archive_files(archive)
                 manifest_files = manifest.get("files")
-                requested = (
-                    {str(item).replace("\\", "/") for item in manifest_files}
-                    if isinstance(manifest_files, list)
-                    else allowed
-                )
+                archive_names = {relative for _, relative in entries}
+                if isinstance(manifest_files, list):
+                    requested = {str(item).replace("\\", "/") for item in manifest_files}
+                    unsupported = requested - allowed
+                    if unsupported:
+                        raise UpdateError(
+                            "El updater instalado no permite estos archivos: "
+                            + ", ".join(sorted(unsupported))
+                        )
+                    missing = requested - archive_names
+                    if missing:
+                        raise UpdateError(
+                            "El ZIP no contiene todos los archivos del manifiesto: "
+                            + ", ".join(sorted(missing))
+                        )
+                else:
+                    requested = allowed
                 selected = [
                     (info, relative)
                     for info, relative in entries

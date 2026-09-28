@@ -427,3 +427,187 @@ def test_por_cuentas_mixed_caption_modes_send_both_tandas_to_each_account(tmp_pa
                     assert caption and caption.startswith("general caption")
     finally:
         cleanup()
+
+
+def test_calendar_view_orders_mixed_posts_and_shows_story_link_and_image(tmp_path, monkeypatch):
+    app, cleanup = _make_app()
+    try:
+        import gui_premium_v7 as gui
+        from calendar_manifest import append_scheduled_entries, build_entry, manifest_path
+        from PIL import Image
+
+        base_dir = str(tmp_path)
+        monkeypatch.setattr(gui, "_BASE_DIR", base_dir)
+        app.db.add_category("CAL_VIEW_CAT")
+        app.db.add_virtual_account("calendar_view_user", "CAL_VIEW_CAT")
+
+        story_path = tmp_path / "story.png"
+        Image.new("RGB", (24, 32), (25, 140, 90)).save(story_path)
+        reel_path = tmp_path / "reel.mp4"
+        reel_path.write_bytes(b"fake video")
+        marketplace_path = tmp_path / "listing.jpg"
+        Image.new("RGB", (32, 24), (140, 90, 25)).save(marketplace_path)
+
+        common = {
+            "username": "calendar_view_user",
+            "account_id": None,
+            "delivery_kind": "normal",
+            "day": 1,
+            "tanda": "CAL_VIEW",
+        }
+        entries = [
+            build_entry(
+                **common,
+                slot=1,
+                source_path=str(reel_path),
+                telegram_filename="reel.mp4",
+                publication_target="instagram_reel",
+                scheduled_date="2030-01-02",
+                scheduled_time="10:00",
+                timezone="America/Argentina/Buenos_Aires",
+                media_kind="video",
+            ),
+            build_entry(
+                **common,
+                slot=2,
+                source_path=str(story_path),
+                telegram_filename="story.png",
+                publication_target="instagram_story",
+                story_link_url="https://links.example/calendar_view_user",
+                story_announcement_text="Visita el enlace",
+                scheduled_date="2030-01-02",
+                scheduled_time="12:00",
+                timezone="America/Argentina/Buenos_Aires",
+                media_kind="image",
+            ),
+            build_entry(
+                **common,
+                slot=3,
+                source_path=str(marketplace_path),
+                telegram_filename="listing.jpg",
+                publication_target="facebook_marketplace_listing",
+                scheduled_date="2030-01-02",
+                scheduled_time="13:00",
+                timezone="America/Argentina/Buenos_Aires",
+                media_kind="image",
+            ),
+        ]
+        append_scheduled_entries(manifest_path(base_dir), entries)
+
+        app.calendar_start.delete(0, "end")
+        app.calendar_start.insert(0, "2030-01-02")
+        app.calendar_days.delete(0, "end")
+        app.calendar_days.insert(0, "5")
+        app.calendar_account.set("Todas")
+        app._refresh_calendar_view()
+
+        rows = [app.calendar_tree.item(iid, "values") for iid in app.calendar_tree.get_children()]
+        assert [row[1] for row in rows] == ["10:00", "12:00", "13:00"]
+        assert [row[3] for row in rows] == [
+            "instagram_reel", "instagram_story", "facebook_marketplace_listing",
+        ]
+
+        app.calendar_tree.selection_set("1")
+        app._show_calendar_entry()
+        detail = app.calendar_detail.get("1.0", "end")
+        assert "https://links.example/calendar_view_user" in detail
+        assert "Visita el enlace" in detail
+        assert app.calendar_image_ref is not None
+
+        app.calendar_account.set("calendar_view_user")
+        app._refresh_calendar_view()
+        assert len(app.calendar_tree.get_children()) == 3
+    finally:
+        cleanup()
+
+
+def test_photo_forge_gui_generates_per_identity_and_prepares_logistics(tmp_path, monkeypatch):
+    app, cleanup = _make_app()
+    try:
+        import gui_premium_v7 as gui
+        import photo_forge
+        from PIL import Image, ImageDraw
+
+        base_dir = str(tmp_path)
+        output_root = tmp_path / "photo_outputs"
+        monkeypatch.setattr(gui, "_BASE_DIR", base_dir)
+        monkeypatch.setattr(gui, "WorkerThread", _SyncWorkerThread)
+        monkeypatch.setattr(gui.messagebox, "askyesno", lambda *args, **kwargs: True)
+        monkeypatch.setattr(gui.messagebox, "showinfo", lambda *args, **kwargs: None)
+        monkeypatch.setattr(gui.messagebox, "showerror", lambda *args, **kwargs: pytest.fail(str(args)))
+        app.db.add_category("PHOTO_FORGE_CAT")
+        app.db.add_virtual_account("photo_forge_a", "PHOTO_FORGE_CAT")
+        app.db.add_virtual_account("photo_forge_b", "PHOTO_FORGE_CAT")
+        app._photo_forge_reload_accounts()
+
+        source = tmp_path / "source.png"
+        image = Image.new("RGB", (180, 320), (30, 90, 150))
+        draw = ImageDraw.Draw(image)
+        for y in range(image.height):
+            draw.line((0, y, image.width, y), fill=(y % 255, (y * 3) % 255, (y * 7) % 255))
+        draw.rectangle((18, 42, 159, 278), outline=(250, 240, 20), width=5)
+        image.save(source)
+        source_bytes = source.read_bytes()
+
+        app.photo_forge_sources.insert("end", str(source))
+        app.photo_forge_sources.selection_set(0)
+        app.photo_forge_batch.delete(0, "end")
+        app.photo_forge_batch.insert(0, "GUI_PHOTO_BATCH")
+        app.photo_forge_output.delete(0, "end")
+        app.photo_forge_output.insert(0, str(output_root))
+        app.photo_forge_profile.set("Post 4:5")
+        app.photo_forge_variant_count.delete(0, "end")
+        app.photo_forge_variant_count.insert(0, "2")
+        app.photo_forge_variant_selection.delete(0, "end")
+        app.photo_forge_variant_selection.insert(0, "1,2")
+        app.photo_forge_strength.set("Estándar")
+        app.photo_forge_accounts.selection_set(0, "end")
+
+        app._photo_forge_run()
+
+        batch_dir = output_root / "GUI_PHOTO_BATCH"
+        manifest_path = batch_dir / photo_forge.MANIFEST_NAME
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        outputs = photo_forge.validated_account_outputs(batch_dir, "photo_forge_a", "post_4_5")
+        outputs_b = photo_forge.validated_account_outputs(batch_dir, "photo_forge_b", "post_4_5")
+        assert len(outputs) == len(outputs_b) == 2
+        assert source.read_bytes() == source_bytes
+        assert len(manifest["entries"]) == 4
+        assert len(manifest["recipe_runs"]) == 1
+        assert {row["username"] for row in manifest["entries"]} == {"photo_forge_a", "photo_forge_b"}
+        for output in [*outputs, *outputs_b]:
+            with Image.open(output) as rendered:
+                assert abs(rendered.width / rendered.height - (4 / 5)) < 0.01
+        assert len({path.resolve() for path in [*outputs, *outputs_b]}) == 4
+        assert "4 relaciones registradas" in app.photo_forge_result.get("1.0", "end")
+        assert app.acct_lane_root.get() == str(batch_dir)
+        assert set(app.acct_dist_list.get("1.0", "end").split()) == {"photo_forge_a", "photo_forge_b"}
+        assert app._active_nav == "Logistica"
+
+        app.acct_lane_target.set("instagram_post")
+        app.acct_lane_photo_profile.set("Automático por destino")
+        app.acct_lane_start_date.delete(0, "end")
+        app.acct_lane_start_date.insert(0, "2030-01-02")
+        app.acct_lane_horizon.delete(0, "end")
+        app.acct_lane_horizon.insert(0, "1")
+        app.acct_lane_every_days.delete(0, "end")
+        app.acct_lane_every_days.insert(0, "1")
+        app.acct_lane_times.delete(0, "end")
+        app.acct_lane_times.insert(0, "12:00")
+        app._acct_multichannel_run(preview_only=False)
+
+        from calendar_manifest import load_entries, manifest_path
+
+        calendar_rows = [
+            row for row in load_entries(manifest_path(base_dir))
+            if row.get("publication_target") == "instagram_post"
+        ]
+        assert len(calendar_rows) == 2
+        assert {row["username"] for row in calendar_rows} == {"photo_forge_a", "photo_forge_b"}
+        assert {row["scheduled_date"] for row in calendar_rows} == {"2030-01-02"}
+        assert {row["scheduled_time"] for row in calendar_rows} == {"12:00"}
+        assert len({row["source_path"] for row in calendar_rows}) == 2
+        assert all(Path(row["source_path"]).is_file() for row in calendar_rows)
+        assert not (tmp_path / "CALENDARIO_POSTEO").exists()
+    finally:
+        cleanup()

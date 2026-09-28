@@ -199,6 +199,10 @@ class DatabaseManager:
         self.db_path = db_path or DB_PATH
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        self.conn.create_function(
+            "unicode_casefold", 1,
+            lambda value: str(value or "").casefold(), deterministic=True,
+        )
         self.initialize()
         
     def initialize(self):
@@ -223,6 +227,8 @@ class DatabaseManager:
                 ON content_root_assets(vault_asset_id, content_root_id);
             CREATE INDEX IF NOT EXISTS idx_content_root_assets_root_role
                 ON content_root_assets(content_root_id, role, vault_asset_id);
+            CREATE INDEX IF NOT EXISTS idx_vault_assets_type_updated
+                ON vault_assets(media_type, updated_at DESC, id DESC);
         """)
         self.conn.commit()
 
@@ -356,6 +362,51 @@ class DatabaseManager:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def query_vault_assets(self, search="", media_type=None, *, asset_ids=None, offset=0, limit=200):
+        if media_type and media_type not in {"image", "video"}:
+            raise ValueError("El tipo de medio debe ser image o video.")
+        clean_offset = max(0, int(offset))
+        clean_limit = max(1, min(int(limit), 1000))
+        clauses = []
+        params = []
+        if media_type:
+            clauses.append("media_type=?")
+            params.append(media_type)
+        allowed_ids = None
+        if asset_ids is not None:
+            allowed_ids = {int(value) for value in asset_ids}
+            if not allowed_ids:
+                return {"items": [], "total": 0}
+            self.conn.execute(
+                "CREATE TEMP TABLE IF NOT EXISTS vault_query_filter_ids "
+                "(id INTEGER PRIMARY KEY)"
+            )
+            self.conn.execute("DELETE FROM temp.vault_query_filter_ids")
+            self.conn.executemany(
+                "INSERT INTO temp.vault_query_filter_ids (id) VALUES (?)",
+                ((asset_id,) for asset_id in allowed_ids),
+            )
+            clauses.append("id IN (SELECT id FROM temp.vault_query_filter_ids)")
+        query = str(search or "").strip().casefold()
+        if query:
+            clauses.append(
+                "(instr(unicode_casefold(display_name), ?) > 0 "
+                "OR instr(unicode_casefold(source_path), ?) > 0 "
+                "OR instr(unicode_casefold(asset_hash), ?) > 0)"
+            )
+            params.extend((query, query, query))
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        total = self.conn.execute(
+            f"SELECT COUNT(*) FROM vault_assets {where}", params,
+        ).fetchone()[0]
+        rows = self.conn.execute(
+            f"SELECT * FROM vault_assets {where} "
+            "ORDER BY datetime(updated_at) DESC, id DESC LIMIT ? OFFSET ?",
+            [*params, clean_limit, clean_offset],
+        ).fetchall()
+        return {"items": [dict(row) for row in rows], "total": total}
+
     def get_vault_asset(self, asset_id):
         row = self.conn.execute("SELECT * FROM vault_assets WHERE id=?", (int(asset_id),)).fetchone()
         return dict(row) if row else None
@@ -366,8 +417,12 @@ class DatabaseManager:
         if not clean_name:
             raise ValueError("El nombre de la colección es obligatorio.")
         with self.conn:
+            self.conn.execute("BEGIN IMMEDIATE")
+            existing = self.conn.execute("SELECT id, name FROM vault_collections").fetchall()
+            if any(row["name"].casefold() == clean_name.casefold() for row in existing):
+                raise ValueError(f"Ya existe la colección '{clean_name}'.")
             self.conn.execute(
-                "INSERT OR IGNORE INTO vault_collections (name) VALUES (?)",
+                "INSERT INTO vault_collections (name) VALUES (?)",
                 (clean_name,),
             )
         row = self.conn.execute(
@@ -407,12 +462,17 @@ class DatabaseManager:
         if not clean_name:
             raise ValueError("El nombre de la familia es obligatorio.")
         clean_tags = self._normalize_content_root_tags(tags)
-        self.conn.execute(
-            "INSERT OR IGNORE INTO content_roots (name, tags_json, notes) VALUES (?, ?, ?)",
-            (clean_name, json.dumps(clean_tags, ensure_ascii=False, sort_keys=True), str(notes or "")),
-        )
-        self.conn.commit()
-        return self.get_content_root_by_name(clean_name)
+        with self.conn:
+            self.conn.execute("BEGIN IMMEDIATE")
+            existing = self.conn.execute("SELECT id, name FROM content_roots").fetchall()
+            if any(row["name"].casefold() == clean_name.casefold() for row in existing):
+                raise ValueError(f"Ya existe la familia '{clean_name}'.")
+            cur = self.conn.execute(
+                "INSERT INTO content_roots (name, tags_json, notes) VALUES (?, ?, ?)",
+                (clean_name, json.dumps(clean_tags, ensure_ascii=False, sort_keys=True), str(notes or "")),
+            )
+            root_id = cur.lastrowid
+        return self.get_content_root(root_id)
 
     def get_content_root(self, root_id):
         row = self.conn.execute(
@@ -424,9 +484,8 @@ class DatabaseManager:
         clean_name = str(name or "").strip()
         if not clean_name:
             return None
-        row = self.conn.execute(
-            "SELECT * FROM content_roots WHERE name=? COLLATE NOCASE", (clean_name,)
-        ).fetchone()
+        rows = self.conn.execute("SELECT * FROM content_roots ORDER BY id").fetchall()
+        row = next((item for item in rows if item["name"].casefold() == clean_name.casefold()), None)
         return self._content_root_row(row)
 
     def list_content_roots(self, search="", status="active"):
@@ -436,10 +495,6 @@ class DatabaseManager:
         clauses = []
         params = []
         query = str(search or "").strip()
-        if query:
-            like = f"%{query}%"
-            clauses.append("(r.name LIKE ? COLLATE NOCASE OR r.tags_json LIKE ? COLLATE NOCASE)")
-            params.extend((like, like))
         if clean_status != "all":
             clauses.append("r.status=?")
             params.append(clean_status)
@@ -459,10 +514,28 @@ class DatabaseManager:
             """,
             params,
         ).fetchall()
-        return [self._content_root_row(row) for row in rows]
+        results = [self._content_root_row(row) for row in rows]
+        if query:
+            folded = query.casefold()
+            results = [
+                row for row in results
+                if folded in row["name"].casefold()
+                or folded in str(row.get("tags_json") or "").casefold()
+            ]
+        return results
 
     def add_asset_to_collection(self, collection_id, asset_id):
         with self.conn:
+            collection_exists = self.conn.execute(
+                "SELECT 1 FROM vault_collections WHERE id=?", (int(collection_id),),
+            ).fetchone()
+            asset_exists = self.conn.execute(
+                "SELECT 1 FROM vault_assets WHERE id=?", (int(asset_id),),
+            ).fetchone()
+            if not collection_exists:
+                raise ValueError("La colección seleccionada ya no existe.")
+            if not asset_exists:
+                raise ValueError("El asset seleccionado ya no existe en Biblioteca.")
             self.conn.execute(
                 "INSERT OR IGNORE INTO vault_collection_assets (collection_id, vault_asset_id) VALUES (?, ?)",
                 (int(collection_id), int(asset_id)),
@@ -493,14 +566,31 @@ class DatabaseManager:
         return [dict(row) for row in rows]
 
     def add_asset_to_content_root(self, root_id, asset_id, role):
+        allowed_roles = {
+            "original_video", "original_image", "overlay", "p1", "p2",
+            "forge_output", "edited_output", "tanda_output", "reference",
+        }
+        clean_role = str(role or "").strip()
+        if clean_role not in allowed_roles:
+            raise ValueError("El rol del asset no es válido.")
         with self.conn:
+            root_exists = self.conn.execute(
+                "SELECT 1 FROM content_roots WHERE id=?", (int(root_id),),
+            ).fetchone()
+            asset_exists = self.conn.execute(
+                "SELECT 1 FROM vault_assets WHERE id=?", (int(asset_id),),
+            ).fetchone()
+            if not root_exists:
+                raise ValueError("La familia seleccionada ya no existe.")
+            if not asset_exists:
+                raise ValueError("El asset seleccionado ya no existe en Biblioteca.")
             self.conn.execute(
                 """
                 INSERT OR IGNORE INTO content_root_assets
                     (content_root_id, vault_asset_id, role)
                 VALUES (?, ?, ?)
                 """,
-                (int(root_id), int(asset_id), str(role)),
+                (int(root_id), int(asset_id), clean_role),
             )
 
     def list_root_assets(self, root_id):

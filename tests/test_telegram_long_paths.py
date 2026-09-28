@@ -30,7 +30,7 @@ def test_send_video_to_topic_handles_calendar_paths_over_260_chars(tmp_path, mon
 
     posted = []
 
-    def fake_post(url, data, files):
+    def fake_post(url, data, files, **_kwargs):
         video_upload = files["video"]
         if isinstance(video_upload, tuple):
             assert video_upload[0] == os.path.basename(normal_path)
@@ -90,7 +90,7 @@ def test_send_video_to_topic_recompresses_from_original_after_413(tmp_path, monk
         SimpleNamespace(status_code=200, text="ok"),
     ]
 
-    def fake_post(url, data, files):
+    def fake_post(url, data, files, **_kwargs):
         return responses.pop(0)
 
     monkeypatch.setattr(organizadortg.os.path, "getsize", fake_getsize)

@@ -100,7 +100,10 @@ def resolve_legacy_reel_schedule(
     if target and target not in {"instagram_reel", "instagram_trial_reel"}:
         return {}
     try:
-        day_number = int(entry.get("day") or 0)
+        day_value = str(entry.get("day") or "0").strip()
+        if day_value.casefold().startswith("dia_"):
+            day_value = day_value[4:]
+        day_number = int(day_value)
         slot_number = int(entry.get("slot") or 0)
         if day_number < 1 or slot_number < 1:
             raise ValueError("La entrada legacy no tiene dia/slot resoluble.")

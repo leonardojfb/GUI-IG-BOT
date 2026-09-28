@@ -83,6 +83,9 @@ def test_trial_only_send_precreates_only_trial_topic(monkeypatch):
     monkeypatch.setattr(organizadortg, "load_tanda_caption_pools", lambda: {})
     monkeypatch.setattr(organizadortg, "load_trial_caption_maps", lambda: {})
     monkeypatch.setattr(organizadortg, "load_normal_individual_caption_maps", lambda: {})
+    monkeypatch.setattr(organizadortg, "load_airtable_config", lambda: object())
+    monkeypatch.setattr(organizadortg, "fetch_published_video_hashes", lambda _config: set())
+    monkeypatch.setattr(organizadortg, "_source_sha256", lambda _path: "a" * 64)
     monkeypatch.setattr(organizadortg, "get_accounts_with_va_info", lambda: [
         {"username": "eve", "account_type": "MAIN", "trials_active": True, "tg_group_id": "-1001", "assigned_va": "Leo"},
     ])
@@ -90,9 +93,13 @@ def test_trial_only_send_precreates_only_trial_topic(monkeypatch):
         {
             "path": "trial.mp4",
             "filename": "vid1__c01__TANDA_T__ACC1__D1__S1.mp4",
-            "category": "main",
-            "day": "Dia_1",
-            "username": "eve",
+                "category": "main",
+                "day": "Dia_1",
+                "slot": 1,
+                "scheduled_date": "2026-08-14",
+                "scheduled_time": "09:00",
+                "timezone": "America/Argentina/Buenos_Aires",
+                "username": "eve",
             "delivery_kind": "trial",
         },
     ])
@@ -104,8 +111,11 @@ def test_trial_only_send_precreates_only_trial_topic(monkeypatch):
     monkeypatch.setattr(organizadortg, "call_tg", lambda *_args, **_kwargs: {"ok": True})
     monkeypatch.setattr(organizadortg, "_send_video_to_topic", lambda *args: (True, args[1]))
 
-    def fake_get_or_create(chat_id, username, tag, topics_state, is_admin=False, force_recreate=False, delivery_kind="normal"):
-        state_key = organizadortg.topic_state_key(chat_id, username, delivery_kind)
+    def fake_get_or_create(
+        chat_id, username, tag, topics_state, is_admin=False,
+        force_recreate=False, delivery_kind="normal", topic_group="account",
+    ):
+        state_key = organizadortg.topic_state_key(chat_id, username, delivery_kind, topic_group)
         if state_key in topics_state and not force_recreate:
             return topics_state[state_key]
         created.append(delivery_kind)

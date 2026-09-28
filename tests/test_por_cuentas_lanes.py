@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from por_cuentas_lanes import LaneRequest, build_lane_entries
+from por_cuentas_lanes import LaneRequest, build_lane_entries, resolve_legacy_reel_schedule
 
 
 def test_build_lane_entries_uses_existing_paths_without_calendar_copies(tmp_path):
@@ -62,3 +62,37 @@ def test_build_lane_entries_requires_one_existing_final_per_slot(tmp_path):
         assert "finales existentes" in str(error)
     else:
         raise AssertionError("No se pueden inventar ni reutilizar archivos finales")
+
+
+def test_legacy_schedule_resolves_numeric_and_calendar_folder_day_values(monkeypatch):
+    import organizadortg
+
+    class FakeDatabase:
+        def get_all_accounts(self):
+            return [{
+                "username": "legacy_user",
+                "assigned_va": "VA Legacy",
+                "account_type": "promo",
+            }]
+
+        def get_va_timezone(self, _va_name):
+            return "America/Argentina/Buenos_Aires"
+
+    monkeypatch.setattr(
+        organizadortg, "get_slots_for_set", lambda *_args: ["9:00 AM"],
+    )
+    database = FakeDatabase()
+    expected = {
+        "scheduled_date": "2026-08-14",
+        "scheduled_time": "10:00",
+        "timezone": "America/Argentina/Buenos_Aires",
+        "media_kind": "video",
+    }
+    for day in (1, "Dia_1"):
+        result = resolve_legacy_reel_schedule({
+            "username": "legacy_user",
+            "delivery_kind": "normal",
+            "day": day,
+            "slot": 1,
+        }, "2026-08-14", database)
+        assert result == expected

@@ -23,8 +23,11 @@ def _stub_common_telegram_plan(monkeypatch, videos, accounts):
     monkeypatch.setattr(organizadortg, "load_airtable_config", lambda: object())
     monkeypatch.setattr(organizadortg, "fetch_published_video_hashes", lambda _config: set())
 
-    def fake_get_or_create(chat_id, username, tag, topics_state, is_admin=False, force_recreate=False, delivery_kind="normal"):
-        state_key = organizadortg.topic_state_key(chat_id, username, delivery_kind)
+    def fake_get_or_create(
+        chat_id, username, tag, topics_state, is_admin=False,
+        force_recreate=False, delivery_kind="normal", topic_group="account",
+    ):
+        state_key = organizadortg.topic_state_key(chat_id, username, delivery_kind, topic_group)
         if state_key not in topics_state or force_recreate:
             topics_state[state_key] = 700 + len(topics_state)
         return topics_state[state_key]
@@ -33,7 +36,11 @@ def _stub_common_telegram_plan(monkeypatch, videos, accounts):
         calls.append((method, dict(data), silent))
         return {"ok": True}
 
-    def fake_send_video(chat_id, topic_id, caption, video_path, topics_state, username, tag, source_hash=None):
+    def fake_send_video(
+        chat_id, topic_id, caption, video_path, topics_state, username,
+        tag, source_hash=None, topic_group="account", delivery_kind="normal",
+        story_link_url=None, **_kwargs,
+    ):
         sent_videos.append((chat_id, topic_id, username, video_path))
         return True, topic_id
 
@@ -59,6 +66,10 @@ def _video(path, username, filename=None):
         "filename": filename or path.name,
         "category": "promo",
         "day": "Dia_1",
+        "slot": 1,
+        "scheduled_date": "2026-08-14",
+        "scheduled_time": "09:00",
+        "timezone": "America/Argentina/Buenos_Aires",
         "username": username,
     }
 
@@ -109,7 +120,7 @@ def test_plan_fails_closed_before_topic_creation_on_airtable_error(monkeypatch, 
 
     result = organizadortg.execute_telegram_plan(datetime(2026, 8, 14))
 
-    assert result == "❌ No se pudo verificar Airtable; no se enviaron videos."
+    assert result == "❌ No se pudo verificar Airtable; no se enviaron publicaciones."
     assert calls == []
     assert sent_videos == []
 
@@ -124,6 +135,10 @@ def test_express_mode_skips_metadata_send_message(monkeypatch, tmp_path):
             "filename": "one__TANDA_T__ACC1__D1__S1.mp4",
             "category": "promo",
             "day": "Dia_1",
+            "slot": 1,
+            "scheduled_date": "2026-08-14",
+            "scheduled_time": "09:00",
+            "timezone": "America/Argentina/Buenos_Aires",
             "username": "alpha",
         }],
         accounts=[{
@@ -157,6 +172,10 @@ def test_telegram_plan_submits_one_worker_per_chat_by_default(monkeypatch, tmp_p
             "filename": f"{username}__TANDA_T__ACC{index}__D1__S1.mp4",
             "category": "promo",
             "day": "Dia_1",
+            "slot": 1,
+            "scheduled_date": "2026-08-14",
+            "scheduled_time": "09:00",
+            "timezone": "America/Argentina/Buenos_Aires",
             "username": username,
         })
         accounts.append({

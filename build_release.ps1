@@ -87,8 +87,10 @@ function Ensure-BundledFfmpegTool {
     Copy-Item -LiteralPath $Command.Source -Destination $Target -Force
 }
 
-Ensure-BundledFfmpegTool "ffmpeg.exe"
-Ensure-BundledFfmpegTool "ffprobe.exe"
+if (-not $BootstrapUpdater) {
+    Ensure-BundledFfmpegTool "ffmpeg.exe"
+    Ensure-BundledFfmpegTool "ffprobe.exe"
+}
 
 foreach ($File in $ReleaseFiles) {
     if (-not (Test-Path -LiteralPath (Join-Path $Root $File) -PathType Leaf)) {

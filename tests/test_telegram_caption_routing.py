@@ -139,7 +139,7 @@ def test_scan_calendar_structure_uses_manifest_when_present(tmp_path, monkeypatc
     assert rows[0]["category"] == "promo"
 
 
-def test_scan_calendar_structure_ignores_manual_publication_targets(tmp_path, monkeypatch):
+def test_scan_calendar_structure_includes_manual_publication_targets(tmp_path, monkeypatch):
     video = tmp_path / "videos_finales" / "T1" / "clip.mp4"
     video.parent.mkdir(parents=True)
     video.write_bytes(b"manifest")
@@ -200,6 +200,9 @@ def test_scan_calendar_structure_ignores_manual_publication_targets(tmp_path, mo
 
     rows = organizadortg.scan_calendar_structure()
 
-    assert len(rows) == 1
-    assert rows[0]["filename"] == "clip__TANDA_T1__ACC1__D1__S1.mp4"
-    assert rows[0]["publication_target"] == "instagram_reel"
+    assert len(rows) == 3
+    assert [row["publication_target"] for row in rows] == [
+        "instagram_reel", "instagram_story", "facebook_page_post",
+    ]
+    assert rows[1]["story_link_url"] == "https://link.ejemplo/alice"
+    assert rows[1]["story_announcement_text"] == "Mira el enlace"
