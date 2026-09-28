@@ -102,6 +102,10 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   parámetros, usados por igual en preview y render y guardados en cada receta;
   los campos vacíos conservan el preset. La GUI permite elegir un subconjunto
   de variantes por índices/rangos y previsualiza la primera variante elegida.
+  La comparación visual V1-Vn permite seleccionar variantes por pareja
+  imagen/identidad; las parejas sin selección propia heredan el ajuste global.
+  La receta de cada ejecución registra índices efectivos por identidad, fuente
+  y hash, y el generador conserva carpetas físicas separadas por identidad.
   Las tandas conservan recetas por ejecución y un resumen agregado al añadir
   más perfiles/subconjuntos sin borrar las salidas anteriores; el historial
   separa rutas solicitadas, nuevas y reutilizadas. Los totales que manifiestos
@@ -109,7 +113,7 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   se muestran como desconocidos.
   Sigue pendiente perspectiva, perfiles
   de metadata configurables, conexión con Vault/captions, cola de jobs persistente,
-  preview comparativo y selección interactiva por salida/identidad, y repetición
+  selección posterior por salida y repetición
   de receta como objeto separado de una ejecución. No presentar Photo Forge
   como implementación completa del prototipo mientras esos puntos sigan pendientes.
 - Si la raiz de carril contiene `photo_forge_manifest.json`, Logistica toma

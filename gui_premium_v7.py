@@ -6034,6 +6034,7 @@ class InstagramAutoPro(ctk.CTk):
         self.photo_forge_strength.set("Estándar")
         self.photo_forge_strength.grid(row=2, column=1, padx=6, pady=(0, 10), sticky="ew")
         self.photo_forge_parameter_ranges = {}
+        self.photo_forge_variant_selections = {}
         GhostButton(form, text="Ajustar efectos", command=self._photo_forge_effect_ranges_dialog).grid(
             row=2, column=2, padx=6, pady=(0, 10), sticky="w")
         ToggleRow(form, "Espejo horizontal", variable=self.photo_forge_mirror_var).grid(
@@ -6097,6 +6098,7 @@ class InstagramAutoPro(ctk.CTk):
         actions = ctk.CTkFrame(f, fg_color="transparent")
         actions.grid(row=3, column=0, sticky="ew", padx=24, pady=(0, 8))
         GhostButton(actions, text="Previsualizar", command=self._photo_forge_preview).pack(side="left", padx=(0, 8))
+        GhostButton(actions, text="Comparar variantes", command=self._photo_forge_compare_variants).pack(side="left", padx=(0, 8))
         self.photo_forge_run_button = PrimaryButton(actions, text="Generar variantes por identidad", command=self._photo_forge_run)
         self.photo_forge_run_button.pack(side="left")
         self.photo_forge_result = ctk.CTkTextbox(f, height=95, fg_color=BG_CARD2, text_color=TEXT_BODY)
@@ -6199,6 +6201,174 @@ class InstagramAutoPro(ctk.CTk):
 
     def _photo_forge_selected_accounts(self):
         return [self.photo_forge_account_rows[index] for index in self.photo_forge_accounts.curselection()]
+
+    def _photo_forge_compare_variants(self):
+        sources = [self.photo_forge_sources.get(i) for i in range(self.photo_forge_sources.size())]
+        accounts = self._photo_forge_selected_accounts()
+        if not sources or not accounts:
+            return messagebox.showwarning("Photo Forge", "Agrega imágenes y selecciona al menos una identidad.", parent=self)
+        try:
+            total = int(self.photo_forge_variant_count.get())
+            if not 1 <= total <= 20:
+                raise ValueError("Usa entre 1 y 20 variantes por imagen.")
+            import photo_forge
+            defaults = photo_forge.normalize_variant_indices(
+                total, self.photo_forge_variant_selection.get().strip() or None,
+            )
+        except (ValueError, ImportError) as error:
+            return messagebox.showwarning("Photo Forge", str(error), parent=self)
+
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Comparar variantes por imagen e identidad")
+        dialog.geometry("1040x760")
+        dialog.minsize(760, 520)
+        dialog.transient(self)
+        dialog.grid_columnconfigure(0, weight=1)
+        dialog.grid_rowconfigure(2, weight=1)
+        header = ctk.CTkFrame(dialog, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 6))
+        header.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(header, text="Imagen:").grid(row=0, column=0, padx=(0, 6))
+        source_var = ctk.StringVar(value=f"1 · {os.path.basename(sources[0])}")
+        source_labels = [f"{i + 1} · {os.path.basename(path)}" for i, path in enumerate(sources)]
+        source_box = ctk.CTkComboBox(header, values=source_labels, variable=source_var, state="readonly")
+        source_box.grid(row=0, column=1, sticky="ew", padx=(0, 14))
+        ctk.CTkLabel(header, text="Identidad:").grid(row=0, column=2, padx=(0, 6))
+        account_labels = [f"@{row.get('username', '')}" for row in accounts]
+        account_var = ctk.StringVar(value=account_labels[0])
+        account_box = ctk.CTkComboBox(header, values=account_labels, variable=account_var, state="readonly", width=200)
+        account_box.grid(row=0, column=3, sticky="e")
+        status = ctk.CTkLabel(dialog, text="Marca las variantes que quieres producir para esta combinación.", anchor="w", text_color=TEXT_MUTED)
+        status.grid(row=1, column=0, sticky="ew", padx=18, pady=4)
+        grid = ctk.CTkScrollableFrame(dialog, fg_color=BG_CARD2)
+        grid.grid(row=2, column=0, sticky="nsew", padx=16, pady=8)
+        grid.grid_columnconfigure((0, 1, 2, 3), weight=1)
+        actions = ctk.CTkFrame(dialog, fg_color="transparent")
+        actions.grid(row=3, column=0, sticky="ew", padx=16, pady=(4, 14))
+        saved_images = self.photo_forge_variant_selections
+        check_vars = {}
+        pair_dirty = [False]
+        preview_refs = []
+        card_widgets = []
+        active_tempdir = [None]
+        render_serial = [0]
+        closed = [False]
+
+        def current_pair():
+            source_index = source_labels.index(source_var.get())
+            account_index = account_labels.index(account_var.get())
+            return sources[source_index], accounts[account_index]
+
+        def save_visible():
+            if not check_vars or not pair_dirty[0]:
+                return
+            source_path, account_row = current_pair()
+            chosen = [index for index, variable in check_vars.items() if variable.get()]
+            username = str(account_row.get("username", ""))
+            key = os.path.normcase(os.path.abspath(source_path)).casefold()
+            saved_images.setdefault(username, {})[key] = chosen
+
+        def clear_cards():
+            for widget in card_widgets:
+                widget.destroy()
+            card_widgets.clear()
+            check_vars.clear()
+            preview_refs.clear()
+
+        def load_pair(_value=None, save_current=True):
+            if save_current:
+                save_visible()
+            render_serial[0] += 1
+            serial = render_serial[0]
+            clear_cards()
+            source_path, account_row = current_pair()
+            key = os.path.normcase(os.path.abspath(source_path)).casefold()
+            username = str(account_row.get("username", ""))
+            chosen = saved_images.get(username, {}).get(key, defaults)
+            pair_dirty[0] = key in saved_images.get(username, {})
+            chosen = set(chosen)
+            profile = self.photo_forge_profile_labels.get(self.photo_forge_profile.get(), "original")
+            strength = self.photo_forge_strength_labels.get(self.photo_forge_strength.get(), "standard")
+            ranges = dict(getattr(self, "photo_forge_parameter_ranges", {}))
+            mirror = bool(self.photo_forge_mirror_var.get())
+            batch = self.photo_forge_batch.get().strip() or "preview"
+            paths = []
+            for index in range(1, total + 1):
+                card = ctk.CTkFrame(grid, fg_color=BG_CARD, corner_radius=4)
+                card.grid(row=(index - 1) // 4, column=(index - 1) % 4, sticky="nsew", padx=6, pady=6)
+                card_widgets.append(card)
+                image_label = ctk.CTkLabel(card, text="Renderizando...", width=190, height=190, fg_color=BG_INPUT)
+                image_label.pack(fill="both", expand=True, padx=7, pady=(7, 2))
+                variable = ctk.BooleanVar(value=index in chosen)
+                check_vars[index] = variable
+                ctk.CTkCheckBox(card, text=f"Variante {index}", variable=variable).pack(anchor="w", padx=9, pady=8)
+                variable.trace_add("write", lambda *_args: pair_dirty.__setitem__(0, True))
+                paths.append((index, image_label))
+            status.configure(text=f"Generando comparación para @{username} · {os.path.basename(source_path)}...")
+
+            def task():
+                import photo_forge
+                folder = tempfile.mkdtemp(prefix="photo-forge-compare-")
+                rendered = []
+                try:
+                    for index, _label in paths:
+                        output = os.path.join(folder, f"variant-{index:02d}.png")
+                        photo_forge.render_photo_preview(
+                            source_path, output, profile=profile, variant_index=index,
+                            strength=strength, mirror_horizontal=mirror, account=account_row,
+                            batch_name=batch, variants_per_image=total, parameter_ranges=ranges,
+                        )
+                        rendered.append((index, output))
+                except Exception:
+                    shutil.rmtree(folder, ignore_errors=True)
+                    raise
+                return folder, rendered
+
+            def done(success, result):
+                if not success:
+                    if not closed[0] and serial == render_serial[0]:
+                        status.configure(text=f"No se pudo generar la comparación: {result}")
+                    return
+                folder, rendered = result
+                if closed[0] or serial != render_serial[0]:
+                    shutil.rmtree(folder, ignore_errors=True)
+                    return
+                if active_tempdir[0]:
+                    shutil.rmtree(active_tempdir[0], ignore_errors=True)
+                active_tempdir[0] = folder
+                from PIL import Image, ImageOps
+                for index, path in rendered:
+                    with Image.open(path) as image:
+                        thumb = ImageOps.exif_transpose(image).convert("RGB")
+                        thumb.thumbnail((190, 190), Image.Resampling.LANCZOS)
+                        ref = ctk.CTkImage(light_image=thumb, dark_image=thumb, size=thumb.size)
+                    preview_refs.append(ref)
+                    paths[index - 1][1].configure(image=ref, text="")
+                status.configure(text=f"@{username} · {os.path.basename(source_path)} · selecciona las variantes para esta combinación.")
+
+            WorkerThread(self, done, task).start()
+
+        source_box.configure(command=load_pair)
+        account_box.configure(command=load_pair)
+        GhostButton(actions, text="Usar selección global", command=lambda: reset_pair()).pack(side="left")
+        PrimaryButton(actions, text="Guardar selección", command=lambda: finish()).pack(side="right")
+
+        def reset_pair():
+            source_path, account_row = current_pair()
+            key = os.path.normcase(os.path.abspath(source_path)).casefold()
+            saved_images.get(str(account_row.get("username", "")), {}).pop(key, None)
+            pair_dirty[0] = False
+            load_pair(save_current=False)
+
+        def finish():
+            save_visible()
+            closed[0] = True
+            if active_tempdir[0]:
+                shutil.rmtree(active_tempdir[0], ignore_errors=True)
+            dialog.destroy()
+
+        dialog.protocol("WM_DELETE_WINDOW", finish)
+        load_pair()
 
     def _photo_forge_effect_ranges_dialog(self):
         import photo_forge
@@ -6347,12 +6517,28 @@ class InstagramAutoPro(ctk.CTk):
             )
         except (KeyError, ValueError) as error:
             return messagebox.showwarning("Photo Forge", str(error), parent=self)
-        total = len(source_paths) * len(accounts) * len(selected_variants)
+        variant_selections = {}
+        total = 0
+        for account in accounts:
+            username = str(account.get("username", ""))
+            account_map = {}
+            for source in source_paths:
+                source_key = os.path.normcase(os.path.abspath(source)).casefold()
+                override = self.photo_forge_variant_selections.get(username, {}).get(source_key)
+                effective = photo_forge.normalize_variant_indices(
+                    variants_per_image, override if override is not None else selected_variants,
+                )
+                total += len(effective)
+                if override is not None:
+                    account_map[source] = effective
+            if account_map:
+                variant_selections[username] = account_map
         confirmation = (
             f"Se crearán hasta {total} variantes en carpetas separadas por identidad.\n"
             f"Placement: {self.photo_forge_profile.get()} · Intensidad: {strength}.\n"
             f"Efectos con rangos manuales: {len(parameter_ranges)}.\n"
-            f"Variantes elegidas: {', '.join(map(str, selected_variants))}.\n"
+            f"Selecciones personalizadas por imagen/identidad: {sum(len(value) for value in variant_selections.values())}.\n"
+            f"Selección global de respaldo: {', '.join(map(str, selected_variants))}.\n"
             f"Espejo horizontal: {'sí' if mirror_horizontal else 'no'}.\n"
             "La receta, parámetros y hashes se guardarán en el manifiesto.\n"
             "Las imágenes fuente se conservarán sin modificar.\n\n¿Continuar?"
@@ -6376,6 +6562,7 @@ class InstagramAutoPro(ctk.CTk):
                 source_paths, account_rows, output_root, batch_name, mirror_horizontal,
                 profile=profile, variants_per_image=variants_per_image, strength=strength,
                 parameter_ranges=parameter_ranges, variant_indices=selected_variants,
+                variant_selections=variant_selections,
             )
             return photo_forge.create_photo_copies(plan, output_root, batch_name)
 

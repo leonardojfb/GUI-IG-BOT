@@ -294,12 +294,22 @@ def plan_photo_copies(
     strength: str = "standard",
     parameter_ranges: dict | None = None,
     variant_indices: list[int] | str | None = None,
+    variant_selections: dict | None = None,
 ) -> list[dict]:
     if profile not in PHOTO_PROFILES:
         raise ValueError("Selecciona un perfil de salida válido.")
     if not 1 <= int(variants_per_image) <= 20:
         raise ValueError("Las variantes por imagen deben estar entre 1 y 20.")
     selected_variants = normalize_variant_indices(variants_per_image, variant_indices)
+    normalized_pair_selections = {}
+    for username, source_map in (variant_selections or {}).items():
+        if not isinstance(source_map, dict):
+            raise ValueError("La selección Photo Forge por identidad debe ser un mapa de imágenes.")
+        for source_path, indices in source_map.items():
+            source_key = os.path.normcase(os.path.abspath(os.fspath(source_path))).casefold()
+            normalized_pair_selections[(str(username).casefold(), source_key)] = normalize_variant_indices(
+                variants_per_image, indices,
+            )
     if strength not in VARIATION_STRENGTHS:
         raise ValueError("Selecciona una intensidad de variación válida.")
     parameter_ranges = normalize_parameter_ranges(parameter_ranges)
@@ -318,7 +328,11 @@ def plan_photo_copies(
         account_dir = root / username
         for source in sources:
             digest = source_hashes[source]
-            for variant_index in selected_variants:
+            source_key = os.path.normcase(os.path.abspath(str(source))).casefold()
+            account_variants = normalized_pair_selections.get(
+                (str(account.get("username", "")).casefold(), source_key), selected_variants,
+            )
+            for variant_index in account_variants:
                 parameters = _variation_parameters(
                     digest, account, _safe_name(batch_name), variant_index,
                     VARIATION_STRENGTHS[strength], parameter_ranges,
@@ -368,7 +382,7 @@ def plan_photo_copies(
                     "profile": profile,
                     "variant_index": variant_index,
                     "variant_total": int(variants_per_image),
-                    "variant_selection": selected_variants,
+                    "variant_selection": account_variants,
                     "recipe_version": 1,
                     "recipe_id": recipe_id,
                     "recipe_strength": strength,
@@ -530,6 +544,23 @@ def create_photo_copies(plan: list[dict], output_root: str | os.PathLike, batch_
         "strength": plan[0].get("recipe_strength", "standard") if plan else "standard",
         "parameter_ranges": plan[0].get("parameter_ranges", {}) if plan else {},
         "recipe_ids": sorted({str(row.get("recipe_id", "")) for row in plan if row.get("recipe_id")}),
+        "variant_selection_scope": "per_identity_source",
+        "variant_selections": [
+            {
+                "username": username,
+                "source_path": source_path,
+                "source_sha256": source_sha256,
+                "indices": indices,
+            }
+            for (username, source_path, source_sha256), indices in sorted({
+                (
+                    str(row.get("username", "")),
+                    str(row.get("source_path", "")),
+                    str(row.get("source_sha256", "")),
+                ): list(row.get("variant_selection", []))
+                for row in plan
+            }.items())
+        ],
     }
 
     def unique_output_paths(rows):
