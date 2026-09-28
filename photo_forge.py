@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
+import random
 import re
 import shutil
 import tempfile
@@ -14,6 +16,15 @@ from PIL import Image, ImageOps
 
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"}
 MANIFEST_NAME = "photo_forge_manifest.json"
+PHOTO_PROFILES = {
+    "original": (None, None),
+    "story_9_16": (9 / 16, 1920),
+    "post_4_5": (4 / 5, 1350),
+    "square_1_1": (1.0, 1080),
+    "cover_16_9": (16 / 9, 1920),
+    "photo_reel": (None, 2048),
+}
+VARIATION_STRENGTHS = {"subtle": 0.025, "standard": 0.06, "strong": 0.12}
 
 
 def _sha256(path: Path) -> str:
@@ -45,11 +56,128 @@ def validate_sources(source_paths: list[str | os.PathLike], mirror_horizontal: b
                 image.verify()
         except Exception as error:
             raise ValueError(f"Imagen inválida o dañada: {path.name}") from error
-        if mirror_horizontal:
-            with Image.open(path) as image:
-                if getattr(image, "n_frames", 1) > 1:
-                    raise ValueError(f"No se admite una imagen animada para espejo: {path.name}")
+        with Image.open(path) as image:
+            if getattr(image, "n_frames", 1) > 1:
+                raise ValueError(f"Photo Forge requiere imágenes fijas; archivo animado: {path.name}")
     return paths
+
+
+def _variation_parameters(source_hash: str, account: dict, batch: str, index: int, strength: float) -> dict:
+    seed_text = f"{source_hash}:{account.get('id')}:{account.get('username')}:{batch}:{index}"
+    rng = random.Random(int(hashlib.sha256(seed_text.encode("utf-8")).hexdigest()[:16], 16))
+    return {
+        "brightness": round(rng.uniform(1 - strength, 1 + strength), 4),
+        "contrast": round(rng.uniform(1 - strength, 1 + strength), 4),
+        "color": round(rng.uniform(1 - strength * 1.35, 1 + strength * 1.35), 4),
+        "sharpness": round(rng.uniform(1, 1 + strength * 2), 4),
+        "gamma": round(rng.uniform(1 - strength, 1 + strength), 4),
+        "rotation_degrees": round(rng.uniform(-strength * 35, strength * 35), 3),
+        "crop_center_x": round(rng.uniform(0.46, 0.54), 4),
+        "crop_center_y": round(rng.uniform(0.46, 0.54), 4),
+        "grain_amount": round(rng.uniform(0, strength / 0.12), 3) if strength else 0,
+        "grain_seed": rng.randrange(0, 2**31),
+        "jpeg_quality": max(75, min(99, round(100 - strength * 100 + rng.uniform(-2, 2)))),
+        "webp_quality": max(75, min(99, round(100 - strength * 100 + rng.uniform(-2, 2)))),
+    }
+
+
+def _crop_to_profile(image: Image.Image, profile: str, center_x: float, center_y: float) -> Image.Image:
+    ratio, max_dimension = PHOTO_PROFILES[profile]
+    if ratio is not None and image.width and image.height:
+        current = image.width / image.height
+        if current > ratio:
+            width = max(1, round(image.height * ratio))
+            left = round((image.width - width) * min(1.0, max(0.0, center_x)))
+            left = min(image.width - width, max(0, left))
+            image = image.crop((left, 0, left + width, image.height))
+        else:
+            height = max(1, round(image.width / ratio))
+            top = round((image.height - height) * min(1.0, max(0.0, center_y)))
+            top = min(image.height - height, max(0, top))
+            image = image.crop((0, top, image.width, top + height))
+    if max_dimension and max(image.size) > max_dimension:
+        scale = max_dimension / max(image.size)
+        size = (max(1, round(image.width * scale)), max(1, round(image.height * scale)))
+        image = image.resize(size, Image.Resampling.LANCZOS)
+    return image
+
+
+def _render_variant(source_path: Path, output_path: Path, row: dict) -> str:
+    if _sha256(source_path) != row["source_sha256"]:
+        raise OSError(f"La imagen fuente cambió desde la previsualización: {source_path.name}")
+    with Image.open(source_path) as source:
+        image_format = source.format or source_path.suffix.lstrip(".").upper()
+        icc_profile = source.info.get("icc_profile") if source.mode in {"RGB", "RGBA"} else None
+        image = ImageOps.exif_transpose(source).copy()
+    if image.mode == "P" and "transparency" in image.info:
+        image = image.convert("RGBA")
+    params = row.get("parameters") or {}
+    profile = row.get("profile", "original")
+    center_x, center_y = params.get("crop_center_x", 0.5), params.get("crop_center_y", 0.5)
+    alpha = image.getchannel("A") if "A" in image.getbands() else None
+    if alpha is not None:
+        alpha = _crop_to_profile(alpha, profile, center_x, center_y)
+        image = image.convert("RGB")
+    image = _crop_to_profile(image, profile, center_x, center_y).convert("RGB")
+    if row.get("mirror_horizontal"):
+        image = ImageOps.mirror(image)
+        if alpha is not None:
+            alpha = ImageOps.mirror(alpha)
+    from PIL import ImageEnhance
+    for key, enhancer in (
+        ("brightness", ImageEnhance.Brightness),
+        ("contrast", ImageEnhance.Contrast),
+        ("color", ImageEnhance.Color),
+        ("sharpness", ImageEnhance.Sharpness),
+    ):
+        if key in params:
+            image = enhancer(image).enhance(float(params[key]))
+    gamma = float(params.get("gamma", 1.0))
+    if abs(gamma - 1.0) >= 0.001:
+        lut = [max(0, min(255, round(255 * ((value / 255) ** (1 / gamma))))) for value in range(256)]
+        image = image.point(lut * 3)
+    grain_amount = float(params.get("grain_amount") or 0)
+    if grain_amount >= 0.05:
+        rng = random.Random(int(params.get("grain_seed") or 0))
+        from PIL import ImageDraw
+        draw = ImageDraw.Draw(image)
+        point_count = int(image.width * image.height * min(1.0, grain_amount) * 0.002)
+        for _ in range(point_count):
+            x = rng.randrange(image.width)
+            y = rng.randrange(image.height)
+            shade = 0 if rng.randrange(2) else 255
+            draw.point((x, y), fill=(shade, shade, shade))
+    degrees = float(params.get("rotation_degrees") or 0)
+    if abs(degrees) >= 0.01:
+        image = image.rotate(degrees, resample=Image.Resampling.BICUBIC, expand=False)
+        if alpha is not None:
+            alpha = alpha.rotate(degrees, resample=Image.Resampling.BICUBIC, expand=False)
+        radians = math.radians(abs(degrees))
+        safe_factor = 1 / (math.cos(radians) + math.sin(radians))
+        if safe_factor < 1:
+            width = max(1, round(image.width * safe_factor))
+            height = max(1, round(image.height * safe_factor))
+            left, top = (image.width - width) // 2, (image.height - height) // 2
+            box = (left, top, left + width, top + height)
+            image = image.crop(box)
+            if alpha is not None:
+                alpha = alpha.crop(box)
+    if alpha is not None:
+        image.putalpha(alpha)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    save_options = {"icc_profile": icc_profile} if icc_profile else {}
+    suffix = output_path.suffix.lower()
+    if suffix in {".jpg", ".jpeg"}:
+        image = image.convert("RGB")
+        save_options.update(quality=int(params.get("jpeg_quality", 94)), optimize=True)
+        save_format = "JPEG"
+    elif suffix == ".webp":
+        save_options.update(quality=int(params.get("webp_quality", 92)), method=6)
+        save_format = "WEBP"
+    else:
+        save_format = image_format
+    image.save(output_path, format=save_format, **save_options)
+    return _sha256(output_path)
 
 
 def plan_photo_copies(
@@ -58,7 +186,17 @@ def plan_photo_copies(
     output_root: str | os.PathLike,
     batch_name: str,
     mirror_horizontal: bool = False,
+    *,
+    profile: str = "original",
+    variants_per_image: int = 1,
+    strength: str = "standard",
 ) -> list[dict]:
+    if profile not in PHOTO_PROFILES:
+        raise ValueError("Selecciona un perfil de salida válido.")
+    if not 1 <= int(variants_per_image) <= 20:
+        raise ValueError("Las variantes por imagen deben estar entre 1 y 20.")
+    if strength not in VARIATION_STRENGTHS:
+        raise ValueError("Selecciona una intensidad de variación válida.")
     sources = validate_sources(source_paths, mirror_horizontal=mirror_horizontal)
     if not accounts:
         raise ValueError("Selecciona al menos una identidad.")
@@ -74,22 +212,101 @@ def plan_photo_copies(
         account_dir = root / username
         for source in sources:
             digest = source_hashes[source]
-            mirror_suffix = "__MIRROR" if mirror_horizontal else ""
-            filename = f"{source.stem[:100]}__ACC{account_id or 0}_{username}__{digest[:10]}{mirror_suffix}{source.suffix.lower()}"
-            destination = account_dir / filename
-            key = str(destination).casefold()
-            if key in destinations:
-                raise ValueError(f"Dos salidas coinciden en el mismo destino: {destination}")
-            destinations.add(key)
-            rows.append({
-                "username": str(account.get("username", "")),
-                "account_id": account_id,
-                "source_path": str(source),
-                "source_sha256": digest,
-                "mirror_horizontal": bool(mirror_horizontal),
-                "output_path": str(destination),
-            })
+            for variant_index in range(1, int(variants_per_image) + 1):
+                parameters = _variation_parameters(
+                    digest, account, _safe_name(batch_name), variant_index,
+                    VARIATION_STRENGTHS[strength],
+                )
+                no_transform = variants_per_image == 1 and profile == "original" and not mirror_horizontal
+                if no_transform:
+                    parameters = {
+                        "brightness": 1.0, "contrast": 1.0, "color": 1.0,
+                        "sharpness": 1.0, "gamma": 1.0, "rotation_degrees": 0.0,
+                        "crop_center_x": 0.5, "crop_center_y": 0.5,
+                        "grain_amount": 0.0, "grain_seed": 0,
+                        "jpeg_quality": 100, "webp_quality": 100,
+                    }
+                recipe_payload = {
+                    "version": 1,
+                    "profile": profile,
+                    "strength": strength,
+                    "mirror_horizontal": bool(mirror_horizontal),
+                    "variant_index": variant_index,
+                    "parameters": parameters,
+                    "metadata_profile": "preserve_source" if no_transform else "strip_exif_keep_icc_if_compatible",
+                }
+                recipe_id = hashlib.sha256(
+                    json.dumps(recipe_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                ).hexdigest()
+                profile_suffix = "" if profile in {"original", "photo_reel"} else f"__{profile.upper()}"
+                filename = (
+                    f"{source.stem[:80]}__ACC{account_id or 0}_{username}__{digest[:10]}"
+                    f"__V{variant_index:02d}{profile_suffix}{source.suffix.lower()}"
+                )
+                destination = account_dir / filename
+                key = str(destination).casefold()
+                if key in destinations:
+                    raise ValueError(f"Dos salidas coinciden en el mismo destino: {destination}")
+                destinations.add(key)
+                rows.append({
+                    "username": str(account.get("username", "")),
+                    "account_id": account_id,
+                    "source_path": str(source),
+                    "source_sha256": digest,
+                    "mirror_horizontal": bool(mirror_horizontal),
+                    "profile": profile,
+                    "variant_index": variant_index,
+                    "recipe_version": 1,
+                    "recipe_id": recipe_id,
+                    "recipe_strength": strength,
+                    "metadata_profile": recipe_payload["metadata_profile"],
+                    "parameters": parameters,
+                    "output_path": str(destination),
+                })
     return rows
+
+
+def render_photo_preview(
+    source_path: str | os.PathLike,
+    output_path: str | os.PathLike,
+    *,
+    profile: str = "original",
+    variant_index: int = 1,
+    strength: str = "standard",
+    mirror_horizontal: bool = False,
+    account: dict | None = None,
+    batch_name: str = "preview",
+    variants_per_image: int = 3,
+) -> dict:
+    source = Path(source_path).resolve()
+    validate_sources([source], mirror_horizontal=mirror_horizontal)
+    if profile not in PHOTO_PROFILES or strength not in VARIATION_STRENGTHS:
+        raise ValueError("Perfil o intensidad de Photo Forge no válido.")
+    if not 1 <= int(variant_index) <= 20:
+        raise ValueError("La variante debe estar entre 1 y 20.")
+    digest = _sha256(source)
+    if int(variants_per_image) == 1 and profile == "original" and not mirror_horizontal:
+        params = {
+            "brightness": 1.0, "contrast": 1.0, "color": 1.0,
+            "sharpness": 1.0, "rotation_degrees": 0.0,
+            "crop_center_x": 0.5, "crop_center_y": 0.5,
+        }
+    else:
+        params = _variation_parameters(
+            digest, account or {"id": 0, "username": "preview"}, _safe_name(batch_name), int(variant_index),
+            VARIATION_STRENGTHS[strength],
+        )
+    row = {
+        "source_sha256": digest,
+        "profile": profile,
+        "parameters": params,
+        "mirror_horizontal": bool(mirror_horizontal),
+    }
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    _render_variant(source, output, row)
+    with Image.open(output) as image:
+        return {"path": str(output), "width": image.width, "height": image.height, "parameters": params}
 
 
 def create_photo_copies(plan: list[dict], output_root: str | os.PathLike, batch_name: str) -> dict:
@@ -100,12 +317,13 @@ def create_photo_copies(plan: list[dict], output_root: str | os.PathLike, batch_
     if manifest_path.exists():
         with manifest_path.open("r", encoding="utf-8") as stream:
             previous = json.load(stream)
-        if not isinstance(previous, dict) or previous.get("version") != 1 or not isinstance(previous.get("entries"), list):
+        if not isinstance(previous, dict) or previous.get("version") not in {1, 2} or not isinstance(previous.get("entries"), list):
             raise ValueError("El manifiesto existente de Photo Forge no es válido.")
         previous_entries = previous["entries"]
     previous_by_path = {row.get("output_path"): row for row in previous_entries if isinstance(row, dict)}
     created = []
     existing = []
+    written_outputs = []
     try:
         for row in plan:
             source = Path(row["source_path"])
@@ -117,39 +335,63 @@ def create_photo_copies(plan: list[dict], output_root: str | os.PathLike, batch_
                 if (
                     prior
                     and prior.get("source_sha256") == row["source_sha256"]
-                    and bool(prior.get("mirror_horizontal")) == bool(row.get("mirror_horizontal"))
+                    and prior.get("recipe_version", 0) == row.get("recipe_version", 0)
+                    and prior.get("recipe_id") == row.get("recipe_id")
                     and prior.get("output_sha256") == output_hash
                 ):
                     existing.append(prior)
                     continue
-                if not row.get("mirror_horizontal") and output_hash == row["source_sha256"]:
+                if row.get("recipe_version", 0) == 0 and not row.get("mirror_horizontal") and output_hash == row["source_sha256"]:
                     copied = {**row, "output_sha256": output_hash}
                     existing.append(copied)
                     continue
                 else:
                     raise FileExistsError(f"La salida ya existe con otro contenido: {destination}")
-            fd, temp_name = tempfile.mkstemp(prefix=f".{destination.name}.", suffix=".part", dir=destination.parent)
+            fd, temp_name = tempfile.mkstemp(prefix=f".{destination.stem}.", suffix=f".tmp{destination.suffix}", dir=destination.parent)
             os.close(fd)
             try:
-                if row.get("mirror_horizontal"):
+                parameters = row.get("parameters") or {}
+                is_unchanged_copy = (
+                    row.get("profile", "original") == "original"
+                    and not row.get("mirror_horizontal")
+                    and all(parameters.get(key) == value for key, value in {
+                        "brightness": 1.0, "contrast": 1.0, "color": 1.0,
+                        "sharpness": 1.0, "gamma": 1.0, "rotation_degrees": 0.0,
+                        "grain_amount": 0.0,
+                    }.items())
+                )
+                if is_unchanged_copy:
+                    shutil.copy2(source, temp_name)
                     if _sha256(source) != row["source_sha256"]:
                         raise OSError(f"La imagen fuente cambió desde la previsualización: {source.name}")
-                    _render_mirrored_image(source, Path(temp_name))
                 else:
-                    shutil.copy2(source, temp_name)
+                    _render_variant(source, Path(temp_name), row)
+                    if _sha256(source) != row["source_sha256"]:
+                        raise OSError(f"La imagen fuente cambió durante el render: {source.name}")
                 output_hash = _sha256(Path(temp_name))
-                if not row.get("mirror_horizontal") and output_hash != row["source_sha256"]:
+                if is_unchanged_copy and output_hash != row["source_sha256"]:
                     raise OSError(f"La copia no coincide con la imagen fuente: {source.name}")
                 if destination.exists():
                     raise FileExistsError(f"La salida apareció durante la generación: {destination}")
                 os.rename(temp_name, destination)
+                written_outputs.append(destination)
             finally:
                 if os.path.exists(temp_name):
                     os.unlink(temp_name)
-            created.append({**row, "output_sha256": output_hash})
+            with Image.open(destination) as rendered:
+                rendered.load()
+                output_info = {
+                    "width": rendered.width,
+                    "height": rendered.height,
+                    "format": rendered.format or destination.suffix.lstrip(".").upper(),
+                }
+            target_ratio = PHOTO_PROFILES[row.get("profile", "original")][0]
+            if target_ratio is not None and abs(output_info["width"] / output_info["height"] - target_ratio) > 0.01:
+                raise OSError(f"El render no cumple la proporción del perfil {row['profile']}: {destination.name}")
+            created.append({**row, "output_sha256": output_hash, "output_info": output_info})
     except Exception:
-        for row in created:
-            Path(row["output_path"]).unlink(missing_ok=True)
+        for output in written_outputs:
+            output.unlink(missing_ok=True)
         raise
 
     entries_by_path = {row.get("output_path"): row for row in previous_entries}
@@ -158,6 +400,13 @@ def create_photo_copies(plan: list[dict], output_root: str | os.PathLike, batch_
         "version": 1,
         "batch": _safe_name(batch_name),
         "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "recipe": {
+            "version": 1,
+            "profile": plan[0].get("profile", "original") if plan else "original",
+            "variants_per_image": max((int(row.get("variant_index", 1)) for row in plan), default=1),
+            "strength": plan[0].get("recipe_strength", "standard") if plan else "standard",
+            "recipe_ids": sorted({str(row.get("recipe_id", "")) for row in plan if row.get("recipe_id")}),
+        },
         "entries": list(entries_by_path.values()),
     }
     fd, temp_name = tempfile.mkstemp(prefix=f".{MANIFEST_NAME}.", suffix=".tmp", dir=root)
@@ -167,8 +416,8 @@ def create_photo_copies(plan: list[dict], output_root: str | os.PathLike, batch_
             stream.write("\n")
         os.replace(temp_name, manifest_path)
     except Exception:
-        for row in created:
-            Path(row["output_path"]).unlink(missing_ok=True)
+        for output in written_outputs:
+            output.unlink(missing_ok=True)
         raise
     finally:
         if os.path.exists(temp_name):
@@ -192,7 +441,7 @@ def validated_account_outputs(batch_dir: str | os.PathLike, username: str) -> li
         raise ValueError("El manifiesto de Photo Forge no se puede leer.") from error
     if (
         not isinstance(manifest, dict)
-        or manifest.get("version") != 1
+        or manifest.get("version") not in {1, 2}
         or not isinstance(manifest.get("entries"), list)
     ):
         raise ValueError("El manifiesto existente de Photo Forge no es válido.")

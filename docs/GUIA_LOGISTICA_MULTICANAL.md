@@ -20,16 +20,33 @@ Para video, usa los finales validados de Forge en `videos_finales/<tanda>`.
 Para fotos, abre **Photo Forge**:
 
 1. Define nombre de tanda y carpeta de salida.
-2. Agrega las imágenes en el orden deseado. Las tandas de Photo Forge guardan
-   ese orden en su manifiesto; para carpetas externas sin manifiesto, Logística
-   ordena los finales por nombre de archivo.
-3. Selecciona las identidades destino. Cada una recibe su propio archivo final.
-4. Deja **Espejo horizontal** apagado para conservar exactamente los bytes; si
-   lo activas, se crea una variante reflejada y el original no cambia.
-5. Revisa la previsualizacion y confirma **Generar finales por cuenta**.
+2. Agrega las imágenes en el orden deseado; el primer archivo se previsualiza.
+3. Elige un **Placement**: Original, Story 9:16, Post 4:5, Post cuadrado,
+   Portada 16:9 o Photo Reel (imagen). Photo Reel sigue siendo imagen y no se
+   convierte a video.
+4. Elige cuántas variantes generar por imagen (1 a 20) y la intensidad
+   **Sutil**, **Estándar** o **Fuerte**. La receta aplica parámetros
+   deterministas de encuadre, escala de salida, luz, contraste, color, gamma,
+   nitidez, rotación y grano; los formatos con pérdida usan calidad registrada
+   en la receta.
+5. **Espejo horizontal** es opcional. El preview muestra el placement y el
+   primer resultado; vuelve a pulsar **Previsualizar** después de cambiar el
+   número de variantes.
+6. Selecciona las identidades destino y confirma **Generar finales por cuenta**.
+   Cada variante se genera físicamente bajo su identidad; las fotos originales
+   no se modifican ni se copian al calendario.
+7. La tanda guarda perfil, intensidad, parámetros efectivos, procedencia y
+   SHA-256 de cada resultado en `photo_forge_manifest.json`. Para los carriles
+   de imagen, Logística valida esos hashes y mantiene el orden del manifiesto;
+   los carriles Reel actuales aceptan sólo video validado por Forge.
 
 Photo Forge abre **Logistica** con la carpeta de salida y las identidades
 seleccionadas. Revisa esa seleccion antes de calendarizar.
+
+Las imágenes transformadas eliminan EXIF y conservan el perfil ICC cuando es
+compatible con el modo de color de salida; una salida Original sin
+transformaciones conserva exactamente los bytes fuente. Photo Forge acepta
+imágenes fijas JPG, PNG, WebP y TIFF; no procesa GIF ni imágenes animadas.
 
 ## 3. Crear un carril
 
@@ -95,3 +112,10 @@ enviar en la siguiente ejecucion normal.
   manual, no un programador de Meta.
 - Los metadatos de Marketplace son una ayuda para completar la publicacion en
   Meta; no crean el anuncio.
+- Photo Forge ofrece placements y presets de intensidad con parámetros
+  deterministas; todavía no expone controles manuales independientes para cada
+  efecto ni deformación de perspectiva, y aún no está conectado a una cola de
+  producción persistente/Vault de recetas.
+- El perfil de exportación Photo Reel conserva una salida de imagen, pero el
+  carril de calendarización `Photo Reel` independiente aún está pendiente; el
+  destino Reel disponible en Logística requiere video.

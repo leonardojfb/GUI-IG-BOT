@@ -85,10 +85,22 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
 - Cuentas permite configurar un dominio base de Story y un link propio por
   identidad; la resolucion queda en SQLite local y no se agrega a los campos
   sincronizados con Airtable.
-- Implementado: Photo Forge con una salida por identidad, manifiesto de
-  procedencia, copia sin cambios por defecto y espejo horizontal opcional.
-  Al terminar, Logistica abre con la carpeta de salida y las mismas identidades
-  seleccionadas en Photo Forge; la seleccion sigue editable.
+- Implementado parcialmente: Photo Forge genera 1-20 variantes deterministas
+  por imagen e identidad, con perfiles Original, Story 9:16, Post 4:5, cuadrado,
+  portada 16:9 y Photo Reel imagen. Los presets de intensidad cambian encuadre,
+  luz, contraste, color, gamma, nitidez, rotacion y grano; el perfil limita
+  resolucion y calidad JPEG/WebP queda registrada. El original no se modifica;
+  los renders eliminan EXIF y conservan ICC si es compatible. El preview renderiza el primer
+  resultado. Receta, parámetros, fuente y hashes se guardan como campos
+  aditivos del manifiesto v1 para conservar lectores anteriores; Logistica
+  admite manifiestos v1/v2 y valida SHA-256 por identidad. Al terminar,
+  Logistica abre con la carpeta de salida y las identidades elegidas.
+- Pendiente de LEG-53: rangos manuales por parámetro, perspectiva, perfiles de
+  metadata configurables, carril `PHOTO_REEL` de imagen (el Reel actual exige
+  video), conexión con Vault/captions, cola de jobs persistente,
+  preview/selección individual de variantes y repetición de receta como objeto
+  separado de una ejecución. No presentar Photo Forge como implementación
+  completa del prototipo mientras esos puntos sigan pendientes.
 - Si la raiz de carril contiene `photo_forge_manifest.json`, Logistica toma
   solo las salidas registradas para cada identidad y verifica `output_sha256`
   antes de calendarizar. Se conserva el orden del manifiesto; faltantes,
@@ -130,12 +142,13 @@ Rama de trabajo: `feature/por-cuentas-multicanal`.
   tambien se conserva visible en los metadatos enviados al topic.
 - Los carriles rechazan finales que ya esten en el manifiesto o repetidos
   dentro de la tanda candidata, aunque la nueva fecha/destino no choque.
-- Verificacion realizada hasta ahora: `py_compile`, smoke de imports para GUI,
-  Telegram y Photo Forge, y `git diff --check`. No se ejecutaron tests
-  automatizados. La GUI arranco desde el worktree sin traceback, pero las
-  superficies de escritorio no expusieron su ventana; no hay validacion visual
-  ni envio real a Telegram. `docs/GUIA_LOGISTICA_MULTICANAL.md` documenta el
-  flujo de usuario confirmado en el codigo.
+- Verificacion reciente de Photo Forge: `py_compile`, smoke de imports y
+  ejecucion funcional temporal con seis salidas para dos identidades, hashes
+  distintos, original intacto, preview igual a variante 1, transparencia,
+  lectura legacy e idempotencia. No se ejecutaron tests automatizados. El
+  formulario modificado aún no tuvo revisión visual; no hubo envío real a
+  Telegram. `docs/GUIA_LOGISTICA_MULTICANAL.md` documenta el flujo de usuario
+  y las limitaciones actuales.
 - Pendiente antes de release: ejecutar las validaciones del plan, revisar el
   flujo en la GUI instalada y hacer un envio controlado a Telegram.
 - Actualizador: como la release agrega modulos locales, publicar primero una

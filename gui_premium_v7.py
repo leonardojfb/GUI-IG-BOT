@@ -22,6 +22,7 @@ from datetime import date, datetime, timedelta
 import json
 import shutil
 import requests
+import tempfile
 import render_performance
 
 from calendar_manifest import (
@@ -5941,8 +5942,43 @@ class InstagramAutoPro(ctk.CTk):
         GhostButton(form, text="Elegir", width=74, command=self._photo_forge_choose_output).grid(
             row=0, column=4, padx=(4, 14), pady=12)
         self.photo_forge_mirror_var = tk.BooleanVar(value=False)
+        profile_labels = {
+            "Original": "original",
+            "Story 9:16": "story_9_16",
+            "Post 4:5": "post_4_5",
+            "Post cuadrado 1:1": "square_1_1",
+            "Portada 16:9": "cover_16_9",
+            "Photo Reel (imagen)": "photo_reel",
+        }
+        self.photo_forge_profile_labels = profile_labels
+        self.photo_forge_strength_labels = {
+            "Sutil": "subtle", "Estándar": "standard", "Fuerte": "strong",
+        }
+        ctk.CTkLabel(form, text="Placement:", text_color=TEXT_MUTED).grid(
+            row=1, column=0, padx=(14, 6), pady=(0, 8), sticky="e")
+        self.photo_forge_profile = ctk.CTkComboBox(
+            form, values=list(profile_labels), fg_color=BG_INPUT, border_color=BORDER,
+            command=lambda _value: self._photo_forge_show_preview(),
+        )
+        self.photo_forge_profile.set("Original")
+        self.photo_forge_profile.grid(row=1, column=1, padx=6, pady=(0, 8), sticky="ew")
+        ctk.CTkLabel(form, text="Variantes por imagen:", text_color=TEXT_MUTED).grid(
+            row=1, column=2, padx=(14, 6), pady=(0, 8), sticky="e")
+        self.photo_forge_variant_count = ctk.CTkEntry(
+            form, width=70, fg_color=BG_INPUT, border_color=BORDER,
+        )
+        self.photo_forge_variant_count.insert(0, "3")
+        self.photo_forge_variant_count.grid(row=1, column=3, padx=6, pady=(0, 8), sticky="w")
+        ctk.CTkLabel(form, text="Intensidad:", text_color=TEXT_MUTED).grid(
+            row=2, column=0, padx=(14, 6), pady=(0, 10), sticky="e")
+        self.photo_forge_strength = ctk.CTkComboBox(
+            form, values=list(self.photo_forge_strength_labels), fg_color=BG_INPUT,
+            border_color=BORDER, command=lambda _value: self._photo_forge_show_preview(),
+        )
+        self.photo_forge_strength.set("Estándar")
+        self.photo_forge_strength.grid(row=2, column=1, padx=6, pady=(0, 10), sticky="ew")
         ToggleRow(form, "Espejo horizontal", variable=self.photo_forge_mirror_var).grid(
-            row=1, column=1, padx=6, pady=(0, 10), sticky="w")
+            row=2, column=3, padx=6, pady=(0, 10), sticky="w")
 
         content = ctk.CTkFrame(f, fg_color="transparent")
         content.grid(row=2, column=0, sticky="nsew", padx=24, pady=(0, 10))
@@ -5994,11 +6030,13 @@ class InstagramAutoPro(ctk.CTk):
         actions = ctk.CTkFrame(f, fg_color="transparent")
         actions.grid(row=3, column=0, sticky="ew", padx=24, pady=(0, 8))
         GhostButton(actions, text="Previsualizar", command=self._photo_forge_preview).pack(side="left", padx=(0, 8))
-        self.photo_forge_run_button = PrimaryButton(actions, text="Generar finales por cuenta", command=self._photo_forge_run)
+        self.photo_forge_run_button = PrimaryButton(actions, text="Generar variantes por identidad", command=self._photo_forge_run)
         self.photo_forge_run_button.pack(side="left")
         self.photo_forge_result = ctk.CTkTextbox(f, height=95, fg_color=BG_CARD2, text_color=TEXT_BODY)
         self.photo_forge_result.grid(row=4, column=0, sticky="ew", padx=24, pady=(0, 16))
-        self.photo_forge_result.insert("end", "Los originales se conservan. Cada identidad recibe un archivo final separado, byte por byte idéntico al original.")
+        self.photo_forge_result.insert(
+            "end", "Photo Forge crea variantes de imagen por identidad; receta y SHA-256 quedan en el manifiesto."
+        )
 
     def _photo_forge_reload_accounts(self):
         if not hasattr(self, "photo_forge_accounts"):
@@ -6026,6 +6064,9 @@ class InstagramAutoPro(ctk.CTk):
             if path.casefold() not in existing:
                 self.photo_forge_sources.insert("end", path)
                 existing.add(path.casefold())
+        if self.photo_forge_sources.size() and not self.photo_forge_sources.curselection():
+            self.photo_forge_sources.selection_set(0)
+            self._photo_forge_show_preview()
 
     def _photo_forge_remove_images(self):
         for index in reversed(self.photo_forge_sources.curselection()):
@@ -6039,23 +6080,50 @@ class InstagramAutoPro(ctk.CTk):
             self.photo_forge_preview_ref = None
             return
         path = self.photo_forge_sources.get(selection[0])
+        preview_path = ""
         try:
             from PIL import Image, ImageOps
+            import photo_forge
+            fd, preview_path = tempfile.mkstemp(prefix="photo-forge-preview-", suffix=".png")
+            os.close(fd)
+            selected_accounts = self._photo_forge_selected_accounts()
+            account = dict(selected_accounts[0]) if selected_accounts else {"id": 0, "username": "preview"}
+            profile = self.photo_forge_profile_labels.get(self.photo_forge_profile.get(), "original")
+            try:
+                variant_index = int(self.photo_forge_variant_count.get())
+            except (AttributeError, TypeError, ValueError):
+                variant_index = 1
+            strength = self.photo_forge_strength_labels.get(
+                self.photo_forge_strength.get(), "standard"
+            ) if hasattr(self, "photo_forge_strength") else "standard"
+            preview = photo_forge.render_photo_preview(
+                path, preview_path, profile=profile, variant_index=1,
+                strength=strength, mirror_horizontal=bool(self.photo_forge_mirror_var.get()),
+                account=account, batch_name=self.photo_forge_batch.get().strip() or "preview",
+                variants_per_image=max(1, min(20, variant_index)),
+            )
             with Image.open(path) as source:
                 dimensions = source.size
-                image = ImageOps.exif_transpose(source).convert("RGB")
+            with Image.open(preview_path) as rendered:
+                image = ImageOps.exif_transpose(rendered).convert("RGB")
                 image.thumbnail((520, 250), Image.Resampling.LANCZOS)
                 self.photo_forge_preview_ref = ctk.CTkImage(
                     light_image=image, dark_image=image, size=image.size
                 )
             self.photo_forge_preview.configure(
                 image=self.photo_forge_preview_ref,
-                text=f"{os.path.basename(path)} · {dimensions[0]}×{dimensions[1]}",
+                text=(f"{os.path.basename(path)} · {dimensions[0]}×{dimensions[1]} → "
+                      f"{preview['width']}×{preview['height']} · {self.photo_forge_profile.get()} · V1"),
                 compound="top",
             )
-        except Exception:
-            self.photo_forge_preview.configure(image=None, text=f"No se pudo previsualizar: {os.path.basename(path)}")
+        except Exception as error:
+            self.photo_forge_preview.configure(
+                image=None, text=f"Preview no disponible: {os.path.basename(path)} · {error}"
+            )
             self.photo_forge_preview_ref = None
+        finally:
+            if preview_path:
+                Path(preview_path).unlink(missing_ok=True)
 
     def _photo_forge_selected_accounts(self):
         return [self.photo_forge_account_rows[index] for index in self.photo_forge_accounts.curselection()]
@@ -6065,17 +6133,31 @@ class InstagramAutoPro(ctk.CTk):
         accounts = self._photo_forge_selected_accounts()
         if not source_count or not accounts:
             return messagebox.showwarning("Photo Forge", "Selecciona imágenes e identidades.", parent=self)
+        try:
+            variant_count = int(self.photo_forge_variant_count.get())
+            if not 1 <= variant_count <= 20:
+                raise ValueError("Usa entre 1 y 20 variantes por imagen.")
+            if self.photo_forge_profile.get() not in self.photo_forge_profile_labels:
+                raise ValueError("Selecciona un placement válido.")
+        except ValueError as error:
+            return messagebox.showwarning("Photo Forge", str(error), parent=self)
+        if not self.photo_forge_sources.curselection() and source_count:
+            self.photo_forge_sources.selection_set(0)
+        self._photo_forge_show_preview()
         self.photo_forge_result.configure(state="normal")
         self.photo_forge_result.delete("1.0", "end")
         self.photo_forge_result.insert(
             "end",
             f"Lote: {self.photo_forge_batch.get().strip()}\n"
-            f"Imágenes: {source_count} · Identidades: {len(accounts)} · Finales: {source_count * len(accounts)}\n"
+            f"Perfil: {self.photo_forge_profile.get()} · Variantes/foto: {variant_count} · "
+            f"Intensidad: {self.photo_forge_strength.get()}\n"
+            f"Imágenes: {source_count} · Identidades: {len(accounts)} · Finales: "
+            f"{source_count * len(accounts) * variant_count}\n"
             f"Salida: {os.path.join(self.photo_forge_output.get().strip(), self.photo_forge_batch.get().strip())}\n"
             + (
-                "Se aplicará espejo horizontal. JPEG se re-codifica en calidad 100; el original no cambia."
+                "Se aplicará espejo horizontal además del perfil y las variaciones elegidas. Los originales no cambian."
                 if self.photo_forge_mirror_var.get()
-                else "Se preservan los bytes del archivo. No hay conversión ni modificación del original."
+                else "Se aplicará recorte de placement y variaciones deterministas. Los originales no cambian."
             ),
         )
         self.photo_forge_result.configure(state="disabled")
@@ -6088,14 +6170,25 @@ class InstagramAutoPro(ctk.CTk):
         mirror_horizontal = bool(self.photo_forge_mirror_var.get())
         if not source_paths or not accounts or not output_root or not batch_name:
             return messagebox.showwarning("Photo Forge", "Completa imágenes, identidades, lote y salida.", parent=self)
-        total = len(source_paths) * len(accounts)
+        try:
+            variants_per_image = int(self.photo_forge_variant_count.get())
+            if not 1 <= variants_per_image <= 20:
+                raise ValueError("Usa entre 1 y 20 variantes por imagen.")
+            profile = self.photo_forge_profile_labels[self.photo_forge_profile.get()]
+            strength_label = self.photo_forge_strength.get()
+            strength = self.photo_forge_strength_labels[strength_label]
+            if strength not in {"subtle", "standard", "strong"}:
+                raise ValueError("Selecciona una intensidad válida.")
+        except (KeyError, ValueError) as error:
+            return messagebox.showwarning("Photo Forge", str(error), parent=self)
+        total = len(source_paths) * len(accounts) * variants_per_image
         confirmation = (
-            f"Se crearán hasta {total} archivos finales en carpetas separadas por identidad.\n"
+            f"Se crearán hasta {total} variantes en carpetas separadas por identidad.\n"
+            f"Placement: {self.photo_forge_profile.get()} · Intensidad: {strength}.\n"
             f"Espejo horizontal: {'sí' if mirror_horizontal else 'no'}.\n"
+            "La receta, parámetros y hashes se guardarán en el manifiesto.\n"
+            "Las imágenes fuente se conservarán sin modificar.\n\n¿Continuar?"
         )
-        if mirror_horizontal:
-            confirmation += "JPEG se re-codifica en calidad 100.\n"
-        confirmation += "Las imágenes fuente se conservarán sin modificar.\n\n¿Continuar?"
         if not messagebox.askyesno(
             "Generar Photo Forge",
             confirmation,
@@ -6112,7 +6205,8 @@ class InstagramAutoPro(ctk.CTk):
         def task():
             import photo_forge
             plan = photo_forge.plan_photo_copies(
-                source_paths, account_rows, output_root, batch_name, mirror_horizontal
+                source_paths, account_rows, output_root, batch_name, mirror_horizontal,
+                profile=profile, variants_per_image=variants_per_image, strength=strength,
             )
             return photo_forge.create_photo_copies(plan, output_root, batch_name)
 
@@ -6125,7 +6219,7 @@ class InstagramAutoPro(ctk.CTk):
                     "end",
                     f"Finales nuevos: {len(result['created'])} · Ya existentes: {len(result['existing'])}\n"
                     f"Manifiesto: {result['manifest_path']}\n"
-                    "Cada salida pertenece a una identidad; no se copiaron archivos al calendario.",
+                    "Cada variante pertenece a una identidad; no se copiaron archivos al calendario.",
                 )
                 self.acct_lane_root.delete(0, "end")
                 self.acct_lane_root.insert(0, result["batch_dir"])
