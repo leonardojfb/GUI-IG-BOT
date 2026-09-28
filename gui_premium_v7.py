@@ -3563,8 +3563,12 @@ class InstagramAutoPro(ctk.CTk):
         self.image_batch_paths = {}
         self.image_batch_status = {}
         for row in batches:
-            label = row["name"] if row["status"] == "validated" else (
-                f"{row['name']} [{row['status']}: {row['capacity']} finales]")
+            if row["status"] == "validated":
+                label = row["name"]
+            elif row["status"] == "legacy":
+                label = f"{row['name']} [LEGADO: requiere tanda neutral]"
+            else:
+                label = f"{row['name']} [{row['status']}: {row['capacity']} finales]"
             self.image_batch_paths[label] = row["path"]
             self.image_batch_status[label] = row["status"]
         try:
@@ -3612,8 +3616,16 @@ class InstagramAutoPro(ctk.CTk):
             row = next((item for item in photo_forge.discover_photo_batches(Path(path).parent)
                         if item["path"] == path), None)
             self.image_result.delete("1.0", "end")
-            self.image_result.insert("end", f"Tanda {self.image_batch_combo.get()} no calendarizable. "
-                                            f"Capacidad física: {row['capacity'] if row else 0}.")
+            if row and row["status"] == "legacy":
+                message = (
+                    f"{self.image_batch_combo.get()} es una tanda Photo Forge de legado y sus archivos "
+                    "están ligados a identidades. Se conserva intacta y no se puede calendarizar aquí. "
+                    "Abre Photo Forge, genera una tanda nueva neutral y luego actualiza este inventario."
+                )
+            else:
+                message = (f"Tanda {self.image_batch_combo.get()} no calendarizable. "
+                           f"Capacidad física: {row['capacity'] if row else 0}.")
+            self.image_result.insert("end", message)
             return
         try:
             outputs = photo_forge.validated_neutral_outputs(path)

@@ -666,3 +666,26 @@ def test_image_logistics_tab_uses_neutral_batch_and_category(tmp_path, monkeypat
         assert app.calendar_media_position.cget("text") == "1 / 1"
     finally:
         cleanup()
+
+
+def test_image_logistics_explains_legacy_batch_without_mutating_it(tmp_path, monkeypatch):
+    app, cleanup = _make_app()
+    try:
+        import gui_premium_v7 as gui
+
+        monkeypatch.setattr(gui, "_BASE_DIR", str(tmp_path))
+        batch = tmp_path / "imagenes_finales" / "LEGACY_BATCH"
+        batch.mkdir(parents=True)
+        manifest = batch / "photo_forge_manifest.json"
+        original = json.dumps({"version": 1, "batch": "LEGACY_BATCH", "entries": []}, indent=2)
+        manifest.write_text(original, encoding="utf-8")
+
+        app._image_refresh_inventory()
+
+        label = "LEGACY_BATCH [LEGADO: requiere tanda neutral]"
+        assert label in app.image_batch_paths
+        assert app.image_batch_status[label] == "legacy"
+        assert "genera una tanda nueva neutral" in app.image_result.get("1.0", "end")
+        assert manifest.read_text(encoding="utf-8") == original
+    finally:
+        cleanup()
