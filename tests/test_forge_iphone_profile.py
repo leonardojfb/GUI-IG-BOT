@@ -12,6 +12,39 @@ import pytest
 from console_encoding import ffmpeg_tool_command, ffmpeg_tool_exists
 
 
+def test_forge_copy_retry_returns_successful_attempt_number():
+    from gui_premium_v7 import _run_forge_copy_with_retries
+
+    attempts = []
+
+    def operation():
+        attempts.append(None)
+        if len(attempts) < 3:
+            raise RuntimeError(f"transient-{len(attempts)}")
+        return {"output": "ok"}
+
+    result, attempt_number = _run_forge_copy_with_retries(operation)
+
+    assert result == {"output": "ok"}
+    assert attempt_number == 3
+    assert len(attempts) == 3
+
+
+def test_forge_copy_retry_reports_last_error_after_five_attempts():
+    from gui_premium_v7 import ForgeCopyRetryError, _run_forge_copy_with_retries
+
+    attempts = []
+
+    def operation():
+        attempts.append(None)
+        raise RuntimeError(f"failure-{len(attempts)}")
+
+    with pytest.raises(ForgeCopyRetryError, match=r"5 intentos.*failure-5"):
+        _run_forge_copy_with_retries(operation)
+
+    assert len(attempts) == 5
+
+
 def _probe(*, hdr=True, audio=True):
     video = {
         "index": 0,

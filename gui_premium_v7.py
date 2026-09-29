@@ -49,6 +49,24 @@ ensure_stdout_utf8()
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _ACCT_HIST_FILE = os.path.join(_BASE_DIR, "dist_accounts_history.json")
+FORGE_COPY_MAX_ATTEMPTS = 5
+
+
+class ForgeCopyRetryError(RuntimeError):
+    """A Forge copy did not pass rendering and validation within its retry budget."""
+
+
+def _run_forge_copy_with_retries(operation, max_attempts=FORGE_COPY_MAX_ATTEMPTS):
+    """Return a successful copy operation and its 1-based attempt number."""
+    errors = []
+    for attempt_number in range(1, max_attempts + 1):
+        try:
+            return operation(), attempt_number
+        except Exception as error:
+            errors.append(str(error))
+    raise ForgeCopyRetryError(
+        f"Forge agotó {max_attempts} intentos para la copia; último error: {errors[-1]}"
+    )
 
 
 def _windows_long_path(path):
@@ -5842,31 +5860,36 @@ class InstagramAutoPro(ctk.CTk):
             def process_copy(copy_job):
                 vid_path, out_path, filename, out_name, vh, meta, fingerprint = copy_job
                 try:
-                    if output_profile:
-                        if pending_retry and os.path.isfile(out_path):
-                            params = validate_existing_copy(
-                                vid_path, out_path, meta, output_profile,
-                                preflight["sources"][vid_path])
-                            params["recovered_published_copy"] = True
-                        else:
-                            params = render_validated_copy(
-                                vid_path, out_path, meta, output_profile,
-                                preflight["sources"][vid_path], enabled=fx_enabled,
-                                strength=forge_strength, overrides=forge_overrides,
-                                threads=performance.ffmpeg_threads,
-                            )
-                        params.update({"output_profile": output_profile,
-                                       "source_color": preflight["sources"][vid_path],
-                                       "source_color_assumption": preflight["assumptions"].get(vid_path),
-                                       "output_color": "hlg" if output_profile == "iphone_hlg" else "sdr",
-                                       "output_codec": "hevc", "output_container": "mov"})
-                    else:
-                        params = metadata_pool.apply_variant_and_metadata(
+                    def render_or_recover():
+                        if output_profile:
+                            if pending_retry and os.path.isfile(out_path):
+                                params = validate_existing_copy(
+                                    vid_path, out_path, meta, output_profile,
+                                    preflight["sources"][vid_path])
+                                params["recovered_published_copy"] = True
+                            else:
+                                params = render_validated_copy(
+                                    vid_path, out_path, meta, output_profile,
+                                    preflight["sources"][vid_path], enabled=fx_enabled,
+                                    strength=forge_strength, overrides=forge_overrides,
+                                    threads=performance.ffmpeg_threads,
+                                )
+                            return params
+                        return metadata_pool.apply_variant_and_metadata(
                             vid_path, out_path, meta,
                             enabled=fx_enabled, strength=forge_strength,
                             overrides=forge_overrides,
                             ffmpeg_threads=performance.ffmpeg_threads,
                         )
+
+                    params, attempt_number = _run_forge_copy_with_retries(render_or_recover)
+                    params["forge_attempts"] = attempt_number
+                    if output_profile:
+                        params.update({"output_profile": output_profile,
+                                       "source_color": preflight["sources"][vid_path],
+                                       "source_color_assumption": preflight["assumptions"].get(vid_path),
+                                       "output_color": "hlg" if output_profile == "iphone_hlg" else "sdr",
+                                       "output_codec": "hevc", "output_container": "mov"})
                 except Exception as error:
                     raise RuntimeError(f"Forge falló en '{filename}': {error}") from error
                 return filename, out_name, vh, fingerprint, vid_path, out_path, meta, params
