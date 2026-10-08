@@ -1,6 +1,8 @@
 from datetime import datetime
+import hashlib
 
 import organizadortg
+from airtable_sync import AirtableSyncError
 
 
 def _stub_common_telegram_plan(monkeypatch, videos, accounts):
@@ -18,6 +20,8 @@ def _stub_common_telegram_plan(monkeypatch, videos, accounts):
     monkeypatch.setattr(organizadortg, "get_slots_for_set", lambda *_args: ["9:00 AM"])
     monkeypatch.setattr(organizadortg, "convert_et_to_va_tz", lambda slot, _tz: (slot, slot))
     monkeypatch.setattr(organizadortg.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(organizadortg, "load_airtable_config", lambda: object())
+    monkeypatch.setattr(organizadortg, "fetch_published_video_hashes", lambda _config: set())
 
     def fake_get_or_create(chat_id, username, tag, topics_state, is_admin=False, force_recreate=False, delivery_kind="normal"):
         state_key = organizadortg.topic_state_key(chat_id, username, delivery_kind)
@@ -29,7 +33,7 @@ def _stub_common_telegram_plan(monkeypatch, videos, accounts):
         calls.append((method, dict(data), silent))
         return {"ok": True}
 
-    def fake_send_video(chat_id, topic_id, caption, video_path, topics_state, username, tag):
+    def fake_send_video(chat_id, topic_id, caption, video_path, topics_state, username, tag, source_hash=None):
         sent_videos.append((chat_id, topic_id, username, video_path))
         return True, topic_id
 
@@ -37,6 +41,77 @@ def _stub_common_telegram_plan(monkeypatch, videos, accounts):
     monkeypatch.setattr(organizadortg, "call_tg", fake_call_tg)
     monkeypatch.setattr(organizadortg, "_send_video_to_topic", fake_send_video)
     return calls, sent_videos
+
+
+def _account(username, chat_id):
+    return {
+        "username": username,
+        "account_type": "promo",
+        "assigned_va": "VA1",
+        "tg_group_id": chat_id,
+        "va_timezone": "America/Argentina/Buenos_Aires",
+    }
+
+
+def _video(path, username, filename=None):
+    return {
+        "path": str(path),
+        "filename": filename or path.name,
+        "category": "promo",
+        "day": "Dia_1",
+        "username": username,
+    }
+
+
+def test_plan_omits_identical_published_bytes_for_every_account(monkeypatch, tmp_path):
+    old = tmp_path / "old.mp4"
+    new = tmp_path / "new.mp4"
+    old.write_bytes(b"same")
+    new.write_bytes(b"different")
+    _calls, sent_videos = _stub_common_telegram_plan(
+        monkeypatch,
+        [
+            _video(old, "alpha"),
+            _video(old, "beta", "renamed.mp4"),
+            _video(new, "beta"),
+        ],
+        [_account("alpha", "-1001"), _account("beta", "-1002")],
+    )
+    published_hash = hashlib.sha256(old.read_bytes()).hexdigest()
+    monkeypatch.setattr(organizadortg, "load_airtable_config", lambda: object(), raising=False)
+    monkeypatch.setattr(
+        organizadortg,
+        "fetch_published_video_hashes",
+        lambda _config: {published_hash},
+        raising=False,
+    )
+
+    result = organizadortg.execute_telegram_plan(datetime(2026, 8, 14))
+
+    assert [video[3] for video in sent_videos] == [str(new)]
+    assert "Omitidos publicados: 2" in result
+
+
+def test_plan_fails_closed_before_topic_creation_on_airtable_error(monkeypatch, tmp_path):
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"test")
+    calls, sent_videos = _stub_common_telegram_plan(
+        monkeypatch, [_video(video, "alpha")], [_account("alpha", "-1001")]
+    )
+    monkeypatch.setattr(organizadortg, "load_airtable_config", lambda: object(), raising=False)
+
+    def unavailable(_config):
+        raise AirtableSyncError("down")
+
+    monkeypatch.setattr(
+        organizadortg, "fetch_published_video_hashes", unavailable, raising=False
+    )
+
+    result = organizadortg.execute_telegram_plan(datetime(2026, 8, 14))
+
+    assert result == "❌ No se pudo verificar Airtable; no se enviaron videos."
+    assert calls == []
+    assert sent_videos == []
 
 
 def test_express_mode_skips_metadata_send_message(monkeypatch, tmp_path):

@@ -69,6 +69,6 @@ Ficheros de Estado:
 
 telegram_state_v11.json: Guarda los IDs de los hilos de Telegram.
 
-fingerprint_history.json: NO BORRAR. Contiene la memoria de qué ha publicado cada cuenta.
+fingerprint_history.json: Historial local de combinaciones distribuidas. El bloqueo de reenvío de videos marcados como publicados en Telegram usa Airtable como fuente autoritativa.
 
 Nota del Arquitecto: Este flujo está diseñado para escalar la marca de Tatiana de forma orgánica, minimizando el riesgo de shadowban mediante el uso de metadatos spoofing y entropía en los textos.

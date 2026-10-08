@@ -18,6 +18,7 @@ from airtable_sync import (
     apply_airtable_mirror_plan,
     fetch_airtable_records,
     fetch_airtable_accounts,
+    fetch_published_video_hashes,
     load_airtable_config,
     prepare_airtable_account_table,
     save_airtable_config,
@@ -56,6 +57,41 @@ class AirtableConfigTest(unittest.TestCase):
 
 
 class AirtableFetchTest(unittest.TestCase):
+    def test_fetch_published_hashes_uses_dedicated_table_and_all_pages(self):
+        calls = []
+
+        def fake_get(url, *, headers, params, timeout):
+            calls.append((url, params.copy()))
+            if params.get("offset"):
+                return FakeResponse({
+                    "records": [{"id": "rec2", "fields": {"SHA-256": "b" * 64}}]
+                })
+            return FakeResponse({
+                "records": [{"id": "rec1", "fields": {"SHA-256": "a" * 64}}],
+                "offset": "next",
+            })
+
+        hashes = fetch_published_video_hashes(
+            AirtableConfig("pat_secret", "app123", "Cuentas"), fake_get
+        )
+
+        self.assertEqual(hashes, {"a" * 64, "b" * 64})
+        self.assertEqual(
+            calls[0][0], "https://api.airtable.com/v0/app123/Videos%20publicados"
+        )
+        self.assertEqual(calls[1][1]["offset"], "next")
+
+    def test_fetch_published_hashes_rejects_invalid_hash(self):
+        def fake_get(_url, *, headers, params, timeout):
+            return FakeResponse({
+                "records": [{"id": "rec1", "fields": {"SHA-256": "wrong"}}]
+            })
+
+        with self.assertRaisesRegex(AirtableSyncError, "videos publicados"):
+            fetch_published_video_hashes(
+                AirtableConfig("pat_secret", "app123", "Cuentas"), fake_get
+            )
+
     def test_fetch_airtable_records_keeps_record_ids_across_pages(self):
         calls = []
 

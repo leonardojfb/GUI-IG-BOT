@@ -5,12 +5,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 import json
+import re
 from urllib.parse import quote
 
 import requests
 
 
 CONFIG_FILE = Path(__file__).with_name("airtable_config.json")
+PUBLISHED_VIDEOS_TABLE = "Videos publicados"
 MANAGED_FIELDS = (
     "username",
     "two_factor",
@@ -504,6 +506,44 @@ def fetch_airtable_records(
         offset = payload.get("offset")
         if not offset:
             return records
+
+
+def fetch_published_video_hashes(
+    config: AirtableConfig,
+    requests_get: Callable[..., Any] = requests.get,
+) -> set[str]:
+    """Devuelve los SHA-256 publicados desde la tabla global de Airtable."""
+    url = "https://api.airtable.com/v0/{}/{}".format(
+        quote(config.base_id, safe=""), quote(PUBLISHED_VIDEOS_TABLE, safe="")
+    )
+    hashes: set[str] = set()
+    offset: str | None = None
+    while True:
+        params: dict[str, Any] = {"pageSize": 100}
+        if offset:
+            params["offset"] = offset
+        try:
+            response = requests_get(
+                url, headers=_airtable_headers(config), params=params, timeout=20
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            raise AirtableSyncError(
+                "No se pudo descargar los videos publicados de Airtable."
+            ) from exc
+        records = payload.get("records") if isinstance(payload, dict) else None
+        if not isinstance(records, list):
+            raise AirtableSyncError("Airtable devolvió videos publicados inválidos.")
+        for record in records:
+            fields = record.get("fields") if isinstance(record, dict) else None
+            value = fields.get("SHA-256") if isinstance(fields, dict) else None
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise AirtableSyncError("Airtable devolvió videos publicados inválidos.")
+            hashes.add(value)
+        offset = payload.get("offset")
+        if not offset:
+            return hashes
 
 
 def _coerce_managed_row(row: AirtableAccount | dict[str, Any]) -> dict[str, Any]:
