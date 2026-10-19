@@ -6,7 +6,7 @@ La pantalla TRIAL permite elegir General o Individual por cuenta. Individual con
 
 ## Datos y reparto
 
-La ruta del TXT pertenece a `trial_tandas`, separada de `batch_tandas`; así funcionan las tandas TRIAL sin fila normal. Se reutiliza el parser de TXT que usa Telegram. Un TXT inexistente o sin captions impide distribuir las cuentas en General. Para cada tanda, se ordenan sus asignaciones por día, slot, cuenta y archivo. Ese orden consume el pool de captions en una sola secuencia compartida por todas las cuentas de la tanda en General: cada elemento aparece una vez antes de volver al primero. Las cuentas en Individual no consumen el pool. La distribución fija `caption_mode=general` y el texto literal `caption` en cada entrada del manifiesto. En Individual fija `caption_mode=individual` y conserva la resolución por origen actual.
+La ruta del TXT pertenece a `trial_tandas`, separada de `batch_tandas`; así funcionan las tandas TRIAL sin fila normal. Se reutiliza el parser de TXT que usa Telegram. Un TXT inexistente o sin captions impide distribuir las cuentas en General. Para cada tanda, se ordenan sus asignaciones por día, slot, cuenta y archivo. Ese orden consume los textos distintos del TXT en una sola secuencia compartida por todas las cuentas de la tanda en General: cada caption aparece una vez antes de volver al primero, aunque el TXT contenga líneas duplicadas. Las cuentas en Individual no consumen el pool. La distribución fija `caption_mode=general` y el texto literal `caption` en cada entrada del manifiesto. En Individual fija `caption_mode=individual` y conserva la resolución por origen actual.
 
 ## Pantalla y envío
 
