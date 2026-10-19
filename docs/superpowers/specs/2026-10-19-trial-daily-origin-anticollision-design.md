@@ -15,7 +15,7 @@ Al distribuir TRIAL, reducir al mínimo la repetición del mismo origen entre cu
 
 Para cada día y plaza, elegir entre los archivos todavía disponibles de la tanda de esa cuenta. Priorizar primero el origen con menor ocupación en ese día entre las cuentas TRIAL existentes y las ya planificadas en esta ejecución; después, preferir evitar reutilizar el origen en la misma cuenta a lo largo de otros días. Mantener la distribución determinista para que vista previa y ejecución con los mismos datos produzcan el mismo plan.
 
-En el modo de días explícitos se conservan los cupos `videos_per_day × days` y el bloqueo por faltantes. En `MAX` se mantiene la cantidad de videos que el asignador actual ofrece por tanda y el orden estable de cuentas, distribuyéndolos entre días para reducir choques. No se modifican los archivos de `videos_finales` ni se crean copias físicas de calendario.
+En el modo de días explícitos se conservan los cupos `videos_per_day × days` y el bloqueo por faltantes. En `MAX`, cada tanda reparte **todos** sus archivos una sola vez entre las cuentas que la eligieron: cada cuenta recibe `total // cuentas` archivos y las primeras `total % cuentas` reciben uno adicional. Por ejemplo, 40 copias para 10 cuentas son 4 por cuenta. Si hay menos copias que cuentas, algunas reciben cero y la vista previa lo indica; esto no se considera un faltante que bloquee `MAX`. Los archivos asignados se distribuyen entre días según `videos_per_day`, conservando la prioridad de anticolisión. No se modifican los archivos de `videos_finales` ni se crean copias físicas de calendario.
 
 ## Interfaz y errores
 
