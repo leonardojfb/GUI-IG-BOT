@@ -172,6 +172,22 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual((self.app_dir / "tools/ffmpeg/bin/ffmpeg.exe").read_bytes(), b"ffmpeg binary")
         self.assertEqual((self.app_dir / "tools/ffmpeg/bin/ffprobe.exe").read_bytes(), b"ffprobe binary")
 
+    def test_apply_package_updates_console_encoding_helper(self):
+        helper = self.app_dir / "console_encoding.py"
+        helper.write_text("old helper", encoding="utf-8")
+        package_path = self.app_dir / "release.zip"
+        package_path.write_bytes(_zip_bytes({
+            "version.json": json.dumps({"version": "1.0.1"}),
+            "console_encoding.py": "def ffmpeg_tool_command(name): return name\n",
+        }))
+
+        updater.apply_package(
+            self.app_dir, package_path,
+            {"version": "1.0.1", "files": ["version.json", "console_encoding.py"]},
+        )
+
+        self.assertIn("ffmpeg_tool_command", helper.read_text(encoding="utf-8"))
+
     def test_apply_package_can_replace_database_when_manifest_explicitly_requests_it(self):
         package_path = self.app_dir / "release.zip"
         package_path.write_bytes(

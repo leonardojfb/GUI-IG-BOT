@@ -34,6 +34,7 @@ DEFAULT_UPDATEABLE_FILES = frozenset(
         "launch_gui.bat",
         "launcher.py",
         "updater.py",
+        "console_encoding.py",
         "organizador.db",
         "organizador.default.db",
         "version.json",

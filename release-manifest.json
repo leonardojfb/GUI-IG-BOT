@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.49",
+    "version":  "1.0.50",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.49",
-    "asset_name":  "MetodoIG-v1.0.49.zip",
-    "sha256":  "1c0d446aa58c6651637111c648bb3480fc14024972db6e6aad9a4f4c61625a39",
-    "notes":  "Calendario y TRIAL, captions globales, Logistica Forge, Telegram por origen y cuenta, reintentos Forge y reparacion de consola.",
+    "github_release_tag":  "v1.0.50",
+    "asset_name":  "MetodoIG-v1.0.50.zip",
+    "sha256":  "641b9a0113c4101e52014a95a5922c4ea6a9a8c806049e8c504c5d7146408a52",
+    "notes":  "Forge SDR/HLG Preview: compatibilidad con instalaciones actualizadas, errores visibles y helper FFmpeg sincronizado.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",

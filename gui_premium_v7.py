@@ -5794,9 +5794,9 @@ class InstagramAutoPro(ctk.CTk):
         retry_items = None
         self.forge_iphone_assume_unknown_sdr = False
         if selected_profile != "Legacy MP4":
-            from forge_iphone_profile import preflight_batch, probe_file
             profile_key = "iphone_hlg" if selected_profile == "iPhone HLG" else "iphone_sdr"
             try:
+                from forge_iphone_profile import preflight_batch, probe_file
                 probes = {path: probe_file(path) for path in self.forge_video_paths}
                 preflight = preflight_batch(probes, profile_key)
             except Exception as error:
@@ -5937,8 +5937,8 @@ class InstagramAutoPro(ctk.CTk):
                 return messagebox.showerror("Reintento Forge", str(error))
         preflight = None
         if output_profile:
-            from forge_iphone_profile import preflight_batch, probe_file, runtime_capabilities
             try:
+                from forge_iphone_profile import preflight_batch, probe_file, runtime_capabilities
                 missing = {"libx265", "aac", "zscale"} - runtime_capabilities()
                 if missing:
                     raise RuntimeError(f"FFmpeg no soporta: {', '.join(sorted(missing))}")

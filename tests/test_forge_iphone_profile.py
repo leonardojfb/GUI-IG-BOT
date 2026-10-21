@@ -4,12 +4,27 @@ import copy
 import importlib
 import json
 import subprocess
+import sys
+import types
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
 from console_encoding import ffmpeg_tool_command, ffmpeg_tool_exists
+
+
+def test_profile_imports_with_old_console_encoding_helper(monkeypatch):
+    source = Path(__file__).parents[1] / "forge_iphone_profile.py"
+    old_helper = types.ModuleType("console_encoding")
+    old_helper.ensure_stdout_utf8 = lambda: None
+    monkeypatch.setitem(sys.modules, "console_encoding", old_helper)
+    spec = importlib.util.spec_from_file_location("forge_profile_legacy_helper_test", source)
+    module = importlib.util.module_from_spec(spec)
+
+    spec.loader.exec_module(module)
+
+    assert Path(module.ffmpeg_tool_command("ffprobe")).name in {"ffprobe", "ffprobe.exe"}
 
 
 def _probe(*, hdr=True, audio=True):

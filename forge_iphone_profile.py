@@ -11,7 +11,16 @@ from datetime import datetime
 from fractions import Fraction
 from pathlib import Path
 
-from console_encoding import ffmpeg_tool_command
+try:
+    from console_encoding import ffmpeg_tool_command
+except ImportError:
+    # Older updaters can leave their old helper beside a newer Forge profile.
+    def ffmpeg_tool_command(tool_name: str) -> str:
+        if tool_name not in {"ffmpeg", "ffprobe"}:
+            raise ValueError(f"Herramienta FFmpeg desconocida: {tool_name}")
+        executable = f"{tool_name}.exe" if os.name == "nt" else tool_name
+        bundled = Path(__file__).resolve().parent / "tools" / "ffmpeg" / "bin" / executable
+        return str(bundled) if bundled.is_file() else tool_name
 
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)

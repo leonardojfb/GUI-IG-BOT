@@ -16,6 +16,36 @@ def test_forge_does_not_expose_untagged_color_checkbox():
 
 
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+
+def test_forge_preview_shows_profile_import_error(monkeypatch):
+    import builtins
+    import gui_premium_v7
+
+    original_import = builtins.__import__
+
+    def failing_import(name, *args, **kwargs):
+        if name == "forge_iphone_profile":
+            raise ImportError("helper incompatible")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", failing_import)
+    showerror = Mock()
+    monkeypatch.setattr(gui_premium_v7.messagebox, "showerror", showerror)
+    process_button = Mock()
+    app = SimpleNamespace(
+        forge_video_paths=["source.mp4"],
+        e_forge_copies=SimpleNamespace(get=lambda: 1),
+        forge_profile_var=SimpleNamespace(get=lambda: "iPhone SDR"),
+        btn_forge_process=process_button,
+    )
+
+    gui_premium_v7.InstagramAutoPro.forge_preview_metadata(app)
+
+    showerror.assert_called_once_with("Preflight iPhone", "helper incompatible")
+    process_button.configure.assert_not_called()
 
 
 SOURCE = Path(__file__).parents[1] / "gui_premium_v7.py"
