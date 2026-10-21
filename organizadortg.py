@@ -1,4 +1,6 @@
 import os
+import base64
+import hashlib
 import threading
 import requests
 import time
@@ -13,9 +15,23 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from calendar_manifest import load_entries, manifest_path, remove_entries_for_accounts
+from calendar_manifest import (
+    load_entries,
+    manifest_path,
+    publication_target_for_entry,
+    remove_entries_for_accounts,
+)
 from database import DatabaseManager
+from social_publishing import is_telegram_publication_target
 from trial_content import source_key_from_filename
+from airtable_sync import (
+    AirtableSyncError,
+    fetch_published_video_hashes,
+    fetch_published_video_origins,
+    fetch_published_video_publications,
+    load_airtable_config,
+    published_wavespeed_family_key,
+)
 from console_encoding import ensure_stdout_utf8
 
 ensure_stdout_utf8()
@@ -104,6 +120,7 @@ def _compress_video_for_tg(video_path: str, target_bytes: int = TG_COMPRESS_TARG
 TOKEN = "8787705820:AAGIeKGzhxHZgUmbbH9G9EgK5Y7M11J-MWM"
 DEFAULT_CHAT_ID = "-1003749971714"
 STATE_FILE = "telegram_state_v11.json"
+DELIVERY_HISTORY_FILE = "telegram_delivery_history.json"
 HISTORY_FILE = "fingerprint_history.json"
 ADMIN_TOPIC_NAME = "Admin"
 TRIAL_TOPIC_PREFIX = "TRIALS - "
@@ -116,10 +133,52 @@ trial_input_root = os.path.join(base_dir, "CALENDARIO_TRIALS")
 db = DatabaseManager()
 
 
-def _publish_button_markup(caption=None):
-    buttons = [{"text": "✅ Publicado", "callback_data": PUBLISH_CALLBACK_DATA}]
-    if caption:
-        buttons.append({"text": "📋 Copiar caption", "copy_text": {"text": str(caption)}})
+def _source_sha256(path):
+    digest = hashlib.sha256()
+    with open(_windows_long_path(path), "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def origin_token_from_identity(origin_identity):
+    if not origin_identity:
+        return None
+    return base64.urlsafe_b64encode(
+        hashlib.blake2s(str(origin_identity).encode("utf-8"), digest_size=12).digest()
+    ).decode("ascii").rstrip("=")
+
+
+def _published_callback_data(source_hash, origin_token=None, account_id=None):
+    if account_id is not None:
+        numeric_id = int(account_id)
+        if not 0 < numeric_id <= 65535:
+            raise ValueError("invalid publication account ID")
+        origin_bytes = (
+            base64.urlsafe_b64decode(origin_token + "==")
+            if origin_token else bytes(12)
+        )
+        if len(origin_bytes) != 12:
+            raise ValueError("invalid publication origin token")
+        payload = numeric_id.to_bytes(2, "big") + bytes.fromhex(source_hash) + origin_bytes
+        if len(payload) != 46:
+            raise ValueError("invalid publication source hash")
+        return "v1" + base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+    callback = "pub:" + base64.urlsafe_b64encode(
+        bytes.fromhex(source_hash)
+    ).decode("ascii").rstrip("=")
+    return f"{callback}:{origin_token}" if origin_token else callback
+
+
+def _publish_button_markup(caption=None, source_hash=None, origin_token=None, account_id=None):
+    callback_data = (
+        _published_callback_data(source_hash, origin_token, account_id)
+        if source_hash else PUBLISH_CALLBACK_DATA
+    )
+    buttons = [{"text": "✅ Publicado", "callback_data": callback_data}]
+    caption_text = str(caption or "")
+    if caption_text and len(caption_text) <= 256:
+        buttons.append({"text": "📋 Copiar caption", "copy_text": {"text": caption_text}})
     return {"inline_keyboard": [buttons]}
 
 
@@ -137,6 +196,22 @@ def _manifest_exists():
     return os.path.exists(_calendar_manifest_file())
 
 
+def _manifest_origin_identity(entry, db_manager=None):
+    identity = str(entry.get("origin_identity") or "").strip()
+    if identity:
+        return identity
+    manager = db_manager or db
+    log_id = entry.get("transform_log_id")
+    if log_id is not None and hasattr(manager, "get_video_transform_source_identity_by_id"):
+        identity = manager.get_video_transform_source_identity_by_id(log_id)
+        if identity:
+            return identity
+    source_path = entry.get("source_path")
+    if source_path and hasattr(manager, "get_video_transform_source_identity"):
+        return manager.get_video_transform_source_identity(source_path)
+    return None
+
+
 def _scan_manifest_calendar_structure(manifest_file=None):
     accounts = get_accounts_with_va_info()
     account_type_map = {
@@ -145,7 +220,11 @@ def _scan_manifest_calendar_structure(manifest_file=None):
     }
     rows = []
     for entry in load_entries(manifest_file or _calendar_manifest_file(), require_source=True):
+        publication_target = publication_target_for_entry(entry)
+        if not is_telegram_publication_target(publication_target):
+            continue
         day_number = int(entry.get("day") or 0)
+        origin_identity = _manifest_origin_identity(entry)
         rows.append({
             "path": entry["source_path"],
             "filename": entry["telegram_filename"],
@@ -155,9 +234,13 @@ def _scan_manifest_calendar_structure(manifest_file=None):
             "slot": int(entry.get("slot") or 0),
             "username": entry["username"],
             "delivery_kind": entry.get("delivery_kind", "normal"),
+            "publication_target": publication_target,
             "account_id": entry.get("account_id"),
             "transform_log_id": entry.get("transform_log_id"),
             "caption_mode": entry.get("caption_mode"),
+            "caption": entry.get("caption"),
+            "origin_identity": origin_identity,
+            "origin_required": not bool(origin_identity),
         })
     rows.sort(key=lambda row: (int(str(row["day"]).split("_")[1]), row.get("slot", 0), row["username"], row["filename"]))
     return rows
@@ -199,6 +282,54 @@ def count_account_calendar_videos_by_kind(account_name, normal_root=None, trial_
         "normal": _count_account_videos_in_root(account_name, normal_root),
         "trial": _count_account_videos_in_root(account_name, trial_root),
     }
+
+
+def count_calendar_videos_by_account(normal_root=None, trial_root=None):
+    """Count eligible calendar videos for every account in one pass."""
+    if normal_root is None and trial_root is None and _manifest_exists():
+        counts_by_account = {}
+        for entry in load_entries(_calendar_manifest_file(), require_source=True):
+            if not is_telegram_publication_target(publication_target_for_entry(entry)):
+                continue
+            kind = entry.get("delivery_kind", "normal")
+            if kind not in {"normal", "trial"}:
+                continue
+            username = entry["username"]
+            counts = counts_by_account.setdefault(
+                username, {"normal": 0, "trial": 0}
+            )
+            counts[kind] += 1
+        return counts_by_account
+
+    normal_root = normal_root or input_root
+    trial_root = trial_root or trial_input_root
+    counts_by_account = {}
+    for kind, calendar_root in (("normal", normal_root), ("trial", trial_root)):
+        if not os.path.isdir(calendar_root):
+            continue
+        for day_folder in os.listdir(calendar_root):
+            if not day_folder.lower().startswith("dia_"):
+                continue
+            day_path = os.path.join(calendar_root, day_folder)
+            if not os.path.isdir(day_path):
+                continue
+            for account_name in os.listdir(day_path):
+                if _safe_calendar_account_name(account_name) != account_name:
+                    continue
+                account_path = os.path.join(day_path, account_name)
+                if not os.path.isdir(account_path):
+                    continue
+                video_count = sum(
+                    1 for filename in os.listdir(account_path)
+                    if filename.lower().endswith((".mp4", ".mov"))
+                )
+                if not video_count:
+                    continue
+                counts = counts_by_account.setdefault(
+                    account_name, {"normal": 0, "trial": 0}
+                )
+                counts[kind] += video_count
+    return counts_by_account
 
 
 def count_account_calendar_videos(account_name, roots=None):
@@ -418,28 +549,43 @@ def save_json(path, data):
             except OSError:
                 pass
 
+
+def _load_delivery_history(path):
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if not isinstance(payload, dict) or payload.get("version") != 1:
+        raise ValueError("Historial de envíos de Telegram inválido")
+    delivered = payload.get("delivered")
+    if not isinstance(delivered, dict) or any(
+        not isinstance(account, str) or not isinstance(origins, list)
+        or any(not isinstance(origin, str) for origin in origins)
+        for account, origins in delivered.items()
+    ):
+        raise ValueError("Historial de envíos de Telegram inválido")
+    return {account: set(origins) for account, origins in delivered.items()}
+
+
+def _save_delivery_history(path, delivered):
+    directory = os.path.dirname(os.path.abspath(path))
+    os.makedirs(directory, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=".telegram_delivery_history.", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump({"version": 1, "delivered": {
+                account: sorted(origins) for account, origins in delivered.items()
+            }}, handle, indent=2)
+            handle.write("\n")
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+
 def load_clean_captions(path=None):
-    if not path or not os.path.exists(path):
-        return []
-    content = open(path, 'r', encoding='utf-8', errors='ignore').read()
-    pattern = r'\[\d{1,2}.*?\].*?:\s*(.*?)(?=\s*\[\d{1,2}|$)'
-    blocks = re.findall(pattern, content, flags=re.DOTALL)
-    captions = [b.strip() for b in blocks if b.strip()]
-    if not captions:
-        # Fallback: cada bloque separado por una línea en blanco es parte de un
-        # caption. Un caption puede contener líneas en blanco internas; sus
-        # hashtags suelen marcar el cierre del bloque.
-        paragraphs = [block.strip() for block in re.split(r"\r?\n\s*\r?\n", content) if block.strip()]
-        captions = []
-        pending = []
-        for paragraph in paragraphs:
-            pending.append(paragraph)
-            if re.search(r"#\w+", paragraph):
-                captions.append("\n\n".join(pending))
-                pending = []
-        if pending:
-            captions.append("\n\n".join(pending))
-    return captions
+    from trial_content import load_clean_captions as read_caption_txt
+    return read_caption_txt(path)
 
 def shuffle_hashtags(text):
     hashtags = re.findall(r'#\w+', text)
@@ -496,8 +642,10 @@ def extract_source_key_from_calendar_filename(filename):
     return source_key_from_filename(source_name)
 
 
-def caption_for_trial_calendar_video(filename, captions):
-    """Return the saved Trial caption literally, never shuffled or rotated."""
+def caption_for_trial_calendar_video(filename, captions, caption_mode=None, manifest_caption=None):
+    """Use each General file's stored caption; keep legacy source routing."""
+    if str(caption_mode or "").strip().lower() == "general":
+        return manifest_caption
     return captions.get(extract_source_key_from_calendar_filename(filename))
 
 
@@ -734,7 +882,7 @@ def delete_known_topics_for_chats(chat_ids, topics_state):
         lambda chat_id, _account_name, _topic_value, _delivery_kind: chat_id in target_chat_ids,
     )
 
-def delete_known_topics_for_accounts(account_names, topics_state):
+def delete_known_topics_for_accounts(account_names, topics_state, delivery_kinds=None):
     target_accounts = {_normalize_account_name(name) for name in account_names if _normalize_account_name(name)}
     trial_targets = {_normalize_account_name(name) for name in account_names if _is_trials_subaccount(name)}
 
@@ -742,6 +890,11 @@ def delete_known_topics_for_accounts(account_names, topics_state):
         normalized_name = _normalize_account_name(account_name)
         if normalized_name not in target_accounts:
             return False
+        if delivery_kinds is not None:
+            topic_kind = "trial" if (
+                delivery_kind == "trial" or _topic_has_trials_prefix(topic_value)
+            ) else "normal"
+            return topic_kind in delivery_kinds.get(normalized_name, set())
         if (
             _topic_has_trials_prefix(topic_value)
             and delivery_kind != "trial"
@@ -755,7 +908,10 @@ def delete_known_topics_for_accounts(account_names, topics_state):
         should_delete,
     )
 
-def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, username, tag):
+def _send_video_to_topic(
+    chat_id, t_id, caption, video_path, topics_state, username, tag,
+    source_hash=None, origin_token=None, upload_filename=None, delivery_kind="normal",
+):
     readable_video_path = _windows_long_path(video_path)
     active_path = readable_video_path
     compressed_tmp = None
@@ -772,16 +928,30 @@ def _send_video_to_topic(chat_id, t_id, caption, video_path, topics_state, usern
             return False, t_id
 
     try:
+        account_match = re.search(
+            r"__ACC(\d+)(?:__|\.|$)", str(upload_filename or ""), re.IGNORECASE
+        )
+        account_id = account_match.group(1) if account_match else None
         for attempt in range(5):
             payload = {
                 'chat_id': chat_id,
                 'message_thread_id': t_id,
                 'supports_streaming': 'true',
-                'reply_markup': json.dumps(_publish_button_markup(caption), ensure_ascii=False),
+                'reply_markup': json.dumps(
+                    _publish_button_markup(
+                        caption,
+                        None if delivery_kind == "trial" else source_hash,
+                        origin_token,
+                        account_id,
+                    ), ensure_ascii=False
+                ),
             }
             if caption:
                 payload['caption'] = caption
-            upload_name = os.path.basename(os.fspath(video_path)) or os.path.basename(os.fspath(active_path))
+            upload_name = (
+                os.path.basename(os.fspath(upload_filename))
+                if upload_filename else os.path.basename(os.fspath(video_path))
+            ) or os.path.basename(os.fspath(active_path))
             content_type = ("video/quicktime" if os.path.splitext(active_path)[1].lower() == ".mov"
                             else "video/mp4")
             with open(active_path, 'rb') as fv:
@@ -935,7 +1105,7 @@ def _account_tag(acc_info):
         return "SUICIDE"
     return category.upper() if category else "GENERAL"
 
-def execute_telegram_plan(start_date, selected_accounts=None, controller=None, reset_topics=False, express_mode=False, db_manager=None):
+def execute_telegram_plan(start_date, selected_accounts=None, controller=None, reset_topics=False, express_mode=False, db_manager=None, allow_published_repeats=False):
     if db_manager is not None:
         global db
         previous_db = db
@@ -947,10 +1117,15 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                 controller,
                 reset_topics=reset_topics,
                 express_mode=express_mode,
+                allow_published_repeats=allow_published_repeats,
             )
         finally:
             db = previous_db
 
+    print(
+        f"Telegram opciones efectivas: borrar_topics={bool(reset_topics)}, "
+        f"envio_express={bool(express_mode)}, repetir_publicados={bool(allow_published_repeats)}"
+    )
     caption_pools = load_tanda_caption_pools()
     trial_caption_maps = load_trial_caption_maps()
     normal_individual_caption_maps = load_normal_individual_caption_maps()
@@ -960,6 +1135,83 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
 
     if not all_videos: return "❌ No se encontraron videos en CALENDARIO_POSTEO. Revisa que las carpetas se llamen 'Dia_X'."
 
+    target_videos = [
+        video for video in all_videos
+        if not selected_accounts or video.get("username") in selected_accounts
+    ]
+    for video in target_videos:
+        account_id = str(video.get("account_id") or "").strip()
+        filename_match = re.search(
+            r"__ACC(\d+)(?:__|\.|$)", str(video.get("filename") or ""), re.IGNORECASE
+        )
+        if not re.fullmatch(r"\d+", account_id) or not filename_match or filename_match.group(1) != account_id:
+            return "❌ El calendario tiene identidad de cuenta inválida; no se enviaron videos."
+
+    all_videos = target_videos
+    delivery_history_path = os.path.join(base_dir, DELIVERY_HISTORY_FILE)
+    try:
+        delivered_origins = _load_delivery_history(delivery_history_path)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"⚠️ No se pudo leer el historial de envíos: {exc}")
+        return "❌ No se pudo leer el historial de envíos; no se enviaron videos."
+    try:
+        published_hashes, published_origins = (set(), set())
+        if any(video.get("delivery_kind", "normal") != "trial" for video in all_videos):
+            published_hashes, published_origins = fetch_published_video_publications(
+                load_airtable_config()
+            )
+        eligible_videos = []
+        omitted_published = 0
+        omitted_duplicate_origins = 0
+        omitted_delivered_origins = 0
+        unverified_origin_count = 0
+        scheduled_origins = set()
+        for video in all_videos:
+            is_trial = video.get("delivery_kind", "normal") == "trial"
+            if not is_trial and video.get("origin_required") and not video.get("origin_identity"):
+                unverified_origin_count += 1
+            source_hash = _source_sha256(video["path"])
+            origin_token = origin_token_from_identity(video.get("origin_identity"))
+            family_key = published_wavespeed_family_key(video["path"])
+            account_id = str(video.get("account_id") or "").strip()
+            already_published = (account_id, source_hash) in published_hashes or (
+                origin_token and (account_id, origin_token) in published_origins
+            ) or (
+                family_key and (
+                    (account_id, family_key) in published_origins
+                )
+            )
+            if not is_trial and already_published and not allow_published_repeats:
+                omitted_published += 1
+                continue
+            if not is_trial:
+                origin_key = origin_token or family_key or source_hash
+                scheduled_key = (account_id, origin_key)
+                if (origin_key in delivered_origins.get(account_id, set())
+                        and not (allow_published_repeats and already_published)):
+                    omitted_delivered_origins += 1
+                    continue
+                if scheduled_key in scheduled_origins:
+                    omitted_duplicate_origins += 1
+                    continue
+                scheduled_origins.add(scheduled_key)
+            video["source_hash"] = source_hash
+            video["origin_token"] = origin_token
+            video["delivery_origin_key"] = None if is_trial else (origin_token or family_key or source_hash)
+            eligible_videos.append(video)
+    except (AirtableSyncError, OSError, ValueError) as exc:
+        print(f"⚠️ No se pudo verificar Airtable: {exc}")
+        return "❌ No se pudo verificar Airtable; no se enviaron videos."
+
+    all_videos = eligible_videos
+    if not all_videos:
+        return (
+            "✨ PROCESO TERMINADO. Se enviaron 0 videos. "
+            f"Omitidos publicados: {omitted_published}. "
+            f"Omitidos por origin duplicado en la cuenta: {omitted_duplicate_origins}. "
+            f"Omitidos por origin ya enviado a la cuenta: {omitted_delivered_origins}. "
+            f"Videos sin origin (comparados por SHA-256): {unverified_origin_count}."
+        )
     topics_state = load_json(os.path.join(base_dir, STATE_FILE))
     from collections import defaultdict
     day_account_videos = defaultdict(lambda: defaultdict(list))
@@ -972,15 +1224,16 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
     if reset_topics:
         target_account_names = set()
         for username in unique_usernames:
-            if selected_accounts and username not in selected_accounts:
-                continue
             acc_info = next((a for a in accounts if a['username'] == username), None)
             if acc_info and acc_info.get('tg_group_id'):
                 target_account_names.add(username)
 
         if target_account_names:
             print(f"🧹 Borrando topics existentes para {len(target_account_names)} cuenta(s) seleccionadas...")
-            reset_summary = delete_known_topics_for_accounts(target_account_names, topics_state)
+            reset_summary = delete_known_topics_for_accounts(
+                target_account_names, topics_state,
+                delivery_kinds={name: account_delivery_kinds[name] for name in target_account_names},
+            )
             save_json(os.path.join(base_dir, STATE_FILE), topics_state)
             if reset_summary["failed"]:
                 for failure in reset_summary["failures"]:
@@ -1080,7 +1333,10 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     trial_map = trial_caption_maps.get(
                         extract_tanda_tag_from_calendar_filename(vid["filename"]), {}
                     )
-                    cap = caption_for_trial_calendar_video(vid["filename"], trial_map)
+                    cap = caption_for_trial_calendar_video(
+                        vid["filename"], trial_map,
+                        vid.get("caption_mode"), vid.get("caption"),
+                    )
                 else:
                     normal_map = normal_individual_caption_maps.get(
                         extract_tanda_tag_from_calendar_filename(vid["filename"]), {}
@@ -1101,9 +1357,14 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     "topic_id": video_topic_id,
                     "caption": cap,
                     "path": vid["path"],
+                    "filename": vid["filename"],
                     "meta": meta,
                     "hora_et": hora_et,
                     "dia_str": dia_str,
+                    "source_hash": vid["source_hash"],
+                    "origin_token": vid.get("origin_token"),
+                    "delivery_origin_key": vid.get("delivery_origin_key"),
+                    "account_id": str(vid.get("account_id")),
                 })
 
         fecha_envio += timedelta(days=1)
@@ -1151,6 +1412,9 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                 break
             if controller:
                 controller.paused.wait()
+                if controller.stopped:
+                    aborted = True
+                    break
             print(f"📤 Enviando a @{job['username']} [{job['tag']}] (Día {job['dia_str']} - {job['hora_et']} ET)...")
             try:
                 topic_id = send_metadata(job)
@@ -1158,13 +1422,24 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     continue
                 ok, _topic_id = _send_video_to_topic(
                     job["chat_id"], topic_id, job["caption"], job["path"],
-                    topics_state, job["username"], job["tag"],
+                    topics_state, job["username"], job["tag"], job["source_hash"],
+                    origin_token=job.get("origin_token"),
+                    upload_filename=job.get("filename"),
+                    delivery_kind=job["delivery_kind"],
                 )
                 if ok:
                     sent += 1
+                    if job["delivery_kind"] != "trial":
+                        with state_lock:
+                            account_origins = delivered_origins.setdefault(job["account_id"], set())
+                            account_origins.add(job["delivery_origin_key"])
+                            _save_delivery_history(delivery_history_path, delivered_origins)
                 with state_lock:
                     save_json(os.path.join(base_dir, STATE_FILE), topics_state)
                 time.sleep(2)
+            except OSError as e:
+                print(f"❌ No se pudo guardar el envío de @{job['username']}; se detiene el envío: {e}")
+                return sent, True
             except Exception as e:
                 print(f"❌ Error físico: {e}")
         return sent, aborted
@@ -1181,15 +1456,22 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     return f"🛑 Abortado. Enviados: {global_sent}"
 
     save_json(os.path.join(base_dir, STATE_FILE), topics_state)
-    return f"✨ PROCESO TERMINADO. Se enviaron {global_sent} videos."
+    return (
+        f"✨ PROCESO TERMINADO. Se enviaron {global_sent} videos. "
+        f"Omitidos publicados: {omitted_published}. "
+        f"Omitidos por origin duplicado en la cuenta: {omitted_duplicate_origins}. "
+        f"Omitidos por origin ya enviado a la cuenta: {omitted_delivered_origins}. "
+        f"Videos sin origin (comparados por SHA-256): {unverified_origin_count}."
+    )
 
 # --- 4. CONTROLADOR DE HILOS Y MOTOR DE EJECUCIÓN ---
 class TelegramBotController:
-    def __init__(self, start_date_str, selected_accounts=None, reset_topics=False, express_mode=False, db_manager=None):
+    def __init__(self, start_date_str, selected_accounts=None, reset_topics=False, express_mode=False, db_manager=None, allow_published_repeats=False):
         self.start_date_str = start_date_str
         self.selected_accounts = selected_accounts
         self.reset_topics = reset_topics
         self.express_mode = express_mode
+        self.allow_published_repeats = allow_published_repeats
         self.db_manager = db_manager
         self._paused = threading.Event()
         self._paused.set()
@@ -1213,6 +1495,7 @@ class TelegramBotController:
             execute_kwargs = {
                 "reset_topics": self.reset_topics,
                 "express_mode": self.express_mode,
+                "allow_published_repeats": self.allow_published_repeats,
             }
             if self.db_manager is not None:
                 execute_kwargs["db_manager"] = self.db_manager
@@ -1228,7 +1511,9 @@ class TelegramBotController:
 
     def pause(self): self._paused.clear()
     def resume(self): self._paused.set()
-    def stop(self): self._stopped = True
+    def stop(self):
+        self._stopped = True
+        self._paused.set()
 
 def preview_telegram_plan():
     all_videos = scan_calendar_structure()

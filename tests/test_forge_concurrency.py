@@ -70,12 +70,12 @@ def _forge_app(tmp_path, completed, video_names=None):
         video.touch()
     metadata = [
         {
-            "iphone_model": "iPhone 15",
+            "iphone_model": "iPhone 16",
             "city": "Miami",
             "lat": "+25.7617",
             "lon": "-080.1918",
             "carrier": "T-Mobile",
-            "ios_version": "18.0",
+            "ios_version": "26.0",
         },
         {
             "iphone_model": "iPhone 16",
@@ -83,7 +83,7 @@ def _forge_app(tmp_path, completed, video_names=None):
             "lat": "+42.3601",
             "lon": "-071.0589",
             "carrier": "Verizon",
-            "ios_version": "18.1",
+            "ios_version": "26.1",
         },
     ]
     return SimpleNamespace(
@@ -272,6 +272,9 @@ def test_iphone_batch_registers_successes_and_reports_incomplete_on_copy_failure
     app = _forge_app(tmp_path, [])
 
     class RecordingDatabase(_Database):
+        def get_all_used_metadata_combos(self):
+            return set()
+
         def save_forge_video(self, _tanda, source, output, _video_hash):
             assert (tmp_path / "videos_finales" / _tanda / output).is_file()
             self.saved_forge_rows.append((source, output))
@@ -385,6 +388,7 @@ def test_iphone_preview_and_process_both_block_ambiguous_color(monkeypatch, tmp_
     monkeypatch.setattr(forge_iphone_profile, "probe_file", lambda _path: ambiguous)
     monkeypatch.setattr(gui_premium_v7.messagebox, "showerror",
                         lambda title, message: errors.append((title, message)))
+    monkeypatch.setattr(gui_premium_v7.messagebox, "askyesno", lambda *_args: False)
     monkeypatch.setattr(gui_premium_v7, "__file__", str(tmp_path / "gui_premium_v7.py"))
     InstagramAutoPro.forge_preview_metadata(app)
     InstagramAutoPro.forge_process(app)
@@ -518,10 +522,10 @@ def test_forge_variant_uses_high_profile_libx264_and_strips_ffmpeg_encoder_tags(
         "source.mp4",
         "output.mp4",
         {
-            "iphone_model": "iPhone 15",
+            "iphone_model": "iPhone 16",
             "lat": "+25.7617",
             "lon": "-080.1918",
-            "ios_version": "18.0",
+            "ios_version": "26.0",
             "carrier": "T-Mobile",
         },
         ffmpeg_threads=3,
@@ -576,10 +580,10 @@ def test_forge_variant_normalizes_square_pixels_and_compatible_pix_fmt(monkeypat
         "source.mp4",
         "output.mp4",
         {
-            "iphone_model": "iPhone 15",
+            "iphone_model": "iPhone 16",
             "lat": "+25.7617",
             "lon": "-080.1918",
-            "ios_version": "18.0",
+            "ios_version": "26.0",
             "carrier": "T-Mobile",
         },
     )

@@ -11,7 +11,8 @@ def test_forge_does_not_expose_untagged_color_checkbox():
     assert "Sin tags: SDR BT.709 ya verificado" not in forge
     assert "forge_untagged_sdr_var" not in forge
     assert "known_untagged_sdr" not in forge
-    assert forge.count("preflight_batch(") == 2
+    assert '"Fuentes sin color"' in forge
+    assert "assume_unknown_sdr=True" in forge
 
 
 from pathlib import Path

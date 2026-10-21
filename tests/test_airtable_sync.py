@@ -18,6 +18,9 @@ from airtable_sync import (
     apply_airtable_mirror_plan,
     fetch_airtable_records,
     fetch_airtable_accounts,
+    fetch_published_video_hashes,
+    fetch_published_video_origins,
+    fetch_published_video_publications,
     load_airtable_config,
     prepare_airtable_account_table,
     save_airtable_config,
@@ -56,6 +59,89 @@ class AirtableConfigTest(unittest.TestCase):
 
 
 class AirtableFetchTest(unittest.TestCase):
+    def test_fetch_published_publications_are_keyed_by_account(self):
+        def fake_get(_url, *, headers, params, timeout):
+            return FakeResponse({
+                "records": [
+                    {"id": "rec1", "fields": {
+                        "Account ID": "1",
+                        "SHA-256": "a" * 64,
+                        "Origin token": "b" * 16,
+                    }},
+                    {"id": "legacy", "fields": {
+                        "SHA-256": "c" * 64,
+                        "Origin token": "d" * 16,
+                    }},
+                    {"id": "legacy-family", "fields": {
+                        "SHA-256": "e" * 64,
+                        "Archivo original": "wavespeed_" + "f" * 32 + "__c09.mov",
+                    }},
+                ]
+            })
+
+        hashes, origins = fetch_published_video_publications(
+            AirtableConfig("pat_secret", "app123", "Cuentas"), fake_get
+        )
+
+        self.assertEqual(hashes, {("1", "a" * 64)})
+        self.assertEqual(origins, {("1", "b" * 16)})
+
+    def test_fetch_published_origins_reads_all_pages(self):
+        calls = []
+
+        def fake_get(url, *, headers, params, timeout):
+            calls.append(params.copy())
+            if params.get("offset"):
+                return FakeResponse({
+                    "records": [{"id": "rec2", "fields": {"Origin token": "bbbbbbbbbbbbbbbb"}}]
+                })
+            return FakeResponse({
+                "records": [{"id": "rec1", "fields": {"Origin token": "aaaaaaaaaaaaaaaa"}}],
+                "offset": "next",
+            })
+
+        origins = fetch_published_video_origins(
+            AirtableConfig("pat_secret", "app123", "Cuentas"), fake_get
+        )
+
+        self.assertEqual(origins, {"aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"})
+        self.assertEqual(calls[1]["offset"], "next")
+
+    def test_fetch_published_hashes_uses_dedicated_table_and_all_pages(self):
+        calls = []
+
+        def fake_get(url, *, headers, params, timeout):
+            calls.append((url, params.copy()))
+            if params.get("offset"):
+                return FakeResponse({
+                    "records": [{"id": "rec2", "fields": {"SHA-256": "b" * 64}}]
+                })
+            return FakeResponse({
+                "records": [{"id": "rec1", "fields": {"SHA-256": "a" * 64}}],
+                "offset": "next",
+            })
+
+        hashes = fetch_published_video_hashes(
+            AirtableConfig("pat_secret", "app123", "Cuentas"), fake_get
+        )
+
+        self.assertEqual(hashes, {"a" * 64, "b" * 64})
+        self.assertEqual(
+            calls[0][0], "https://api.airtable.com/v0/app123/Videos%20publicados"
+        )
+        self.assertEqual(calls[1][1]["offset"], "next")
+
+    def test_fetch_published_hashes_rejects_invalid_hash(self):
+        def fake_get(_url, *, headers, params, timeout):
+            return FakeResponse({
+                "records": [{"id": "rec1", "fields": {"SHA-256": "wrong"}}]
+            })
+
+        with self.assertRaisesRegex(AirtableSyncError, "videos publicados"):
+            fetch_published_video_hashes(
+                AirtableConfig("pat_secret", "app123", "Cuentas"), fake_get
+            )
+
     def test_fetch_airtable_records_keeps_record_ids_across_pages(self):
         calls = []
 
@@ -313,6 +399,70 @@ class AirtableSchemaPreparationTest(unittest.TestCase):
 
 
 class AirtableMirrorTest(unittest.TestCase):
+    @staticmethod
+    def _live_account_schema():
+        def select(name, choices):
+            return {
+                "id": f"fld-{name}",
+                "name": name,
+                "type": "singleSelect",
+                "options": {"choices": [{"name": choice} for choice in choices]},
+            }
+
+        return {
+            "id": "tblAccounts",
+            "name": "CUENTAS EVE",
+            "fields": [
+                {"id": "fldUsername", "name": "Username", "type": "multilineText"},
+                {"id": "fld2fa", "name": "2FA", "type": "multilineText"},
+                select("VA", ["VA Ramon", "iRemoTech"]),
+                select("Categoria", ["MAIN", "Trials"]),
+                select("Trials desbloqueados", ["No", "Sí"]),
+                select("Dia", ["Día 1", "Sin dato"]),
+                select("Red social", ["IG", "Sin dato"]),
+                {"id": "fldVpn", "name": "VPN / Proxy", "type": "multilineText"},
+                {"id": "fldLink", "name": "Link", "type": "multilineText"},
+            ],
+        }
+
+    def test_adapts_local_values_to_live_single_select_schema(self):
+        plan = build_airtable_mirror_plan(
+            [{
+                "username": "eve.xlaine",
+                "account_type": "MAIN",
+                "assigned_va": "VA Ramon",
+                "trials_active": 0,
+                "account_day": "",
+                "social_network": "",
+            }],
+            [{"id": "recXlaine", "fields": {
+                "Username": "eve.xlaine",
+                "VA": "iRemoTech",
+                "Categoria": "MAIN",
+            }}],
+            table_schema=self._live_account_schema(),
+        )
+
+        fields = plan.update[0]["fields"]
+        self.assertEqual(fields["Trials desbloqueados"], "No")
+        self.assertNotIn("Dia", fields)
+        self.assertNotIn("Red social", fields)
+        self.assertEqual(fields["Link"], "")
+
+    def test_rejects_value_missing_from_live_single_select_choices(self):
+        with self.assertRaisesRegex(AirtableSyncError, "@eve.xlaine.*Categoria.*NO_EXISTE"):
+            build_airtable_mirror_plan(
+                [{
+                    "username": "eve.xlaine",
+                    "account_type": "NO_EXISTE",
+                    "assigned_va": "VA Ramon",
+                }],
+                [{"id": "recXlaine", "fields": {
+                    "Username": "eve.xlaine", "Categoria": "MAIN"
+                }}],
+                table_schema=self._live_account_schema(),
+            )
+
     def test_builds_complete_local_mirror_plan(self):
         local = [
             {
@@ -397,6 +547,15 @@ class AirtableGuiConnectionTest(unittest.TestCase):
         ).read()
         self.assertIn('text="Sincronizar GUI → Airtable"', source)
         self.assertIn("apply_airtable_mirror_plan", source)
+
+    def test_gui_mirror_loads_live_schema_before_building_plan(self):
+        source = open(
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "gui_premium_v7.py"),
+            encoding="utf-8",
+        ).read()
+        mirror_source = source[source.index("    def sync_gui_to_airtable(self):"):]
+        self.assertIn("fetch_airtable_table_schema(config)", mirror_source)
+        self.assertIn("table_schema=table_schema", mirror_source)
 
     def test_connection_feedback_reports_reused_first_columns(self):
         text = airtable_schema_preparation_text(AirtableSchemaPreparation(

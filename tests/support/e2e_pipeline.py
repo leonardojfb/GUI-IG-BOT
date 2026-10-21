@@ -376,9 +376,9 @@ def _distribute_all(run_root, matrix, Organizador):
         shutil.rmtree(calendar)
     pairs = [(name, info["category"]) for name, info in matrix["tandas"].items()]
     for tanda, category in pairs:
-        previews[tanda] = Organizador.preview_distribution_tanda(tanda, category, 1, False, "1")
+        previews[tanda] = Organizador.preview_distribution_tanda(tanda, category, 1, False, "MAX")
         random.seed(260726)
-        results[tanda] = Organizador.distribute_tanda(tanda, category, 1, False, "1")
+        results[tanda] = Organizador.distribute_tanda(tanda, category, 1, False, "MAX")
     return previews, results
 
 
@@ -389,7 +389,7 @@ def _run_two_tanda_route(run_root, db_path, matrix):
     with patched_modules(second_root) as mods:
         Organizador = mods[4]
         random.seed(260726)
-        result = Organizador.distribute_tanda("ED_A", "PRUEBA_CAT_A", 1, False, "1", tanda_name_2="FO_A")
+        result = Organizador.distribute_tanda("ED_A", "PRUEBA_CAT_A", 1, False, "MAX", tanda_name_2="FO_A")
         files = list((second_root / "CALENDARIO_POSTEO").rglob("*.mp4"))
         return {"result": result, "count": len(files), "files": [str(p) for p in files]}
 
@@ -400,11 +400,15 @@ def _run_telegram(organizadortg, selected_accounts):
         "call_tg": organizadortg.call_tg,
         "get_or_create_topic": organizadortg.get_or_create_topic,
         "_send_video_to_topic": organizadortg._send_video_to_topic,
+        "load_airtable_config": organizadortg.load_airtable_config,
+        "fetch_published_video_publications": organizadortg.fetch_published_video_publications,
         "sleep": organizadortg.time.sleep,
     }
     organizadortg.call_tg = fake.fake_call
     organizadortg.get_or_create_topic = fake.fake_get_or_create_topic
     organizadortg._send_video_to_topic = fake.fake_send_video
+    organizadortg.load_airtable_config = lambda: object()
+    organizadortg.fetch_published_video_publications = lambda _config: (set(), set())
     organizadortg.time.sleep = lambda seconds: None
     try:
         result = organizadortg.execute_telegram_plan(datetime(2026, 7, 26), selected_accounts=selected_accounts)
@@ -412,6 +416,8 @@ def _run_telegram(organizadortg, selected_accounts):
         organizadortg.call_tg = saved["call_tg"]
         organizadortg.get_or_create_topic = saved["get_or_create_topic"]
         organizadortg._send_video_to_topic = saved["_send_video_to_topic"]
+        organizadortg.load_airtable_config = saved["load_airtable_config"]
+        organizadortg.fetch_published_video_publications = saved["fetch_published_video_publications"]
         organizadortg.time.sleep = saved["sleep"]
     return result, fake.events
 
@@ -513,7 +519,10 @@ def run_e2e_pipeline(keep_artifacts=True):
         telegram_result, telegram_events = _run_telegram(organizadortg, selected_accounts)
 
     manifest["sha256"] = sha256_file
-    calendar_files = list((run_root / "CALENDARIO_POSTEO").rglob("*.mp4"))
+    calendar_manifest = json.loads(
+        (run_root / "calendar_manifest.json").read_text(encoding="utf-8")
+    )
+    distributed_entries = calendar_manifest.get("entries", [])
     findings = []
     findings.extend(audit_filesystem(manifest, run_root / "videos_finales", run_root / "CALENDARIO_POSTEO"))
     findings.extend(audit_database(manifest, db_path))
@@ -521,7 +530,7 @@ def run_e2e_pipeline(keep_artifacts=True):
 
     actual = {
         "processed_outputs": len(manifest["outputs"]),
-        "distributed_files": len(calendar_files),
+        "distributed_files": len(distributed_entries),
         "telegram_sends": len([e for e in telegram_events if e.get("event") == "video"]),
         "categories": matrix["categories"],
         "vas": [v["name"] for v in matrix["vas"]],
@@ -529,8 +538,8 @@ def run_e2e_pipeline(keep_artifacts=True):
     }
     expected = {
         "processed_outputs": 27,
-        "distributed_files": 27,
-        "telegram_sends": 27,
+        "distributed_files": 63,
+        "telegram_sends": 63,
     }
     summary = {
         "run_id": run_root.name,

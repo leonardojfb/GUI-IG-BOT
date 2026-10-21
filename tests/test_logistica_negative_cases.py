@@ -7,6 +7,7 @@ into a calendar day that already has files from a previous run (collision).
 """
 import shutil
 import json
+from pathlib import Path
 
 import pytest
 
@@ -50,7 +51,7 @@ def test_distribute_tanda_missing_folder_returns_graceful_error(isolated_organiz
     )
 
 
-def test_distribute_tanda_refuses_incomplete_iphone_forge_batch(isolated_organizador):
+def test_distribute_tanda_uses_validated_copies_from_partial_iphone_batch(isolated_organizador):
     run_root, Organizador, database = isolated_organizador
     tanda_dir = run_root / "videos_finales" / "IPHONE_INCOMPLETE"
     tanda_dir.mkdir(parents=True)
@@ -67,8 +68,10 @@ def test_distribute_tanda_refuses_incomplete_iphone_forge_batch(isolated_organiz
 
     result = Organizador.distribute_tanda(
         "IPHONE_INCOMPLETE", "PRUEBA_IPHONE_INCOMPLETE", 1, False, "1")
-    assert "incompleta" in result.lower()
-    assert not list((run_root / "CALENDARIO_POSTEO").rglob("*.mov"))
+    assert "Tanda Forge parcial" in result
+    entries = load_entries(manifest_path(run_root))
+    assert len(entries) == 1
+    assert entries[0]["source_path"].endswith("clip__c01.mov")
 
 
 def test_distribute_tanda_uses_only_validated_mov_from_complete_forge_batch(isolated_organizador):
@@ -117,7 +120,7 @@ def test_iphone_mov_flows_from_forge_through_logistics_to_telegram_upload(
     tanda_dir = run_root / "videos_finales" / "IPHONE_FLOW"
     output = tanda_dir / "IPHONE_FLOW__P1__P2__c01.mov"
     forge_iphone_profile.render_validated_copy(source, output, {
-        "iphone_model": "iPhone 14 Pro Max", "ios_version": "26.4",
+        "iphone_model": "iPhone 16 Pro Max", "ios_version": "26.4",
     }, "iphone_sdr", "sdr")
     (tanda_dir / "forge_batch_status.json").write_text(json.dumps({
         "state": "complete", "profile": "iphone_sdr",
@@ -163,7 +166,7 @@ def test_distribute_tanda_category_without_accounts_returns_graceful_error(isola
     assert "No hay cuentas" in result
 
 
-def test_distribute_tanda_rerun_into_existing_day_uses_collision_suffix_not_overwrite(
+def test_distribute_tanda_rerun_does_not_resend_origins_already_received(
     isolated_organizador,
 ):
     run_root, Organizador, database = isolated_organizador
@@ -181,23 +184,114 @@ def test_distribute_tanda_rerun_into_existing_day_uses_collision_suffix_not_over
     import random
 
     random.seed(1)
-    first = Organizador.distribute_tanda("NEG_COLLIDE", "PRUEBA_NEG_COLLIDE_CAT", 1, False, "1")
+    first = Organizador.distribute_tanda("NEG_COLLIDE", "PRUEBA_NEG_COLLIDE_CAT", 1, False, "2")
+    first_entries = load_entries(manifest_path(run_root))
     random.seed(1)
-    second = Organizador.distribute_tanda("NEG_COLLIDE", "PRUEBA_NEG_COLLIDE_CAT", 1, False, "1")
+    second = Organizador.distribute_tanda("NEG_COLLIDE", "PRUEBA_NEG_COLLIDE_CAT", 1, False, "2")
 
     assert "Error" not in first
     assert "Error" not in second
+    assert len(first_entries) == 2, "the first run must deliver the complete two-origin tanda"
 
     entries = load_entries(manifest_path(run_root))
-    names = [entry["telegram_filename"] for entry in entries]
-    assert len(names) == len(set(names)), (
-        f"a rerun into the same Dia_1/account created duplicate manifest names: {names}"
+    assert entries == [], "a second run must not redeliver origins already received by the account"
+
+
+def test_distribute_tanda_sends_each_origin_once_to_every_account_with_rotated_forge_copies(
+    isolated_organizador,
+):
+    run_root, Organizador, database = isolated_organizador
+    tanda_dir = run_root / "videos_finales" / "FULL_TANDA"
+    tanda_dir.mkdir(parents=True)
+    source_names = {
+        "FULL_TANDA__P1_A__ORIGIN_A",
+        "FULL_TANDA__P1_B__ORIGIN_B",
+    }
+    for source in sorted(source_names):
+        for copy_number in (1, 2):
+            (tanda_dir / f"{source}__c{copy_number:02d}.mp4").write_bytes(
+                f"{source}-{copy_number}".encode()
+            )
+
+    db = database.DatabaseManager()
+    db.add_category("PRUEBA_FULL_CAT")
+    db.add_virtual_account("full_acc_a", "PRUEBA_FULL_CAT")
+    db.add_virtual_account("full_acc_b", "PRUEBA_FULL_CAT")
+    db.add_tanda("FULL_TANDA", "FULL_TANDA", "FULL_TANDA", "")
+    db.close()
+
+    result = Organizador.distribute_tanda(
+        "FULL_TANDA", "PRUEBA_FULL_CAT", 1, False, "MAX"
     )
-    assert len(entries) == 1, (
-        "normal manifest distribution replaces the affected account's previous run; "
-        f"expected 1 latest entry, got {len(entries)}"
+    assert "4 videos procesados" in result
+
+    entries = load_entries(manifest_path(run_root))
+    by_account = {}
+    for entry in entries:
+        by_account.setdefault(entry["username"], []).append(entry)
+
+    assert set(by_account) == {"full_acc_a", "full_acc_b"}
+    assert all(len(account_entries) == len(source_names) for account_entries in by_account.values())
+
+    delivered_copies_by_origin = {}
+    for username, account_entries in by_account.items():
+        origins = set()
+        for entry in account_entries:
+            filename = Path(entry["source_path"]).name
+            origin = Organizador._origin_key_from_filename(filename)
+            origins.add(origin)
+            delivered_copies_by_origin.setdefault(origin, {})[username] = filename
+        assert origins == {
+            Organizador._origin_key_from_filename(f"{source}__c01.mp4")
+            for source in source_names
+        }
+
+    assert all(
+        len(set(account_copies.values())) == 2
+        for account_copies in delivered_copies_by_origin.values()
+    ), "when there are enough Forge variants, accounts should receive different copies per origin"
+
+
+def test_distribute_tanda_uses_a_deterministic_rotating_order(isolated_organizador):
+    run_root, Organizador, database = isolated_organizador
+    tanda_dir = run_root / "videos_finales" / "ROTATING_ORDER"
+    tanda_dir.mkdir(parents=True)
+    source_names = [
+        f"ROTATING_ORDER__P1_{index}__P2_{index}.mp4"
+        for index in range(1, 4)
+    ]
+    for index, name in enumerate(source_names):
+        create_video(tanda_dir / name, ("black", "white", "teal")[index], name)
+
+    db = database.DatabaseManager()
+    db.add_category("PRUEBA_ORDER_CAT")
+    for username in ("order_acc_c", "order_acc_a", "order_acc_b"):
+        db.add_virtual_account(username, "PRUEBA_ORDER_CAT")
+    db.add_tanda("ROTATING_ORDER", "ROTATING_ORDER", "ROTATING_ORDER", "")
+    db.close()
+
+    result = Organizador.distribute_tanda(
+        "ROTATING_ORDER", "PRUEBA_ORDER_CAT", 1, False, "MAX"
     )
-    assert entries[0]["source_path"].endswith(("NEG_COLLIDE__P1__P2A.mp4", "NEG_COLLIDE__P1__P2B.mp4"))
+    assert "9 videos procesados" in result
+
+    entries = load_entries(manifest_path(run_root))
+    source_order = sorted(
+        Organizador._origin_key_from_filename(name) for name in source_names
+    )
+    actual = {}
+    for entry in entries:
+        actual.setdefault(entry["username"], {})[entry["day"]] = (
+            Organizador._origin_key_from_filename(Path(entry["source_path"]).name)
+        )
+
+    usernames = ("order_acc_a", "order_acc_b", "order_acc_c")
+    expected = {
+        username: source_order[index:] + source_order[:index]
+        for index, username in enumerate(usernames)
+    }
+    for username in usernames:
+        assert [actual[username][day] for day in (1, 2, 3)] == expected[username]
 
 
 def test_distribute_tanda_does_not_resend_identical_video_to_same_account_across_separate_runs(

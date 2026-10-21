@@ -1,4 +1,5 @@
 import database
+import sqlite3
 
 
 def _temporary_db(tmp_path):
@@ -36,4 +37,38 @@ def test_trial_captions_are_keyed_by_source(tmp_path):
     finally:
         db.close()
         database.DB_PATH = previous
+
+
+def test_trial_tanda_txt_is_independent_of_normal_tandas(tmp_path):
+    db, previous = _temporary_db(tmp_path)
+    try:
+        assert db.set_tanda_trial("TRIAL_ONLY", True)
+        assert db.get_tanda_by_name("TRIAL_ONLY") is None
+        assert db.set_trial_tanda_captions("TRIAL_ONLY", "C:/trial.txt")
+        assert db.get_trial_tanda_captions("TRIAL_ONLY") == "C:/trial.txt"
+        db.close()
+        db = database.DatabaseManager()
+        assert db.get_trial_tanda_captions("TRIAL_ONLY") == "C:/trial.txt"
+        assert db.set_trial_tanda_captions("TRIAL_ONLY", None)
+        assert db.get_trial_tanda_captions("TRIAL_ONLY") is None
+    finally:
+        db.close()
+        database.DB_PATH = previous
+
+
+def test_existing_trial_tandas_gain_txt_column_without_losing_rows(tmp_path):
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE trial_tandas (tanda_name TEXT PRIMARY KEY, created_at TEXT)")
+    conn.execute("INSERT INTO trial_tandas VALUES ('OLD_TRIAL', '2026-01-01')")
+    conn.commit()
+    conn.close()
+    db = database.DatabaseManager(str(path))
+    try:
+        assert db.get_trial_tandas() == ["OLD_TRIAL"]
+        assert db.get_trial_tanda_captions("OLD_TRIAL") is None
+        assert db.set_trial_tanda_captions("OLD_TRIAL", "C:/captions.txt")
+        assert db.get_trial_tanda_captions("OLD_TRIAL") == "C:/captions.txt"
+    finally:
+        db.close()
 

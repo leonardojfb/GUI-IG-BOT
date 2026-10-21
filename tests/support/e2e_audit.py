@@ -37,42 +37,41 @@ def audit_filesystem(manifest, videos_root, calendar_root):
     findings = []
     outputs = manifest["outputs"]
     outputs_by_tanda = defaultdict(list)
-    output_by_hash = {}
+    output_paths_by_tanda = defaultdict(set)
     for item in outputs:
         outputs_by_tanda[item["tanda"]].append(item)
-        output_by_hash[item["output_hash"]] = item
+        output_paths_by_tanda[item["tanda"]].add(str(Path(item["output"]).resolve()))
 
     for tanda in manifest["matrix"]["tandas"]:
         count = len(outputs_by_tanda[tanda])
         if count != 3:
             findings.append(_finding("OUTPUT_COUNT", "FAIL", f"{tanda} has {count} outputs", tanda=tanda))
 
-    calendar_files = [p for p in Path(calendar_root).rglob("*") if p.is_file() and p.suffix.lower() in {".mp4", ".mov"}]
-    calendar_hashes = [manifest["sha256"](p) for p in calendar_files]
-    dupes = [h for h, n in Counter(calendar_hashes).items() if n > 1]
-    if dupes:
-        findings.append(_finding("FILE_DUPLICATE", "FAIL", "duplicated calendar hash", hashes=dupes))
-
+    calendar_manifest = Path(manifest["run_root"]) / "calendar_manifest.json"
+    if not calendar_manifest.is_file():
+        return [_finding("FILE_MISSING", "FAIL", "calendar manifest was not created")]
+    entries = json.loads(calendar_manifest.read_text(encoding="utf-8")).get("entries", [])
     by_tanda = defaultdict(list)
-    for path in calendar_files:
-        tanda = extract_tanda_from_calendar_name(path.name)
-        by_tanda[tanda].append(path)
-        if not tanda:
-            findings.append(_finding("TANDA_MISSING", "FAIL", "calendar file has no TANDA marker", file=str(path)))
+    origins_by_tanda_account = defaultdict(list)
+    seen_names = set()
+    for entry in entries:
+        tanda = entry.get("tanda")
+        if tanda not in manifest["matrix"]["tandas"]:
+            findings.append(_finding("TANDA_MISSING", "FAIL", "manifest entry has no known tanda", file=entry.get("telegram_filename")))
             continue
         expected_category = manifest["matrix"]["tandas"][tanda]["category"]
-        account = path.parent.name
+        account = entry.get("username")
         account_info = manifest["accounts_by_username"].get(account)
         if not account_info:
-            findings.append(_finding("ACCOUNT_UNKNOWN", "FAIL", "calendar account not in manifest", file=str(path), account_actual=account))
+            findings.append(_finding("ACCOUNT_UNKNOWN", "FAIL", "calendar account not in manifest", file=entry.get("telegram_filename"), account_actual=account))
             continue
         if account_info["category"] != expected_category:
             findings.append(
                 _finding(
                     "CATEGORY_MIX",
                     "FAIL",
-                    "calendar file landed in wrong category account",
-                    file=str(path),
+                    "calendar entry targets an account in the wrong category",
+                    file=entry.get("telegram_filename"),
                     tanda=tanda,
                     category_expected=expected_category,
                     account_actual=account,
@@ -80,48 +79,73 @@ def audit_filesystem(manifest, videos_root, calendar_root):
                     va_actual=account_info["va"],
                 )
             )
-        source_candidates = [o for o in outputs_by_tanda[tanda] if path.name.startswith(Path(o["output"]).stem)]
-        if not source_candidates:
+        source_path = Path(entry.get("source_path", ""))
+        if str(source_path.resolve()) not in output_paths_by_tanda[tanda]:
             findings.append(
                 _finding(
                     "TANDA_MIX",
                     "FAIL",
-                    "calendar filename claims a tanda but its source output belongs to another tanda",
-                    file=str(path),
+                    "calendar entry's source output belongs to another tanda",
+                    file=entry.get("telegram_filename"),
                     tanda=tanda,
                     account_actual=account,
                     va_actual=account_info["va"],
                 )
             )
             continue
-        calendar_hash = manifest["sha256"](path)
-        source_path = Path(source_candidates[0]["output"])
-        source_bytes = source_path.read_bytes()
-        calendar_bytes = path.read_bytes()
-        metadata_suffix = calendar_bytes[len(source_bytes):]
-        expected_mutation = re.fullmatch(rb"\n# ID_[A-Za-z0-9]{16}", metadata_suffix)
-        if calendar_bytes.startswith(source_bytes) and expected_mutation:
-            continue
-        findings.append(
-            _finding(
-                "CALENDAR_CONTENT_CHANGED",
-                "FAIL",
-                "calendar file is not the processed output plus Logistica metadata marker",
-                file=str(path),
-                tanda=tanda,
-                source_hash=source_candidates[0].get("source_hash"),
-                output_hash=source_candidates[0]["output_hash"],
-                calendar_hash=calendar_hash,
-                account_actual=account,
-                va_actual=account_info["va"],
-            )
-        )
+        if not source_path.is_file():
+            findings.append(_finding("FILE_MISSING", "FAIL", "calendar source file is missing", file=str(source_path), tanda=tanda))
+        by_tanda[tanda].append(entry)
+        stem = re.sub(r"__c\d+$", "", source_path.stem, flags=re.IGNORECASE)
+        parts = stem.split("__")
+        origin = f"{parts[1]}__{parts[2]}" if len(parts) >= 3 else stem
+        origins_by_tanda_account[(tanda, account)].append(origin)
+        logical_name = entry.get("telegram_filename")
+        if logical_name in seen_names:
+            findings.append(_finding("FILE_DUPLICATE", "FAIL", "duplicate calendar delivery name", file=logical_name, tanda=tanda))
+        seen_names.add(logical_name)
 
-    for tanda in manifest["matrix"]["tandas"]:
-        if len(by_tanda[tanda]) != 3:
-            findings.append(_finding("FILE_MISSING", "FAIL", f"{tanda} has {len(by_tanda[tanda])} distributed files", tanda=tanda))
+    for tanda, tanda_info in manifest["matrix"]["tandas"].items():
+        account_count = sum(
+            1 for account in manifest["matrix"]["accounts"]
+            if account["category"] == tanda_info["category"]
+        )
+        origins = {
+            _audit_origin(Path(output["output"]).name)
+            for output in outputs_by_tanda[tanda]
+        }
+        expected_count = len(origins) * account_count
+        if len(by_tanda[tanda]) != expected_count:
+            findings.append(
+                _finding(
+                    "FILE_MISSING",
+                    "FAIL",
+                    f"{tanda} has {len(by_tanda[tanda])} distributed files; expected {expected_count}",
+                    tanda=tanda,
+                )
+            )
+        for account in manifest["matrix"]["accounts"]:
+            if account["category"] != tanda_info["category"]:
+                continue
+            delivered = origins_by_tanda_account[(tanda, account["username"])]
+            if len(delivered) != len(set(delivered)) or set(delivered) != origins:
+                findings.append(
+                    _finding(
+                        "FILE_MISSING",
+                        "FAIL",
+                        f"{tanda} did not deliver each origin exactly once to {account['username']}",
+                        tanda=tanda,
+                        account_actual=account["username"],
+                    )
+                )
 
     return findings
+
+
+def _audit_origin(filename):
+    stem = re.sub(r"__c\d+$", "", Path(filename).stem, flags=re.IGNORECASE)
+    parts = stem.split("__")
+    return f"{parts[1]}__{parts[2]}" if len(parts) >= 3 else stem
 
 
 def audit_database(manifest, db_path):
@@ -179,16 +203,16 @@ def audit_database(manifest, db_path):
 def audit_telegram(manifest, events, label):
     findings = []
     video_events = [e for e in events if e.get("event") == "video"]
-    seen_paths = Counter(e["video_path"] for e in video_events)
-    for path, count in seen_paths.items():
+    seen_paths = Counter((e["username"], e["video_path"]) for e in video_events)
+    for (username, path), count in seen_paths.items():
         if count != 1:
-            findings.append(_finding("TELEGRAM_DUPLICATE_SEND", "FAIL", "telegram sent a file more than once", file=path, count=count, run=label))
+            findings.append(_finding("TELEGRAM_DUPLICATE_SEND", "FAIL", "telegram sent an origin to one account more than once", file=path, account_actual=username, count=count, run=label))
 
     for event in video_events:
         path = Path(event["video_path"])
         username = event["username"]
         account = manifest["accounts_by_username"].get(username, {})
-        tanda = extract_tanda_from_calendar_name(path.name)
+        tanda = path.parent.name
         expected_chat = manifest["va_chat_by_name"].get(account.get("va"))
         if event["chat_id"] != expected_chat or username not in str(event["topic_id"]):
             findings.append(

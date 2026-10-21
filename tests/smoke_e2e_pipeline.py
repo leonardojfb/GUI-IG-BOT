@@ -14,10 +14,10 @@ def test_e2e_multimedia_logistica_telegram_smoke():
 
     assert result["expected"]["processed_outputs"] == 27
     assert result["actual"]["processed_outputs"] == 27
-    assert result["expected"]["distributed_files"] == 27
-    assert result["actual"]["distributed_files"] == 27
-    assert result["expected"]["telegram_sends"] == 27
-    assert result["actual"]["telegram_sends"] == 27
+    assert result["expected"]["distributed_files"] == 63
+    assert result["actual"]["distributed_files"] == 63
+    assert result["expected"]["telegram_sends"] == 63
+    assert result["actual"]["telegram_sends"] == 63
 
     assert result["actual"]["categories"] == [
         "PRUEBA_CAT_A",

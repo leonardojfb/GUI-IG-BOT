@@ -5,21 +5,11 @@ import tempfile
 import organizadortg
 
 
-def test_send_mov_to_topic_uses_quicktime_mime(tmp_path, monkeypatch):
-    mov = tmp_path / "clip__c01.mov"
-    mov.write_bytes(b"mov-video")
-    uploads = []
+def test_publish_button_markup_omits_copy_button_for_long_caption():
+    markup = organizadortg._publish_button_markup("x" * 257)
+    buttons = markup["inline_keyboard"][0]
 
-    def fake_post(url, data, files):
-        name, handle, content_type = files["video"]
-        uploads.append((name, content_type, handle.read()))
-        return SimpleNamespace(status_code=200, text="ok")
-
-    monkeypatch.setattr(organizadortg.requests, "post", fake_post)
-    ok, _topic_id = organizadortg._send_video_to_topic(
-        "-1001", 123, "caption", str(mov), {}, "eve", "MAIN")
-    assert ok
-    assert uploads == [("clip__c01.mov", "video/quicktime", b"mov-video")]
+    assert buttons == [{"text": "✅ Publicado", "callback_data": organizadortg.PUBLISH_CALLBACK_DATA}]
 
 
 def test_send_video_to_topic_handles_calendar_paths_over_260_chars(tmp_path, monkeypatch):
@@ -41,12 +31,14 @@ def test_send_video_to_topic_handles_calendar_paths_over_260_chars(tmp_path, mon
     posted = []
 
     def fake_post(url, data, files):
-        assert url.endswith("/sendVideo")
-        _filename, handle, content_type = files["video"]
-        assert handle.read() == b"fake-video"
-        assert content_type == "video/mp4"
-        assert data["supports_streaming"] == "true"
-        assert "disable_content_type_detection" not in data
+        video_upload = files["video"]
+        if isinstance(video_upload, tuple):
+            assert video_upload[0] == os.path.basename(normal_path)
+            assert video_upload[2] == "video/mp4"
+            video_file = video_upload[1]
+        else:
+            video_file = video_upload
+        assert video_file.read() == b"fake-video"
         posted.append((url, dict(data)))
         return SimpleNamespace(status_code=200, text="ok")
 
@@ -144,6 +136,4 @@ def test_telegram_compression_prefers_nvenc_and_falls_back_to_cpu(monkeypatch):
     assert compressed is not None
     assert commands[1][commands[1].index("-vcodec") + 1] == "h264_nvenc"
     assert commands[2][commands[2].index("-vcodec") + 1] == "libx264"
-    assert commands[2][commands[2].index("-map_metadata") + 1] == "0"
-    assert commands[2][commands[2].index("-movflags") + 1] == "+use_metadata_tags"
     os.unlink(compressed)

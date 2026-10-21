@@ -1,13 +1,4 @@
-"""Functional coverage for distribute_tanda()'s fill-up path and multi-day runs.
-
-tests/smoke_e2e_pipeline.py always calls Organizador.distribute_tanda(tanda, category,
-1, False, "1") for all nine tandas -- fill_up is always False and days_to_organize is
-always fixed at "1". That means the fill-up fallback (falling back to full_tanda_pool
-once the fresh, shared video pool is drained) and multi-day distribution were never
-exercised by the mandatory matrix run. This test forces exactly that: three accounts
-sharing three videos (one per account on day 1 drains the fresh pool), then a second
-day where fresh inventory is gone and the two modes should visibly diverge.
-"""
+"""Coverage for complete per-account tanda delivery and origin non-repetition."""
 import random
 import shutil
 
@@ -66,7 +57,7 @@ def _run_distribution(fill_up: bool) -> dict:
 
             random.seed(260726)
             result = Organizador.distribute_tanda(
-                "FILLUP_TA", "PRUEBA_FILLUP_CAT", 1, fill_up, "2"
+                "FILLUP_TA", "PRUEBA_FILLUP_CAT", 1, fill_up, "MAX"
             )
 
             manifest_entries = load_entries(manifest_path(run_root))
@@ -85,44 +76,33 @@ def _run_distribution(fill_up: bool) -> dict:
         shutil.rmtree(run_root, ignore_errors=True)
 
 
-def test_fillup_disabled_leaves_day_two_partial_when_pool_is_drained():
+def test_fillup_disabled_still_sends_the_complete_tanda_to_every_account():
     outcome = _run_distribution(fill_up=False)
     assert outcome["by_day"].get("Dia_1") == 3, outcome["by_day"]
-    assert outcome["by_day"].get("Dia_2", 0) == 0, (
-        "with fill_up=False and only 3 unique videos shared by 3 accounts, day 2 must "
-        f"have nothing to assign (drained pool, no fallback) -- got {outcome['by_day']}"
-    )
-    assert outcome["total_files"] == 3
+    assert outcome["by_day"].get("Dia_2") == 3, outcome["by_day"]
+    assert outcome["by_day"].get("Dia_3") == 3, outcome["by_day"]
+    assert outcome["total_files"] == 9
 
 
-def test_fillup_enabled_fills_day_two_by_reusing_other_accounts_videos():
+def test_fillup_never_repeats_an_origin_within_an_account():
     outcome = _run_distribution(fill_up=True)
     assert outcome["by_day"].get("Dia_1") == 3, outcome["by_day"]
     assert outcome["by_day"].get("Dia_2") == 3, (
-        "with fill_up=True the day-2 slots must be filled by reusing videos the "
-        f"*other* accounts already used on day 1 -- got {outcome['by_day']}"
+        f"the full tanda should continue on day 2 for every account: {outcome['by_day']}"
     )
-    assert outcome["total_files"] == 6
+    assert outcome["by_day"].get("Dia_3") == 3, outcome["by_day"]
+    assert outcome["total_files"] == 9
 
     for entry in outcome["files"]:
         assert "__TANDA_FILLUP_TA__" in entry["telegram_filename"], (
             f"fill-up manifest entry lost its tanda tag: {entry['telegram_filename']}"
         )
 
-    day1_choice_by_account = {}
-    day2_choice_by_account = {}
+    origins_by_account = {}
     for entry in outcome["files"]:
-        account = entry["username"]
-        day = f"Dia_{entry['day']}"
-        bucket = day1_choice_by_account if day == "Dia_1" else day2_choice_by_account
-        for name in outcome["output_hashes"]:
-            if entry["telegram_filename"].startswith(name.rsplit(".", 1)[0]):
-                bucket[account] = name
-                break
+        origin = entry["telegram_filename"].split("__TANDA_", 1)[0]
+        origins_by_account.setdefault(entry["username"], []).append(origin)
 
-    for account in day1_choice_by_account:
-        assert day1_choice_by_account[account] != day2_choice_by_account.get(account), (
-            f"{account} reused the exact same source video on day 2 as day 1 -- the "
-            "hard anti-collision rule (never repeat a P1+P2 combo for the same "
-            "account) was violated by the fill-up fallback"
-        )
+    assert len(origins_by_account) == 3
+    assert all(len(origins) == len(set(origins)) == 3 for origins in origins_by_account.values())
+    assert "Fill-up omitido" in outcome["result"]

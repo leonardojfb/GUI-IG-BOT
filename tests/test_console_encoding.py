@@ -13,6 +13,7 @@ guarded against it.
 import importlib
 import io
 import sys
+import subprocess
 
 import pytest
 
@@ -35,6 +36,24 @@ def test_ensure_stdout_utf8_makes_emoji_print_safe(monkeypatch):
     print("\U0001f3ac should not raise anymore")
     sys.stdout.flush()
     assert sys.stdout.encoding.lower().replace("-", "") == "utf8"
+
+
+def test_missing_stderr_descriptor_cannot_be_reused_for_database(tmp_path):
+    """Tk writes errors to fd 2 even when a GUI has no console stream."""
+    target = tmp_path / "database-like-file"
+    script = (
+        "import os,sys; from console_encoding import ensure_stdout_utf8; "
+        "os.close(2); ensure_stdout_utf8(); "
+        "fd=os.open(sys.argv[1],os.O_CREAT|os.O_WRONLY); "
+        "os.write(2,b'Tk callback error'); os.close(fd); os._exit(0)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(target)],
+        cwd=str(__import__("pathlib").Path(__file__).resolve().parents[1]),
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert target.read_bytes() == b""
 
 
 @pytest.mark.parametrize("module_name", ["videos", "Organizador"])

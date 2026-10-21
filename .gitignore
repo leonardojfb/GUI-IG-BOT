@@ -8,6 +8,7 @@ node_modules/
 update_config.json
 .update_status.json
 releases/
+releases-validation/
 release-*test/
 
 # Python and local development
@@ -30,6 +31,7 @@ organizador.db
 *.sqlite
 *.sqlite3
 telegram_state_v11.json
+telegram_delivery_history.json
 dist_accounts_history.json
 .worktrees/
 fingerprint_history.json

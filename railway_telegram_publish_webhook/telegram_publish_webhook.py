@@ -1,16 +1,63 @@
 from __future__ import annotations
 
 import json
+import base64
+import binascii
 import os
+import re
 import sys
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 
 PENDING_CALLBACK = "pub"
 PUBLISHED_CALLBACK = "published"
+ORIGIN_TOKEN_RE = r"[A-Za-z0-9_-]{16}"
+CALLBACK_PATH = "/telegram/callback"
+ALLOWED_UPDATES = [
+    "message",
+    "edited_message",
+    "channel_post",
+    "edited_channel_post",
+    "callback_query",
+]
+WEBHOOK_RECONCILE_SECONDS = 300
+
+
+def load_topic_account_map() -> dict[str, str]:
+    path = Path(__file__).with_name("topic_account_map.json")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return {
+        str(key): str(value)
+        for key, value in data.items()
+        if str(key).strip() and str(value).strip()
+    }
+
+
+TOPIC_ACCOUNT_MAP = load_topic_account_map()
+
+
+def webhook_registration_payload(base_url: str, secret: str = "") -> dict:
+    base_url = str(base_url or "").strip().rstrip("/")
+    if not base_url:
+        raise ValueError("webhook base URL is required")
+    if not base_url.startswith(("http://", "https://")):
+        base_url = f"https://{base_url}"
+    payload = {
+        "url": f"{base_url}{CALLBACK_PATH}",
+        "allowed_updates": list(ALLOWED_UPDATES),
+    }
+    if secret:
+        payload["secret_token"] = str(secret)
+    return payload
 
 
 def is_authorized(headers, expected_secret: str) -> bool:
@@ -41,34 +88,168 @@ def post_telegram_method(token: str, method: str, payload: dict) -> dict:
             return {"ok": False, "description": raw or str(exc)}
 
 
-def _published_markup() -> dict:
-    return {
-        "inline_keyboard": [[{"text": "✅ Ya publicado", "disabled": {}}]]
-    }
+def reconcile_webhook(token: str, base_url: str, secret: str = "") -> dict:
+    desired = webhook_registration_payload(base_url, secret)
+    current_response = post_telegram_method(token, "getWebhookInfo", {})
+    if not current_response.get("ok"):
+        return current_response
+
+    current = current_response.get("result") or {}
+    current_updates = set(current.get("allowed_updates") or [])
+    if current.get("url") == desired["url"] and "callback_query" in current_updates:
+        return current_response
+
+    return post_telegram_method(token, "setWebhook", desired)
 
 
-def _remove_publish_buttons(reply_markup: dict | None) -> dict | None:
+def start_webhook_guard(token: str, base_url: str, secret: str = "") -> threading.Thread:
+    def guard() -> None:
+        while True:
+            try:
+                result = reconcile_webhook(token, base_url, secret)
+                if not result.get("ok"):
+                    print(f"webhook reconciliation failed: {result}", file=sys.stderr, flush=True)
+            except Exception as exc:
+                print(f"webhook reconciliation error: {exc}", file=sys.stderr, flush=True)
+            time.sleep(WEBHOOK_RECONCILE_SECONDS)
+
+    thread = threading.Thread(target=guard, name="telegram-webhook-guard", daemon=True)
+    thread.start()
+    return thread
+
+
+def published_markup(reply_markup: dict | None) -> dict | None:
+    """Remove the publish action while preserving copy/download controls."""
     keyboard = []
     for row in (reply_markup or {}).get("inline_keyboard") or []:
         kept = [
             button for button in row
             if button.get("callback_data") not in {PENDING_CALLBACK, PUBLISHED_CALLBACK}
+            and not str(button.get("callback_data") or "").startswith(f"{PENDING_CALLBACK}:")
+            and published_callback_details(button.get("callback_data")) is None
         ]
         if kept:
             keyboard.append(kept)
-    if not keyboard:
-        return None
-    return {"inline_keyboard": keyboard}
+    return {"inline_keyboard": keyboard} if keyboard else None
 
 
-def _mark_caption_published(caption: str) -> str:
+def mark_caption_published(caption: str) -> str:
     caption = str(caption or "").rstrip()
-    marker = "✅ Ya publicado"
+    marker = "✅ YA PUBLICADO"
     if marker in caption:
         return caption
-    if caption:
-        return f"{caption}\n\n{marker}"
-    return marker
+    return f"{caption}\n\n{marker}" if caption else marker
+
+
+def published_callback_data(
+    source_hash: str, origin_token: str | None = None, account_id: str | int | None = None,
+) -> str:
+    if account_id is not None:
+        numeric_id = int(account_id)
+        if not 0 < numeric_id <= 65535:
+            raise ValueError("invalid publication account ID")
+        origin_bytes = (
+            base64.urlsafe_b64decode(origin_token + "==")
+            if origin_token else bytes(12)
+        )
+        if len(origin_bytes) != 12:
+            raise ValueError("invalid publication origin token")
+        payload = numeric_id.to_bytes(2, "big") + bytes.fromhex(source_hash) + origin_bytes
+        if len(payload) != 46:
+            raise ValueError("invalid publication source hash")
+        return "v1" + base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+    encoded_hash = base64.urlsafe_b64encode(bytes.fromhex(source_hash)).decode("ascii").rstrip("=")
+    if origin_token:
+        if not re.fullmatch(ORIGIN_TOKEN_RE, origin_token):
+            raise ValueError("invalid origin token")
+        return f"pub:{encoded_hash}:{origin_token}"
+    return f"pub:{encoded_hash}"
+
+
+def published_callback_details(data: str) -> tuple[str, str | None, str | None] | None:
+    if re.fullmatch(r"v1[A-Za-z0-9_-]{62}", str(data or "")):
+        try:
+            raw = base64.urlsafe_b64decode(str(data)[2:] + "==")
+        except (ValueError, binascii.Error):
+            return None
+        if len(raw) != 46:
+            return None
+        account_id = int.from_bytes(raw[:2], "big")
+        if not account_id:
+            return None
+        origin = raw[34:]
+        origin_token = (
+            base64.urlsafe_b64encode(origin).decode("ascii").rstrip("=")
+            if origin != bytes(12) else None
+        )
+        return raw[2:34].hex(), origin_token, str(account_id)
+    match = re.fullmatch(
+        rf"pub:([A-Za-z0-9_-]{{43}})(?::({ORIGIN_TOKEN_RE}))?",
+        str(data or ""),
+    )
+    if not match:
+        return None
+    try:
+        raw = base64.urlsafe_b64decode(match.group(1) + "=")
+    except (ValueError, binascii.Error):
+        return None
+    return (raw.hex(), match.group(2), None) if len(raw) == 32 else None
+
+
+def published_callback_values(data: str) -> tuple[str, str | None] | None:
+    details = published_callback_details(data)
+    return details[:2] if details else None
+
+
+def published_hash_from_callback(data: str) -> str | None:
+    values = published_callback_values(data)
+    return values[0] if values else None
+
+
+def account_id_from_filename(filename: str) -> str | None:
+    match = re.search(r"__ACC(\d+)(?:__|\.|$)", str(filename or ""), re.IGNORECASE)
+    return match.group(1) if match else None
+
+
+def account_id_from_topic(message: dict) -> str | None:
+    chat_id = (message.get("chat") or {}).get("id")
+    thread_id = message.get("message_thread_id")
+    if chat_id is None or thread_id is None:
+        return None
+    return TOPIC_ACCOUNT_MAP.get(f"{chat_id}:{thread_id}")
+
+
+def upsert_published_video(fields: dict) -> bool:
+    token = os.environ.get("AIRTABLE_PAT", "")
+    base_id = os.environ.get("AIRTABLE_BASE_ID", "")
+    table = os.environ.get("AIRTABLE_PUBLISHED_TABLE", "Videos publicados")
+    if not token or not base_id:
+        print("Airtable publication store unavailable", file=sys.stderr, flush=True)
+        return False
+    url = "https://api.airtable.com/v0/{}/{}".format(
+        urllib.parse.quote(base_id, safe=""), urllib.parse.quote(table, safe="")
+    )
+    payload = {
+        "records": [{"fields": fields}],
+        "performUpsert": {"fieldsToMergeOn": ["Publication key"]},
+    }
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        method="PATCH",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        return bool(result.get("records"))
+    except Exception as exc:
+        print(
+            f"Airtable publication upsert failed: {type(exc).__name__}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return False
 
 
 def handle_update(update: dict, token: str) -> dict:
@@ -78,46 +259,151 @@ def handle_update(update: dict, token: str) -> dict:
 
     callback_id = callback.get("id")
     data = callback.get("data")
-    if data == PUBLISHED_CALLBACK:
-        if callback_id:
-            post_telegram_method(
-                token,
-                "answerCallbackQuery",
-                {"callback_query_id": callback_id, "text": "Ya estaba marcado."},
-            )
-        return {"ok": True, "handled": True}
+    already_published = data == PUBLISHED_CALLBACK
 
-    if data != PENDING_CALLBACK:
-        if callback_id:
-            post_telegram_method(token, "answerCallbackQuery", {"callback_query_id": callback_id})
-        return {"ok": True, "handled": False}
-
-    if callback_id:
-        post_telegram_method(token, "answerCallbackQuery", {"callback_query_id": callback_id})
-
+    callback_details = published_callback_details(data)
+    source_hash = callback_details[0] if callback_details else None
+    origin_token = callback_details[1] if callback_details else None
+    callback_account_id = callback_details[2] if callback_details else None
+    callback_kind = (
+        "already_published" if already_published else
+        "legacy_visual_only" if data == PENDING_CALLBACK else
+        "hashed" if source_hash else
+        "unsupported"
+    )
     message = callback.get("message") or {}
     chat = message.get("chat") or {}
     chat_id = chat.get("id")
     message_id = message.get("message_id")
-    if chat_id is None or message_id is None:
+    thread_id = message.get("message_thread_id")
+    print(
+        "publication callback received: "
+        f"kind={callback_kind} chat_id={chat_id} message_id={message_id} "
+        f"thread_id={thread_id} has_video={bool(message.get('video'))} "
+        f"has_caption={message.get('caption') is not None}",
+        flush=True,
+    )
+    if not already_published and data != PENDING_CALLBACK and source_hash is None:
+        print(f"publication callback ignored: kind=unsupported message_id={message_id}", flush=True)
+        if callback_id:
+            post_telegram_method(token, "answerCallbackQuery", {"callback_query_id": callback_id})
         return {"ok": True, "handled": False}
 
-    remaining_markup = _remove_publish_buttons(message.get("reply_markup"))
-    caption = message.get("caption")
-    if caption is not None:
-        payload = {
-            "chat_id": chat_id,
-            "message_id": message_id,
-            "caption": _mark_caption_published(caption),
+    if chat_id is None or message_id is None:
+        print(f"publication callback missing message identity: kind={callback_kind}", flush=True)
+        return {"ok": True, "handled": False}
+
+    if source_hash:
+        video = message.get("video") or {}
+        original_filename = str(video.get("file_name") or "")
+        account_id = callback_account_id or account_id_from_filename(original_filename) or account_id_from_topic(message)
+        if not account_id:
+            print(
+                f"publication callback missing account: message_id={message_id} "
+                f"has_filename={bool(original_filename)} has_thread_id={thread_id is not None}",
+                flush=True,
+            )
+            if callback_id:
+                post_telegram_method(
+                    token,
+                    "answerCallbackQuery",
+                    {
+                        "callback_query_id": callback_id,
+                        "text": "No se pudo identificar la cuenta; no se guardó.",
+                    },
+                )
+            return {"ok": True, "handled": True}
+        fields = {
+            "SHA-256": source_hash,
+            **({"Origin token": origin_token} if origin_token else {}),
+            "Account ID": account_id,
+            "Publication key": f"{account_id}:{source_hash}",
+            "Archivo original": original_filename,
+            "Chat ID": str(chat_id),
+            "Message ID": str(message_id),
         }
-        if remaining_markup:
-            payload["reply_markup"] = remaining_markup
-        post_telegram_method(token, "editMessageCaption", payload)
+        marked_by = (callback.get("from") or {}).get("username")
+        if marked_by:
+            fields["Marcado por"] = str(marked_by)
+        if not upsert_published_video(fields):
+            print(
+                f"publication persistence rejected: account_id={account_id} message_id={message_id}",
+                flush=True,
+            )
+            if callback_id:
+                post_telegram_method(
+                    token,
+                    "answerCallbackQuery",
+                    {
+                        "callback_query_id": callback_id,
+                        "text": "No se pudo guardar; intenta de nuevo.",
+                    },
+                )
+            return {"ok": True, "handled": True}
+        print(
+            f"publication persistence ok: account_id={account_id} message_id={message_id}",
+            flush=True,
+        )
+    elif data == PENDING_CALLBACK:
+        print(
+            f"legacy publish callback is visual-only: message_id={message_id}",
+            flush=True,
+        )
+
+    if callback_id and not already_published:
+        post_telegram_method(token, "answerCallbackQuery", {"callback_query_id": callback_id})
+
+    remaining_markup = published_markup(message.get("reply_markup"))
+    safe_markup = remaining_markup or {"inline_keyboard": []}
+    if message.get("caption") is not None:
+        result = post_telegram_method(
+            token,
+            "editMessageCaption",
+            {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "caption": mark_caption_published(message["caption"]),
+                "reply_markup": safe_markup,
+            },
+        )
+        method = "editMessageCaption"
     else:
-        payload = {"chat_id": chat_id, "message_id": message_id}
-        if remaining_markup:
-            payload["reply_markup"] = remaining_markup
-        post_telegram_method(token, "editMessageReplyMarkup", payload)
+        result = post_telegram_method(
+            token,
+            "editMessageReplyMarkup",
+            {"chat_id": chat_id, "message_id": message_id, "reply_markup": safe_markup},
+        )
+        method = "editMessageReplyMarkup"
+    if result.get("ok"):
+        print(
+            f"publication message edit ok: kind={callback_kind} method={method} message_id={message_id}",
+            flush=True,
+        )
+    elif "message is not modified" in str(result.get("description", "")).lower():
+        print(
+            f"publication message already matched: kind={callback_kind} method={method} message_id={message_id}",
+            flush=True,
+        )
+    else:
+        print(f"{method} failed: {result}", file=sys.stderr, flush=True)
+        if callback_id and already_published:
+            post_telegram_method(
+                token,
+                "answerCallbackQuery",
+                {
+                    "callback_query_id": callback_id,
+                    "text": "No se pudo actualizar el mensaje; intenta de nuevo.",
+                    "show_alert": True,
+                },
+            )
+        return {"ok": True, "handled": True}
+
+    if callback_id and already_published:
+        post_telegram_method(
+            token,
+            "answerCallbackQuery",
+            {"callback_query_id": callback_id, "text": "Ya estaba marcado."},
+        )
     return {"ok": True, "handled": True}
 
 
@@ -128,7 +414,6 @@ def download_file(token: str, file_id: str) -> tuple[int, dict, bytes]:
     file_path = (file_info.get("result") or {}).get("file_path")
     if not file_path:
         return 404, {"Content-Type": "application/json"}, b'{"ok": false, "error": "file_not_found"}'
-
     url = f"https://api.telegram.org/file/bot{token}/{file_path}"
     with urllib.request.urlopen(urllib.request.Request(url), timeout=30) as response:
         body = response.read()
@@ -164,7 +449,7 @@ class TelegramCallbackHandler(BaseHTTPRequestHandler):
         self._send_json(404, {"ok": False, "error": "not_found"})
 
     def do_POST(self):
-        if self.path != "/telegram/callback":
+        if self.path != CALLBACK_PATH:
             self._send_json(404, {"ok": False, "error": "not_found"})
             return
         secret = os.environ.get("WEBHOOK_SECRET", "")
@@ -175,12 +460,10 @@ class TelegramCallbackHandler(BaseHTTPRequestHandler):
         if not token:
             self._send_json(500, {"ok": False, "error": "missing_token"})
             return
-
         try:
             length = int(self.headers.get("Content-Length", "0"))
             payload = self.rfile.read(length).decode("utf-8")
-            update = json.loads(payload or "{}")
-            result = handle_update(update, token)
+            result = handle_update(json.loads(payload or "{}"), token)
         except Exception as exc:
             print(f"webhook error: {exc}", file=sys.stderr, flush=True)
             self._send_json(500, {"ok": False, "error": "internal_error"})
@@ -191,8 +474,7 @@ class TelegramCallbackHandler(BaseHTTPRequestHandler):
         print(format % args, flush=True)
 
     def _send_json(self, status: int, payload: dict) -> None:
-        body = json.dumps(payload).encode("utf-8")
-        self._send_bytes(status, {"Content-Type": "application/json"}, body)
+        self._send_bytes(status, {"Content-Type": "application/json"}, json.dumps(payload).encode("utf-8"))
 
     def _send_bytes(self, status: int, headers: dict, body: bytes) -> None:
         self.send_response(status)
@@ -205,6 +487,13 @@ class TelegramCallbackHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     port = int(os.environ.get("PORT", "8080"))
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    base_url = os.environ.get("TELEGRAM_WEBHOOK_BASE_URL", "") or os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
+    secret = os.environ.get("WEBHOOK_SECRET", "")
+    if token and base_url:
+        start_webhook_guard(token, base_url, secret)
+    else:
+        print("webhook guard disabled: missing TELEGRAM_BOT_TOKEN or public domain", file=sys.stderr, flush=True)
     server = ThreadingHTTPServer(("0.0.0.0", port), TelegramCallbackHandler)
     print(f"telegram publish webhook listening on :{port}", flush=True)
     server.serve_forever()

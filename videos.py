@@ -266,22 +266,45 @@ def render_video_pair(path_v1, path_v2, out_path, cat, p1_id, p2_id, ffmpeg_thre
     """
     p1_audio = get_audio(path_v1)
     p2_audio = get_audio(path_v2)
+    ffprobe = _ffmpeg_tool_command('ffprobe')
 
-    a1 = "[0:a]" if p1_audio else "[2:a]"
-    a2 = "[1:a]" if p2_audio else "[2:a]"
+    def get_duration(file_path):
+        result = subprocess.run(
+            [
+                ffprobe, '-v', 'error', '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1', file_path,
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            creationflags=_NO_WINDOW,
+        )
+        duration = float(result.stdout.strip())
+        if duration <= 0:
+            raise ValueError(f"Duración no válida para '{file_path}': {duration}")
+        return duration
 
-    # Si ambos videos carecen de audio, usamos asplit para no reutilizar el mismo stream.
-    if not p1_audio and not p2_audio:
-        audio_filter = "[2:a]asplit[a0][a1];"
-    else:
-        audio_filter = f"{a1}aresample=44100[a0];{a2}aresample=44100[a1];"
+    duration_v1 = get_duration(path_v1)
+    duration_v2 = get_duration(path_v2)
+
+    def audio_filter(index, has_audio, duration):
+        if has_audio:
+            return (
+                f"[{index}:a]aresample=44100,asetpts=PTS-STARTPTS,"
+                f"apad,atrim=duration={duration:.6f}[a{index}]"
+            )
+        return (
+            f"anullsrc=channel_layout=stereo:sample_rate=44100,"
+            f"atrim=duration={duration:.6f},asetpts=PTS-STARTPTS[a{index}]"
+        )
 
     filter_complex = (
-        f"[0:v]scale={RES_W}:{RES_H}:force_original_aspect_ratio=increase,"
+        f"[0:v]setpts=PTS-STARTPTS,scale={RES_W}:{RES_H}:force_original_aspect_ratio=increase,"
         f"crop={RES_W}:{RES_H},setsar=1,fps={FPS},format=yuv420p[v0];"
-        f"[1:v]scale={RES_W}:{RES_H}:force_original_aspect_ratio=increase,"
+        f"[1:v]setpts=PTS-STARTPTS,scale={RES_W}:{RES_H}:force_original_aspect_ratio=increase,"
         f"crop={RES_W}:{RES_H},setsar=1,fps={FPS},format=yuv420p[v1];"
-        f"{audio_filter}"
+        f"{audio_filter(0, p1_audio, duration_v1)};"
+        f"{audio_filter(1, p2_audio, duration_v2)};"
         f"[v0][a0][v1][a1]concat=n=2:v=1:a=1[outv][outa]"
     )
 
@@ -303,7 +326,6 @@ def render_video_pair(path_v1, path_v2, out_path, cat, p1_id, p2_id, ffmpeg_thre
             [_ffmpeg_tool_command('ffmpeg'), '-y']
             + hw_args
             + ['-i', path_v1, '-i', path_v2,
-               '-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
                '-filter_complex', filter_complex,
                '-map', '[outv]', '-map', '[outa]']
             + codec_args

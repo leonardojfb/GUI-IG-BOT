@@ -7,7 +7,7 @@ class FakeTelegramSender:
         self.events.append({"event": "api", "method": method, "data": dict(data)})
         return {"ok": True, "result": {"message_id": len(self.events)}}
 
-    def fake_get_or_create_topic(self, chat_id, acc_name, tag_emoji, state, is_admin=False, force_recreate=False):
+    def fake_get_or_create_topic(self, chat_id, acc_name, tag_emoji, state, is_admin=False, force_recreate=False, delivery_kind="normal"):
         key = (chat_id, acc_name)
         topic = f"TOPIC::{chat_id}::{acc_name}"
         self._topic_ids[key] = topic
@@ -23,7 +23,8 @@ class FakeTelegramSender:
         )
         return topic
 
-    def fake_send_video(self, chat_id, t_id, caption, video_path, topics_state, username, tag):
+    def fake_send_video(self, chat_id, t_id, caption, video_path, topics_state, username, tag,
+                        source_hash=None, origin_token=None, upload_filename=None, delivery_kind="normal"):
         self.events.append(
             {
                 "event": "video",
@@ -33,6 +34,10 @@ class FakeTelegramSender:
                 "video_path": video_path,
                 "username": username,
                 "tag": tag,
+                "source_hash": source_hash,
+                "origin_token": origin_token,
+                "upload_filename": upload_filename,
+                "delivery_kind": delivery_kind,
             }
         )
         return True, t_id

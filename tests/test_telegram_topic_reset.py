@@ -167,6 +167,30 @@ def test_delete_known_topics_for_accounts_deletes_modern_trial_topic_for_selecte
     ]
 
 
+def test_trial_scoped_reset_preserves_normal_topic_and_other_accounts(monkeypatch):
+    deleted = []
+
+    def fake_call_tg(method, data, silent=False):
+        deleted.append(data["message_thread_id"])
+        return {"ok": True, "result": True}
+
+    monkeypatch.setattr(organizadortg, "call_tg", fake_call_tg)
+    state = {
+        "-1001_alpha": {"id": 11, "name": "alpha MAIN"},
+        "-1001_alpha_trials": {"id": 22, "name": "TRIALS - alpha MAIN"},
+        "-1002_alpha": {"id": 33, "name": "TRIALS - alpha MAIN"},
+        "-1001_beta_trials": {"id": 44, "name": "TRIALS - beta MAIN"},
+    }
+
+    summary = organizadortg.delete_known_topics_for_accounts(
+        {"alpha"}, state, delivery_kinds={"alpha": {"trial"}},
+    )
+
+    assert summary["deleted"] == 2
+    assert deleted == [22, 33]
+    assert set(state) == {"-1001_alpha", "-1001_beta_trials"}
+
+
 def test_trial_subaccount_topics_are_named_with_trials_prefix(monkeypatch):
     calls = []
 
@@ -217,6 +241,7 @@ def test_topic_id_invalid_is_treated_as_stale_state(monkeypatch):
 def test_execute_plan_resets_selected_account_topics_before_recreating(monkeypatch, tmp_path):
     video_path = tmp_path / "video.mp4"
     video_path.write_bytes(b"fake")
+    monkeypatch.setattr(organizadortg, "base_dir", str(tmp_path))
     state = {"-1001_alpha": 11, "-1001_old": 99, "-1002_beta": 22}
     order = []
 
@@ -226,6 +251,7 @@ def test_execute_plan_resets_selected_account_topics_before_recreating(monkeypat
         "get_accounts_with_va_info",
         lambda: [
             {
+                "id": 1,
                 "username": "alpha",
                 "account_type": "promo",
                 "assigned_va": "VA1",
@@ -233,6 +259,7 @@ def test_execute_plan_resets_selected_account_topics_before_recreating(monkeypat
                 "va_timezone": "America/Argentina/Buenos_Aires",
             },
             {
+                "id": 2,
                 "username": "beta",
                 "account_type": "promo",
                 "assigned_va": "VA2",
@@ -247,25 +274,30 @@ def test_execute_plan_resets_selected_account_topics_before_recreating(monkeypat
         lambda: [
             {
                 "path": str(video_path),
-                "filename": "ALPHA__TANDA_NEW__ACC__D1__S1.mp4",
+                "filename": "ALPHA__TANDA_NEW__ACC1__D1__S1.mp4",
                 "category": "promo",
                 "day": "Dia_1",
                 "username": "alpha",
+                "account_id": 1,
             },
             {
                 "path": str(video_path),
-                "filename": "BETA__TANDA_OLD__ACC__D1__S1.mp4",
+                "filename": "BETA__TANDA_OLD__ACC2__D1__S1.mp4",
                 "category": "promo",
                 "day": "Dia_1",
                 "username": "beta",
+                "account_id": 2,
             },
         ],
     )
     monkeypatch.setattr(organizadortg, "load_json", lambda _path: state)
     monkeypatch.setattr(organizadortg, "save_json", lambda _path, _data: None)
+    monkeypatch.setattr(organizadortg, "load_airtable_config", lambda: object())
+    monkeypatch.setattr(organizadortg, "fetch_published_video_publications", lambda _config: (set(), set()))
     monkeypatch.setattr(organizadortg, "time", type("TimeStub", (), {"sleep": staticmethod(lambda _seconds: None)}))
 
-    def fake_delete(account_names, topics_state):
+    def fake_delete(account_names, topics_state, delivery_kinds=None):
+        assert delivery_kinds == {"alpha": {"normal"}}
         order.append(("delete", tuple(sorted(account_names)), dict(topics_state)))
         topics_state.pop("-1001_alpha", None)
         return {"deleted": 1, "missing": 0, "failed": 0, "failures": []}
@@ -278,7 +310,7 @@ def test_execute_plan_resets_selected_account_topics_before_recreating(monkeypat
     monkeypatch.setattr(organizadortg, "delete_known_topics_for_accounts", fake_delete)
     monkeypatch.setattr(organizadortg, "get_or_create_topic", fake_get_or_create)
     monkeypatch.setattr(organizadortg, "call_tg", lambda *_args, **_kwargs: {"ok": True})
-    monkeypatch.setattr(organizadortg, "_send_video_to_topic", lambda *args: (True, args[1]))
+    monkeypatch.setattr(organizadortg, "_send_video_to_topic", lambda *args, **_kwargs: (True, args[1]))
 
     result = organizadortg.execute_telegram_plan(
         datetime(2026, 7, 27),
@@ -297,12 +329,13 @@ def test_execute_plan_resets_selected_account_topics_before_recreating(monkeypat
 def test_controller_passes_reset_topics_to_execute_plan(monkeypatch):
     captured = {}
 
-    def fake_execute(start_date, selected_accounts=None, controller=None, reset_topics=False, express_mode=False):
+    def fake_execute(start_date, selected_accounts=None, controller=None, reset_topics=False, express_mode=False, allow_published_repeats=False):
         captured["start_date"] = start_date
         captured["selected_accounts"] = selected_accounts
         captured["controller"] = controller
         captured["reset_topics"] = reset_topics
         captured["express_mode"] = express_mode
+        captured["allow_published_repeats"] = allow_published_repeats
         return "done"
 
     monkeypatch.setattr(organizadortg, "execute_telegram_plan", fake_execute)
@@ -320,3 +353,4 @@ def test_controller_passes_reset_topics_to_execute_plan(monkeypatch):
     assert captured["controller"] is controller
     assert captured["reset_topics"] is True
     assert captured["express_mode"] is True
+    assert captured["allow_published_repeats"] is False

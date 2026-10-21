@@ -5,12 +5,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 import json
+import re
 from urllib.parse import quote
 
 import requests
 
 
 CONFIG_FILE = Path(__file__).with_name("airtable_config.json")
+PUBLISHED_VIDEOS_TABLE = "Videos publicados"
+
+
+def published_wavespeed_family_key(filename: str | None) -> str | None:
+    """Identify a WaveSpeed source across Forge copies when legacy origin is absent."""
+    name = str(filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+    match = re.fullmatch(r"(wavespeed_[0-9a-f]{32})__c\d+\.(?:mp4|mov)", name, re.IGNORECASE)
+    return "source-family:" + match.group(1).lower() if match else None
 MANAGED_FIELDS = (
     "username",
     "two_factor",
@@ -231,6 +240,14 @@ def _configured_table_schema(
     raise AirtableSyncError(
         f"La tabla '{config.table_name}' no existe en la base indicada. Créala en Airtable e inténtalo otra vez."
     )
+
+
+def fetch_airtable_table_schema(
+    config: AirtableConfig,
+    requests_get: Callable[..., Any] = requests.get,
+) -> dict[str, Any]:
+    """Lee el esquema de la tabla configurada sin modificar Airtable."""
+    return _configured_table_schema(config, requests_get)
 
 
 def _airtable_error_code(response: Any) -> str:
@@ -506,6 +523,140 @@ def fetch_airtable_records(
             return records
 
 
+def fetch_published_video_hashes(
+    config: AirtableConfig,
+    requests_get: Callable[..., Any] = requests.get,
+) -> set[str]:
+    """Devuelve los SHA-256 publicados desde la tabla global de Airtable."""
+    url = "https://api.airtable.com/v0/{}/{}".format(
+        quote(config.base_id, safe=""), quote(PUBLISHED_VIDEOS_TABLE, safe="")
+    )
+    hashes: set[str] = set()
+    offset: str | None = None
+    while True:
+        params: dict[str, Any] = {"pageSize": 100}
+        if offset:
+            params["offset"] = offset
+        try:
+            response = requests_get(
+                url, headers=_airtable_headers(config), params=params, timeout=20
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            raise AirtableSyncError(
+                "No se pudo descargar los videos publicados de Airtable."
+            ) from exc
+        records = payload.get("records") if isinstance(payload, dict) else None
+        if not isinstance(records, list):
+            raise AirtableSyncError("Airtable devolvió videos publicados inválidos.")
+        for record in records:
+            fields = record.get("fields") if isinstance(record, dict) else None
+            value = fields.get("SHA-256") if isinstance(fields, dict) else None
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise AirtableSyncError("Airtable devolvió videos publicados inválidos.")
+            hashes.add(value)
+        offset = payload.get("offset")
+        if not offset:
+            return hashes
+
+
+def fetch_published_video_origins(
+    config: AirtableConfig,
+    requests_get: Callable[..., Any] = requests.get,
+) -> set[str]:
+    """Devuelve los tokens de origin publicados desde Airtable."""
+    url = "https://api.airtable.com/v0/{}/{}".format(
+        quote(config.base_id, safe=""), quote(PUBLISHED_VIDEOS_TABLE, safe="")
+    )
+    origins: set[str] = set()
+    offset: str | None = None
+    while True:
+        params: dict[str, Any] = {"pageSize": 100}
+        if offset:
+            params["offset"] = offset
+        try:
+            response = requests_get(
+                url, headers=_airtable_headers(config), params=params, timeout=20
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            raise AirtableSyncError(
+                "No se pudo descargar los origins publicados de Airtable."
+            ) from exc
+        records = payload.get("records") if isinstance(payload, dict) else None
+        if not isinstance(records, list):
+            raise AirtableSyncError("Airtable devolvió origins publicados inválidos.")
+        for record in records:
+            fields = record.get("fields") if isinstance(record, dict) else None
+            value = fields.get("Origin token") if isinstance(fields, dict) else None
+            if value is None:
+                continue
+            if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{16}", value):
+                raise AirtableSyncError("Airtable devolvió origins publicados inválidos.")
+            origins.add(value)
+        offset = payload.get("offset")
+        if not offset:
+            return origins
+
+
+def fetch_published_video_publications(
+    config: AirtableConfig,
+    requests_get: Callable[..., Any] = requests.get,
+) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+    """Return account-scoped publications; rows without an account are ignored."""
+    url = "https://api.airtable.com/v0/{}/{}".format(
+        quote(config.base_id, safe=""), quote(PUBLISHED_VIDEOS_TABLE, safe="")
+    )
+    hashes: set[tuple[str, str]] = set()
+    origins: set[tuple[str, str]] = set()
+    offset: str | None = None
+    while True:
+        params: dict[str, Any] = {"pageSize": 100}
+        if offset:
+            params["offset"] = offset
+        try:
+            response = requests_get(
+                url, headers=_airtable_headers(config), params=params, timeout=20
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            raise AirtableSyncError(
+                "No se pudieron descargar las publicaciones por cuenta de Airtable."
+            ) from exc
+        records = payload.get("records") if isinstance(payload, dict) else None
+        if not isinstance(records, list):
+            raise AirtableSyncError("Airtable devolvió publicaciones por cuenta inválidas.")
+        for record in records:
+            fields = record.get("fields") if isinstance(record, dict) else None
+            if not isinstance(fields, dict):
+                raise AirtableSyncError("Airtable devolvió publicaciones por cuenta inválidas.")
+            account_id = str(fields.get("Account ID") or "").strip()
+            if not account_id:
+                continue
+            if not re.fullmatch(r"\d+", account_id):
+                raise AirtableSyncError("Airtable devolvió publicaciones por cuenta inválidas.")
+            source_hash = fields.get("SHA-256")
+            if source_hash is not None:
+                if not isinstance(source_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", source_hash):
+                    raise AirtableSyncError("Airtable devolvió publicaciones por cuenta inválidas.")
+                hashes.add((account_id, source_hash))
+            origin_token = fields.get("Origin token")
+            if origin_token is not None:
+                if not isinstance(origin_token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{16}", origin_token):
+                    raise AirtableSyncError("Airtable devolvió publicaciones por cuenta inválidas.")
+                origins.add((account_id, origin_token))
+            else:
+                family_key = published_wavespeed_family_key(fields.get("Archivo original"))
+                if family_key:
+                    origins.add((account_id, family_key))
+        offset = payload.get("offset")
+        if not offset:
+            return hashes, origins
+
+
 def _coerce_managed_row(row: AirtableAccount | dict[str, Any]) -> dict[str, Any]:
     values = row.as_managed_dict() if isinstance(row, AirtableAccount) else dict(row)
     username = normalize_username(values.get("username"))
@@ -540,9 +691,60 @@ def _airtable_fields_from_managed_row(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _airtable_fields_for_schema(
+    fields: dict[str, Any],
+    table_schema: dict[str, Any],
+    username: str,
+) -> dict[str, Any]:
+    """Adapta los nueve campos al tipo y opciones actuales de Airtable."""
+    schema_fields = table_schema.get("fields") if isinstance(table_schema, dict) else None
+    if not isinstance(schema_fields, list):
+        raise AirtableSyncError("Airtable devolvió un esquema de columnas inválido.")
+    by_name = {
+        item.get("name"): item
+        for item in schema_fields
+        if isinstance(item, dict) and isinstance(item.get("name"), str)
+    }
+    adapted: dict[str, Any] = {}
+    for name, value in fields.items():
+        field = by_name.get(name)
+        if field is None:
+            raise AirtableSyncError(f"@{username}: Airtable no tiene la columna '{name}'.")
+        field_type = field.get("type")
+        if field_type == "singleSelect":
+            choices = (field.get("options") or {}).get("choices", [])
+            choice_names = [
+                choice.get("name")
+                for choice in choices
+                if isinstance(choice, dict) and isinstance(choice.get("name"), str)
+            ]
+            if name == "Trials desbloqueados":
+                desired = {"sí", "si", "yes", "true", "1"} if bool(value) else {"no", "false", "0"}
+                selected = next((choice for choice in choice_names if choice.casefold() in desired), None)
+            else:
+                normalized = str(value or "").strip()
+                if not normalized:
+                    continue
+                selected = next((choice for choice in choice_names if choice.casefold() == normalized.casefold()), None)
+            if selected is None:
+                raise AirtableSyncError(
+                    f"@{username}: '{name}' no acepta el valor '{value}'. "
+                    f"Opciones: {', '.join(choice_names)}."
+                )
+            adapted[name] = selected
+        elif field_type == "url":
+            normalized = str(value or "").strip()
+            if normalized:
+                adapted[name] = normalized
+        else:
+            adapted[name] = value
+    return adapted
+
+
 def build_airtable_mirror_plan(
     local_rows: list[dict[str, Any]],
     remote_records: list[dict[str, Any]],
+    table_schema: dict[str, Any] | None = None,
 ) -> AirtableMirrorPlan:
     """Construye un espejo completo local -> Airtable por Username."""
     local_by_key: dict[str, dict[str, Any]] = {}
@@ -565,9 +767,14 @@ def build_airtable_mirror_plan(
         remote_by_key[key] = (record["id"], row)
 
     create = [
-        _airtable_fields_from_managed_row(row)
+        (
+            _airtable_fields_for_schema(fields, table_schema, row["username"])
+            if table_schema is not None
+            else fields
+        )
         for key, row in local_by_key.items()
         if key not in remote_by_key
+        for fields in [_airtable_fields_from_managed_row(row)]
     ]
     update: list[dict[str, Any]] = []
     for key, row in local_by_key.items():
@@ -576,10 +783,13 @@ def build_airtable_mirror_plan(
             continue
         record_id, remote_row = remote
         if any(row[name] != remote_row[name] for name in MANAGED_FIELDS):
+            fields = _airtable_fields_from_managed_row(row)
+            if table_schema is not None:
+                fields = _airtable_fields_for_schema(fields, table_schema, row["username"])
             update.append({
                 "record_id": record_id,
                 "username": row["username"],
-                "fields": _airtable_fields_from_managed_row(row),
+                "fields": fields,
             })
     delete = [
         {"record_id": record_id, "username": row["username"]}

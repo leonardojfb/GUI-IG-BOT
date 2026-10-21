@@ -34,6 +34,8 @@ def test_tanda_render_uses_high_profile_libx264_and_strips_ffmpeg_encoder_tags(m
     monkeypatch.setattr(videos, "get_audio", lambda _path: True)
 
     def run(command, **_kwargs):
+        if "ffprobe" in str(command[0]).lower():
+            return SimpleNamespace(returncode=0, stdout="1.0", stderr="")
         commands.append(command)
         return SimpleNamespace(returncode=0, stderr="")
 
@@ -66,7 +68,11 @@ def test_all_tanda_encoders_raise_a_source_and_output_specific_error(monkeypatch
     monkeypatch.setattr(
         videos.subprocess,
         "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=1, stderr="encoder failed"),
+        lambda command, **_kwargs: (
+            SimpleNamespace(returncode=0, stdout="1.0", stderr="")
+            if "ffprobe" in str(command[0]).lower()
+            else SimpleNamespace(returncode=1, stderr="encoder failed")
+        ),
     )
 
     with pytest.raises(RuntimeError) as raised:
@@ -106,7 +112,11 @@ def test_tanda_future_failure_prevents_a_success_result(monkeypatch, tmp_path):
     monkeypatch.setattr(
         videos.subprocess,
         "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=1, stderr="all encoders failed"),
+        lambda command, **_kwargs: (
+            SimpleNamespace(returncode=0, stdout="1.0", stderr="")
+            if "ffprobe" in str(command[0]).lower()
+            else SimpleNamespace(returncode=1, stderr="all encoders failed")
+        ),
     )
 
     with pytest.raises(Exception) as raised:

@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import tempfile
+from datetime import datetime
 from fractions import Fraction
 from pathlib import Path
 
@@ -140,8 +141,10 @@ def _recognized_wavespeed_sdr(name: str, data: dict) -> bool:
         return False
 
 
-def preflight_batch(probes: dict[str, dict], profile: str) -> dict:
-    """Classify every source; never silently infer color from an unknown file."""
+def preflight_batch(
+    probes: dict[str, dict], profile: str, *, assume_unknown_sdr: bool = False,
+) -> dict:
+    """Classify every source, optionally using a confirmed SDR fallback."""
     if profile not in PROFILES:
         raise ValueError(f"Perfil de Forge desconocido: {profile}")
     counts = {"sdr": 0, "hlg": 0, "unknown": 0}
@@ -150,9 +153,13 @@ def preflight_batch(probes: dict[str, dict], profile: str) -> dict:
     sources: dict[str, str] = {}
     for name, data in probes.items():
         color = classify_color(data)
-        if color == "unknown" and _recognized_wavespeed_sdr(name, data):
-            color = "sdr"
-            assumptions[name] = "SDR BT.709 asumido por perfil WaveSpeed conocido"
+        if color == "unknown":
+            if _recognized_wavespeed_sdr(name, data):
+                color = "sdr"
+                assumptions[name] = "SDR BT.709 asumido por perfil WaveSpeed conocido"
+            elif assume_unknown_sdr:
+                color = "sdr"
+                assumptions[name] = "SDR BT.709 asumido por confirmación del usuario"
         counts[color] += 1
         sources[name] = color
         if color == "unknown":
@@ -235,6 +242,9 @@ def render_iphone_video(
     include_location: bool = False,
 ) -> None:
     """Encode a MOV from an explicitly classified color source."""
+    from metadata_pool import current_creation_tags, validate_iphone_metadata
+
+    validate_iphone_metadata(meta)
     if profile not in PROFILES or source_color not in {"sdr", "hlg"}:
         raise ValueError(f"Perfil/color no admitido: {profile}/{source_color}")
     if profile == "iphone_sdr" and source_color == "hlg":
@@ -277,13 +287,16 @@ def render_iphone_video(
                 "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2"]
     if threads:
         command += ["-threads", str(threads)]
+    creation_tags = current_creation_tags()
     command += ["-map_metadata", "-1", "-map_chapters", "-1",
                 "-movflags", "use_metadata_tags", "-metadata", "encoder=",
                 "-metadata:s:v:0", "encoder=", "-metadata:s:a:0", "encoder=",
                 "-fflags", "+bitexact", "-flags:v", "+bitexact", "-flags:a", "+bitexact",
                 "-metadata", "com.apple.quicktime.make=Apple",
                 "-metadata", f"com.apple.quicktime.model={meta['iphone_model']}",
-                "-metadata", f"com.apple.quicktime.software={meta['ios_version']}"]
+                "-metadata", f"com.apple.quicktime.software={meta['ios_version']}",
+                "-metadata", f"creation_time={creation_tags['creation_time']}",
+                "-metadata", f"com.apple.quicktime.creationdate={creation_tags['com.apple.quicktime.creationdate']}"]
     if include_location and meta.get("lat") and meta.get("lon"):
         command += ["-metadata", f"com.apple.quicktime.location.ISO6709={meta['lat']}{meta['lon']}/"]
     command.append(str(output_path))
@@ -375,7 +388,21 @@ def validate_probe(data: dict, profile: str, *, expect_audio: bool,
     tags = (data.get("format") or {}).get("tags") or {}
     if tags.get("major_brand") != "qt  ":
         problems.append("format.major_brand: se esperaba qt")
+    for field in ("creation_time", "com.apple.quicktime.creationdate"):
+        value = tags.get(field)
+        if not value:
+            problems.append(f"format.{field}: falta timestamp de Forge")
+            continue
+        try:
+            datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            problems.append(f"format.{field}: timestamp inválido {value!r}")
     if expected_meta is not None:
+        try:
+            from metadata_pool import validate_iphone_metadata
+            validate_iphone_metadata(expected_meta)
+        except (TypeError, ValueError) as error:
+            problems.append(f"metadata: {error}")
         expected_tags = {
             "com.apple.quicktime.make": "Apple",
             "com.apple.quicktime.model": expected_meta["iphone_model"],

@@ -19,10 +19,12 @@ from datetime import datetime, timedelta
 
 import json
 import shutil
+from pathlib import Path
+from uuid import uuid4
 import requests
 import render_performance
 
-from calendar_manifest import build_entry, manifest_path, replace_entries
+from calendar_manifest import build_entry, load_entries, manifest_path, replace_entries
 from database import DatabaseManager
 from airtable_sync import (
     AirtableConfig,
@@ -31,6 +33,7 @@ from airtable_sync import (
     build_account_sync_plan,
     build_airtable_mirror_plan,
     fetch_airtable_accounts,
+    fetch_airtable_table_schema,
     fetch_airtable_records,
     load_airtable_config,
     prepare_airtable_account_table,
@@ -41,6 +44,7 @@ from trial_content import (
     trial_calendar_root, build_trial_account_plan,
     reused_trial_tanda_warnings, trial_preview_path,
     source_key_from_filename, forge_output_id_from_filename,
+    load_clean_captions, assign_trial_general_captions,
 )
 from updater import APP_DIR as UPDATE_APP_DIR, check_and_apply, load_config, read_local_version
 from console_encoding import ensure_stdout_utf8
@@ -49,6 +53,55 @@ ensure_stdout_utf8()
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _ACCT_HIST_FILE = os.path.join(_BASE_DIR, "dist_accounts_history.json")
+FORGE_COPY_MAX_ATTEMPTS = 5
+
+
+class ForgeCopyRetryError(RuntimeError):
+    """A Forge copy did not pass rendering and validation within its retry budget."""
+
+
+def generate_forge_retry_metadata(pending_items, db_manager):
+    """Assign current, unused metadata to every pending copy without changing saved state."""
+    import metadata_pool
+
+    return metadata_pool.generate_unique_metadata(db_manager, len(pending_items))
+
+
+def quarantine_forge_retry_copy(output_path):
+    """Keep an invalid copy out of Forge inventory before rendering its replacement."""
+    output = Path(output_path)
+    archive_dir = output.parent / ".forge_ignored"
+    archive_dir.mkdir(exist_ok=True)
+    archived = archive_dir / f"{output.stem}-{uuid4().hex}{output.suffix}"
+    output.rename(archived)
+    return str(archived)
+
+
+def _run_forge_copy_with_retries(operation, max_attempts=FORGE_COPY_MAX_ATTEMPTS):
+    """Return a successful copy operation and its 1-based attempt number."""
+    errors = []
+    for attempt_number in range(1, max_attempts + 1):
+        try:
+            return operation(), attempt_number
+        except Exception as error:
+            errors.append(str(error))
+    raise ForgeCopyRetryError(
+        f"Forge agotó {max_attempts} intentos para la copia; último error: {errors[-1]}"
+    )
+
+
+def _render_with_qc_fallback(normal_render, safe_render):
+    """Retry a visual-QC rejection with the same iPhone contract but no effects."""
+    try:
+        return normal_render()
+    except RuntimeError as error:
+        initial_error = str(error)
+        if not initial_error.startswith("QC visual iPhone rechazó la copia:"):
+            raise
+    params = safe_render()
+    params["iphone_qc_fallback"] = "sin_efectos"
+    params["iphone_qc_initial_error"] = initial_error
+    return params
 
 
 def _windows_long_path(path):
@@ -79,18 +132,55 @@ def _safe_file_status(path):
 
 def _acct_inventory_items(folders):
     """Use the same Forge publication gate for Por Cuentas and Por Tandas."""
+    items, _notices = _acct_inventory_summary(folders)
+    return items
+
+
+def _acct_inventory_summary(folders):
+    """Return distributable Forge outputs and non-blocking partial-batch notices."""
     from Organizador import _tanda_video_inventory
 
     items = []
+    notices = []
     for source_tanda, source_folder in folders.items():
         if not os.path.isdir(source_folder):
             raise FileNotFoundError(f"Carpeta no encontrada: {source_folder}")
-        videos, error = _tanda_video_inventory(
+        videos, notice = _tanda_video_inventory(
             source_folder, extensions=(".mp4", ".mov", ".avi"))
-        if error:
-            raise ValueError(f"{source_tanda}: {error}")
+        if notice and not notice.startswith("Tanda Forge parcial:"):
+            raise ValueError(f"{source_tanda}: {notice}")
+        if notice:
+            notices.append(f"{source_tanda}: {notice}")
         items.extend({"tanda": source_tanda, "name": name} for name in sorted(videos))
-    return items
+    return items, notices
+
+
+def _resolve_forge_retry_sources(pending_items, selected_paths):
+    """Map persisted retry items to the currently selected byte-identical sources."""
+    import metadata_pool
+
+    selected_by_hash = {}
+    selected_by_path = {}
+    for path in selected_paths:
+        try:
+            video_hash = metadata_pool.get_video_hash(path)
+        except OSError as error:
+            raise ValueError(f"No se pudo leer la fuente seleccionada: {os.path.basename(path)}") from error
+        selected_by_hash.setdefault(video_hash, path)
+        selected_by_path[os.path.normcase(os.path.abspath(path))] = (path, video_hash)
+
+    resolved = []
+    for item in pending_items:
+        original = selected_by_path.get(
+            os.path.normcase(os.path.abspath(str(item.get("source_path") or ""))))
+        if original and original[1] == item["video_hash"]:
+            resolved.append(original[0])
+        else:
+            resolved.append(selected_by_hash.get(item["video_hash"]))
+    missing = sum(path is None for path in resolved)
+    if missing:
+        raise ValueError(f"Incluye todas las fuentes pendientes ({missing} no coinciden por contenido)")
+    return resolved
 
 
 def _telegram_runtime_diagnostics(db_manager, app_dir=None, version_reader=read_local_version):
@@ -2718,22 +2808,47 @@ class InstagramAutoPro(ctk.CTk):
         self.trial_accounts_lbl = ctk.CTkLabel(cfg, text="0 cuentas con TRIALS ACTIVOS", text_color=TEXT_MUTED)
         self.trial_accounts_lbl.pack(side="right")
 
+        caption_cfg = ctk.CTkFrame(parent, fg_color=BG_CARD2)
+        caption_cfg.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 8))
+        ctk.CTkLabel(caption_cfg, text="Modo captions TRIAL (todas las cuentas):", text_color=TEXT_BODY).pack(side="left", padx=(12, 8), pady=10)
+        self.trial_caption_mode = tk.StringVar(value="Individual")
+        ctk.CTkComboBox(
+            caption_cfg, values=["Individual", "General"], variable=self.trial_caption_mode,
+            fg_color=BG_INPUT, border_color=BORDER, width=140,
+            command=self._trial_on_global_caption_mode_changed,
+        ).pack(side="left", padx=8, pady=10)
+        self.trial_general_txt_path = tk.StringVar(value="")
+        self.trial_general_txt_btn = GhostButton(
+            caption_cfg, text="Elegir TXT de captions",
+            command=self._trial_choose_general_txt, state="disabled",
+        )
+        self.trial_general_txt_btn.pack(side="left", padx=8, pady=10)
+        self.trial_general_txt_clear_btn = DangerButton(
+            caption_cfg, text="Quitar TXT", command=self._trial_clear_general_txt,
+            state="disabled",
+        )
+        self.trial_general_txt_clear_btn.pack(side="left", padx=8, pady=10)
+        self.trial_general_txt_label = ctk.CTkLabel(caption_cfg, text="General: sin TXT elegido", text_color=TEXT_MUTED)
+        self.trial_general_txt_label.pack(side="left", padx=8)
+
         self.trial_account_scroll = ctk.CTkScrollableFrame(parent, fg_color=BG_CARD2)
-        self.trial_account_scroll.grid(row=1, column=0, sticky="nsew", padx=16, pady=8)
-        parent.grid_rowconfigure(1, weight=1)
+        self.trial_account_scroll.grid(row=2, column=0, sticky="nsew", padx=16, pady=8)
+        parent.grid_rowconfigure(2, weight=1)
         self.trial_account_vars = {}
         self.trial_account_panel_frames = {}
+        self.trial_panel_buttons = {}
         self.trial_expanded_accounts = set()
         self.trial_caption_editors = {}
         self.trial_thumbnail_images = []
 
         buttons = ctk.CTkFrame(parent, fg_color="transparent")
-        buttons.grid(row=2, column=0, pady=(4, 12))
-        GhostButton(buttons, text="Guardar captions Trial", command=self._save_trial_captions).pack(side="left", padx=6)
+        buttons.grid(row=3, column=0, pady=(4, 12))
+        self.trial_save_individual_btn = GhostButton(buttons, text="Guardar captions individuales", command=self._save_trial_captions)
+        self.trial_save_individual_btn.pack(side="left", padx=6)
         GhostButton(buttons, text="VISTA PREVIA", command=lambda: self._trial_dist_run_per_account(True)).pack(side="left", padx=6)
         PrimaryButton(buttons, text="DISTRIBUIR TRIALS", command=lambda: self._trial_dist_run_per_account(False)).pack(side="left", padx=6)
         self.trial_dist_result = ctk.CTkTextbox(parent, height=100, fg_color=BG_INPUT, text_color=NEON_CYAN)
-        self.trial_dist_result.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 16))
+        self.trial_dist_result.grid(row=4, column=0, sticky="ew", padx=16, pady=(0, 16))
 
     def _trial_tanda_files(self, tanda_name=None):
         if not tanda_name:
@@ -2742,39 +2857,6 @@ class InstagramAutoPro(ctk.CTk):
         if not os.path.isdir(folder):
             return []
         return sorted(name for name in os.listdir(folder) if name.lower().endswith((".mp4", ".mov", ".avi")))
-
-    def _trial_refresh_account_rows(self):
-        for widget in self.trial_account_scroll.winfo_children():
-            widget.destroy()
-        tandas = [""] + self.db.get_trial_tandas()
-        self.trial_account_vars = {}
-        self.trial_account_panel_frames = {}
-        self.trial_expanded_accounts = set()
-        self.trial_caption_editors = {}
-        self.trial_thumbnail_images = []
-        for account in self.db.get_trials_active_accounts():
-            username = account["username"]
-            row = ctk.CTkFrame(self.trial_account_scroll, fg_color=BG_CARD)
-            row.pack(fill="x", padx=4, pady=4)
-            header = ctk.CTkFrame(row, fg_color="transparent")
-            header.pack(fill="x", padx=8, pady=6)
-            ctk.CTkLabel(header, text=f"@{username} [{account.get('account_type', '')}]", width=220, anchor="w").pack(side="left", padx=8)
-            var = tk.StringVar(value="")
-            ctk.CTkComboBox(
-                header, values=tandas, variable=var, width=260,
-                command=lambda _value, u=username: self._trial_on_account_tanda_changed(u),
-            ).pack(side="left", padx=8, pady=5)
-            GhostButton(
-                header, text="Desplegar panel de trials",
-                command=lambda u=username: self._trial_toggle_account_panel(u),
-            ).pack(side="left", padx=8, pady=5)
-            panel = ctk.CTkFrame(row, fg_color=BG_CARD2)
-            self.trial_account_panel_frames[username] = panel
-            self.trial_account_vars[username] = var
-        self.trial_accounts_lbl.configure(text=f"{len(self.trial_account_vars)} cuentas con TRIALS ACTIVOS")
-
-    def _trial_selected_assignments(self):
-        return {u: v.get().strip() for u, v in self.trial_account_vars.items() if v.get().strip()}
 
     def _trial_load_thumbnail(self, label, video_path):
         def task():
@@ -2801,10 +2883,52 @@ class InstagramAutoPro(ctk.CTk):
         for key in list(self.trial_caption_editors):
             if len(key) == 3 and key[0] == username:
                 self.trial_caption_editors.pop(key, None)
-        if username in getattr(self, "trial_expanded_accounts", set()):
+        mode = getattr(self, "trial_caption_mode", None)
+        if (username in getattr(self, "trial_expanded_accounts", set())
+                and (mode is None or mode.get().strip().lower() != "general")):
             self._trial_render_account_panel(username)
 
+    def _trial_on_global_caption_mode_changed(self, _value=None):
+        general = self.trial_caption_mode.get().strip().lower() == "general"
+        if general and self.trial_caption_editors:
+            self._trial_saving_silently = True
+            try:
+                self._save_trial_captions()
+            finally:
+                self._trial_saving_silently = False
+        for username, panel in self.trial_account_panel_frames.items():
+            button = self.trial_panel_buttons.get(username)
+            if button is not None:
+                button.configure(state="disabled" if general else "normal")
+            if username in self.trial_expanded_accounts:
+                if general:
+                    panel.pack_forget()
+                else:
+                    panel.pack(fill="x", padx=12, pady=(0, 8))
+                    self._trial_render_account_panel(username)
+        if general:
+            self.trial_caption_editors.clear()
+        self.trial_general_txt_btn.configure(state="normal" if general else "disabled")
+        self.trial_general_txt_clear_btn.configure(state="normal" if general else "disabled")
+        self.trial_save_individual_btn.configure(state="disabled" if general else "normal")
+
+    def _trial_choose_general_txt(self):
+        path = filedialog.askopenfilename(filetypes=[("Archivos de Texto", "*.txt")])
+        if not path:
+            return
+        if not load_clean_captions(path):
+            return messagebox.showwarning("Captions TRIAL", "El TXT no contiene captions legibles.")
+        self.trial_general_txt_path.set(path)
+        self.trial_general_txt_label.configure(text=f"TXT: {os.path.basename(path)}", text_color=NEON_CYAN)
+
+    def _trial_clear_general_txt(self):
+        self.trial_general_txt_path.set("")
+        self.trial_general_txt_label.configure(text="General: sin TXT elegido", text_color=TEXT_MUTED)
+
     def _trial_toggle_account_panel(self, username):
+        mode = getattr(self, "trial_caption_mode", None)
+        if mode is not None and mode.get().strip().lower() == "general":
+            return
         expanded = getattr(self, "trial_expanded_accounts", set())
         panel = self.trial_account_panel_frames.get(username)
         if panel is None:
@@ -2855,6 +2979,9 @@ class InstagramAutoPro(ctk.CTk):
             self._trial_load_thumbnail(preview_label, os.path.join(folder, copies[0]))
 
     def _trial_refresh_sources(self, _value=None):
+        mode = getattr(self, "trial_caption_mode", None)
+        if mode is not None and mode.get().strip().lower() == "general":
+            return
         for username in list(getattr(self, "trial_expanded_accounts", set())):
             self._trial_render_account_panel(username)
 
@@ -2885,12 +3012,32 @@ class InstagramAutoPro(ctk.CTk):
         assignments = self._trial_selected_assignments()
         if not assignments:
             return messagebox.showwarning("Trials", "Selecciona una tanda para al menos una cuenta.")
-        self._trial_saving_silently = True
-        self._save_trial_captions()
-        self._trial_saving_silently = False
-        missing = [f"{t}/{s}" for t in set(assignments.values()) for s in self._trial_missing_caption_sources(t)]
+        mode_selector = getattr(self, "trial_caption_mode", None)
+        mode = "general" if mode_selector is not None and mode_selector.get().strip().lower() == "general" else "individual"
+        modes = {username: mode for username in assignments}
+        if mode == "individual":
+            self._trial_saving_silently = True
+            try:
+                self._save_trial_captions()
+            finally:
+                self._trial_saving_silently = False
+        missing = [
+            f"{t}/{s}" for t in {assignments[u] for u in assignments if mode == "individual"}
+            for s in self._trial_missing_caption_sources(t)
+        ]
         if missing:
             return messagebox.showwarning("Captions Trial faltantes", ", ".join(missing))
+        pools = {}
+        if mode == "general":
+            path_selector = getattr(self, "trial_general_txt_path", None)
+            path = path_selector.get().strip() if path_selector is not None else ""
+            try:
+                pool = load_clean_captions(path)
+            except OSError as error:
+                return messagebox.showwarning("Captions TRIAL", f"No se pudo leer el TXT: {error}")
+            if not pool:
+                return messagebox.showwarning("Captions TRIAL", "Elige un TXT con captions para todos los TRIAL.")
+            pools = {tanda: pool for tanda in set(assignments.values())}
         try:
             per_day = int(self.trial_dist_vpd.get())
             files_by_tanda = {t: self._trial_tanda_files(t) for t in set(assignments.values())}
@@ -2900,9 +3047,46 @@ class InstagramAutoPro(ctk.CTk):
                 raise ValueError
         except ValueError:
             return messagebox.showwarning("Trials", "Dias invalidos.")
-        plan = build_trial_account_plan(assignments, files_by_tanda, per_day, days)
+        try:
+            existing_entries = load_entries(manifest_path(_BASE_DIR), require_source=False)
+            origin_by_file = {}
+            for tanda, filenames in files_by_tanda.items():
+                for filename in filenames:
+                    source_path = os.path.abspath(os.path.join(_BASE_DIR, "videos_finales", tanda, filename))
+                    origin_by_file[(tanda, filename)] = self.db.get_video_transform_source_identity(source_path)
+            existing_trials = []
+            for entry in existing_entries:
+                if entry.get("delivery_kind") != "trial":
+                    continue
+                row = dict(entry)
+                if not row.get("origin_identity") and row.get("source_path"):
+                    row["origin_identity"] = self.db.get_video_transform_source_identity(row["source_path"])
+                existing_trials.append(row)
+            plan = build_trial_account_plan(
+                assignments, files_by_tanda, per_day, days,
+                origin_by_file=origin_by_file, existing_entries=existing_trials,
+            )
+            general_captions = assign_trial_general_captions(
+                plan, assignments, modes, pools, per_day,
+            )
+        except (OSError, ValueError, TypeError) as error:
+            return messagebox.showerror("Trials", f"No se pudo leer la ocupación TRIAL: {error}")
         warnings = reused_trial_tanda_warnings(plan)
-        result = "\n".join(warnings + [f"@{u}: {len(v)} videos" + (f" (faltan {plan.shortfalls[u]})" if u in plan.shortfalls else "") for u, v in plan.assigned.items()])
+        lines = warnings + [
+            f"@{user}: {len(files)} videos" + (f" (faltan {plan.shortfalls[user]})" if user in plan.shortfalls else "")
+            for user, files in plan.assigned.items()
+        ]
+        for user, files in plan.assigned.items():
+            for index, filename in enumerate(files):
+                line = f"  Día {index // per_day + 1}, slot {index % per_day + 1}: {assignments[user]} / {filename}"
+                if modes[user] == "general":
+                    line += f" | Caption: {general_captions[(user, filename)].replace(chr(10), ' ⏎ ')}"
+                lines.append(line)
+        total_repeats = sum((plan.daily_repeats or {}).values())
+        lines.append(f"Orígenes repetidos en el mismo día: {total_repeats}")
+        for day, count in sorted((plan.daily_repeats or {}).items()):
+            lines.append(f"  Día {day}: {count} repetición(es)")
+        result = "\n".join(lines)
         if preview_only:
             self.trial_dist_result.delete("1.0", "end"); self.trial_dist_result.insert("1.0", result); return
         if plan.shortfalls and not preview_only:
@@ -2912,7 +3096,10 @@ class InstagramAutoPro(ctk.CTk):
                 "Trials incompletos",
                 "No se calendariza incompleto. Revisa VISTA PREVIA y asigna una tanda con videos suficientes por cuenta.",
             )
-        if not messagebox.askyesno("Distribuir Trials", "\n\n".join(warnings + [f"Calendarizar {sum(map(len, plan.assigned.values()))} videos sin reutilizar metadata?"])):
+        if not messagebox.askyesno("Distribuir Trials", "\n\n".join(warnings + [
+            f"Calendarizar {sum(map(len, plan.assigned.values()))} videos sin reutilizar metadata?",
+            f"Orígenes repetidos en el mismo día: {total_repeats}",
+        ])):
             return
         ids = {r["username"]: r["id"] for r in self.db.get_trials_active_accounts()}
         def task():
@@ -2935,6 +3122,9 @@ class InstagramAutoPro(ctk.CTk):
                             source_path=source_path,
                             telegram_filename=build_calendar_video_filename(name, tanda, ids.get(user), day, slot),
                             transform_log_id=self.db.get_video_transform_log_id(source_path),
+                            origin_identity=self.db.get_video_transform_source_identity(source_path),
+                            caption_mode=modes[user],
+                            caption=general_captions.get((user, name), ""),
                         )
                     )
             if affected:
@@ -3463,7 +3653,7 @@ class InstagramAutoPro(ctk.CTk):
             def forge_vid_id(fname):
                 return source_key_from_filename(fname)
 
-            all_vids = _acct_inventory_items(folders)
+            all_vids, partial_notices = _acct_inventory_summary(folders)
             if not all_vids:
                 raise ValueError("No se encontraron videos en las tandas seleccionadas")
 
@@ -3524,15 +3714,23 @@ class InstagramAutoPro(ctk.CTk):
                     accs_shuffled = accounts[:]
                     random.shuffle(accs_shuffled)
 
-                    for acc in accs_shuffled:
+                    for acc_index, acc in enumerate(accs_shuffled):
                         acc_today_vid_ids = {forge_vid_id(item_name(v)) for v in plan[acc][day_idx]}
+                        preferred_tanda = None
+                        if len(selected_tandas) > 1 and n >= len(selected_tandas):
+                            preferred_tanda = selected_tandas[(slot + acc_index) % len(selected_tandas)]
+                        available = [
+                            v for v in pool
+                            if item_key(v) not in assigned
+                            and forge_vid_id(item_name(v)) not in acc_today_vid_ids
+                        ]
+                        if preferred_tanda:
+                            preferred = [v for v in available if v["tanda"] == preferred_tanda]
+                            if preferred:
+                                available = preferred
                         candidates = []
-                        for v in pool:
-                            if item_key(v) in assigned:
-                                continue
+                        for v in available:
                             vid_id = forge_vid_id(item_name(v))
-                            if vid_id in acc_today_vid_ids:
-                                continue  # regla dura: no repetir vid_id mismo día/cuenta
                             score = 0
                             if vid_id in acc_lifetime_vid_ids[acc]:
                                 score += 200  # penalizar reutilización en misma cuenta
@@ -3560,6 +3758,10 @@ class InstagramAutoPro(ctk.CTk):
                         slot_vid_ids_used.add(vid_id)
 
             lines = []
+            if partial_notices:
+                lines += ["⚠️  AVISO FORGE"]
+                lines += [f"⚠️  {notice}" for notice in partial_notices]
+                lines.append("")
             label = "👁️  PREVISUALIZACIÓN" if preview_only else "🚀  EJECUTANDO"
             total_per_acc = n
             period_detail = f"{days} días × {vpd} videos/día = {total_per_acc}/cuenta"
@@ -3642,6 +3844,7 @@ class InstagramAutoPro(ctk.CTk):
                                     source_path=src,
                                     telegram_filename=dst_name,
                                     transform_log_id=self.db.get_video_transform_log_id(src),
+                                    origin_identity=self.db.get_video_transform_source_identity(src),
                                     caption_mode=caption_mode_map.get(item_tanda, "general"),
                                 )
                             )
@@ -3649,7 +3852,13 @@ class InstagramAutoPro(ctk.CTk):
                             total_copiados += 1
 
                 if affected:
-                    replace_entries(manifest_path(_BASE_DIR), entries, affected, "normal")
+                    replace_entries(
+                        manifest_path(_BASE_DIR),
+                        entries,
+                        affected,
+                        "normal",
+                        tanda_names=set(selected_tandas),
+                    )
 
                 lines += ["=" * 60,
                           f"✅  Estructura creada en : {cal_root}",
@@ -3689,7 +3898,7 @@ class InstagramAutoPro(ctk.CTk):
         ctrl_card = Card(f, title="Cuentas programadas")
         ctrl_card.grid(row=1, column=0, sticky="nsew", padx=(24, 12), pady=10)
         ctrl = ctrl_card.body
-        ctrl.grid_rowconfigure(6, weight=1)
+        ctrl.grid_rowconfigure(7, weight=1)
         ctrl.grid_columnconfigure(0, weight=1)
 
         # Fila 0: título + botón cargar
@@ -3740,6 +3949,7 @@ class InstagramAutoPro(ctk.CTk):
             variable=self._tg_express_mode,
             fg_color=BG_CARD2,
         )
+        self._tg_express_switch = express_toggle.switch
         express_toggle.grid(row=4, column=0, sticky="ew", pady=(8, 4))
 
         # Fila 5: reset opcional de topics
@@ -3750,20 +3960,32 @@ class InstagramAutoPro(ctk.CTk):
             variable=self._tg_reset_topics,
             fg_color=BG_CARD2,
         )
-        reset_topics_toggle.grid(row=5, column=0, sticky="ew", pady=(4, 10))
+        self._tg_reset_topics_switch = reset_topics_toggle.switch
+        reset_topics_toggle.grid(row=5, column=0, sticky="ew", pady=(4, 4))
 
-        # Fila 5: listbox con selección múltiple
+        # Fila 6: permitir reenvíos de videos marcados como Publicado.
+        self._tg_allow_published_repeats = tk.BooleanVar(value=False)
+        repeat_published_toggle = ToggleRow(
+            ctrl,
+            "Repetir videos marcados como Publicado en la cuenta",
+            variable=self._tg_allow_published_repeats,
+            fg_color=BG_CARD2,
+        )
+        self._tg_allow_published_repeats_switch = repeat_published_toggle.switch
+        repeat_published_toggle.grid(row=6, column=0, sticky="ew", pady=(4, 10))
+
+        # Fila 7: listbox con selección múltiple
         self.list_tg = tk.Listbox(ctrl, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
                                   selectbackground=self.themed(ACCENT),
                                   selectforeground=self.themed(ACCENT_TEXT),
                                   selectmode=tk.EXTENDED,
                                   borderwidth=0, highlightthickness=1,
                                   highlightbackground=self.themed(BORDER), font=FONT_BODY)
-        self.list_tg.grid(row=6, column=0, sticky="nsew", pady=(0, 10))
+        self.list_tg.grid(row=7, column=0, sticky="nsew", pady=(0, 10))
 
         # Controles inferiores
         bot_ctrl = ctk.CTkFrame(ctrl, fg_color="transparent")
-        bot_ctrl.grid(row=7, column=0, sticky="ew", pady=(10, 20))
+        bot_ctrl.grid(row=8, column=0, sticky="ew", pady=(10, 20))
         
         ctk.CTkLabel(bot_ctrl, text="Fecha Inicio (YYYY-MM-DD):", text_color=TEXT_MUTED).pack(side="left")
         self.e_date_tg = ctk.CTkEntry(bot_ctrl, fg_color=BG_INPUT, border_color=BORDER, width=120)
@@ -3771,7 +3993,7 @@ class InstagramAutoPro(ctk.CTk):
         self.e_date_tg.insert(0, datetime.now().strftime("%Y-%m-%d"))
 
         btn_row = ctk.CTkFrame(ctrl, fg_color="transparent")
-        btn_row.grid(row=8, column=0, sticky="ew", pady=(0, 0))
+        btn_row.grid(row=9, column=0, sticky="ew", pady=(0, 0))
         
         self.btn_start_tg = PrimaryButton(btn_row, text="▶ INICIAR", fg_color=TELEGRAM,
                                           text_color=TEXT_ON_DANGER, command=self.start_tg_bot)
@@ -3786,7 +4008,7 @@ class InstagramAutoPro(ctk.CTk):
         self.btn_stop_tg.pack(side="left", expand=True, padx=(5, 0))
 
         cleanup_row = ctk.CTkFrame(ctrl, fg_color="transparent")
-        cleanup_row.grid(row=9, column=0, sticky="ew", pady=(8, 0))
+        cleanup_row.grid(row=10, column=0, sticky="ew", pady=(8, 0))
         self.btn_delete_calendar_tg = DangerButton(
             cleanup_row,
             text="Borrar calendarizaciones",
@@ -3952,12 +4174,15 @@ class InstagramAutoPro(ctk.CTk):
         only_with_videos = self._tg_only_with_videos.get() if self._tg_only_with_videos else False
         accounts = self.db.get_all_accounts()
         import organizadortg as telegram_bot
+        video_counts_by_account = telegram_bot.count_calendar_videos_by_account()
         for diagnostic_line in _telegram_runtime_diagnostics(self.db):
             self.bot_log(diagnostic_line, "INFO")
 
         enriched = []
         for acc in accounts:
-            video_counts = telegram_bot.count_account_calendar_videos_by_kind(acc["username"])
+            video_counts = video_counts_by_account.get(
+                acc["username"], {"normal": 0, "trial": 0}
+            )
             total = video_counts["normal"] + video_counts["trial"]
             if only_with_videos and total == 0:
                 continue
@@ -4071,6 +4296,8 @@ class InstagramAutoPro(ctk.CTk):
         reset_topics = bool(reset_topics_var.get()) if reset_topics_var is not None else False
         express_mode_var = getattr(self, "_tg_express_mode", None)
         express_mode = bool(express_mode_var.get()) if express_mode_var is not None else False
+        repeat_published_var = getattr(self, "_tg_allow_published_repeats", None)
+        allow_published_repeats = bool(repeat_published_var.get()) if repeat_published_var is not None else False
         if reset_topics:
             if not messagebox.askyesno(
                 "Borrar topics existentes",
@@ -4086,6 +4313,8 @@ class InstagramAutoPro(ctk.CTk):
         self.bot_log("📝 Captions: se resuelven por tanda desde Logística.", "INFO")
         if express_mode:
             self.bot_log("Envío express activado: se omite el mensaje de metadata.", "WARNING")
+        if allow_published_repeats:
+            self.bot_log("Reenvío de videos marcados como Publicado activado para estas cuentas.", "WARNING")
         if reset_topics:
             self.bot_log("🧹 Reset de topics activado: se borraran y recrearan antes del envio.", "WARNING")
         self.tg_controller = telegram_bot.TelegramBotController(
@@ -4093,8 +4322,12 @@ class InstagramAutoPro(ctk.CTk):
             selected_accounts,
             reset_topics=reset_topics,
             express_mode=express_mode,
+            allow_published_repeats=allow_published_repeats,
             db_manager=self.db,
         )
+        self._tg_express_switch.configure(state="disabled")
+        self._tg_reset_topics_switch.configure(state="disabled")
+        self._tg_allow_published_repeats_switch.configure(state="disabled")
         
         self.btn_start_tg.configure(state="disabled")
         self.btn_pause_tg.configure(state="normal")
@@ -4125,6 +4358,9 @@ class InstagramAutoPro(ctk.CTk):
             
         def done(success, result):
             builtins.print = self._original_print
+            self._tg_express_switch.configure(state="normal")
+            self._tg_reset_topics_switch.configure(state="normal")
+            self._tg_allow_published_repeats_switch.configure(state="normal")
             self.btn_start_tg.configure(state="normal")
             self.btn_pause_tg.configure(state="disabled")
             self.btn_stop_tg.configure(state="disabled")
@@ -4342,8 +4578,11 @@ class InstagramAutoPro(ctk.CTk):
 
         def task():
             config = load_airtable_config()
+            table_schema = fetch_airtable_table_schema(config)
             records = fetch_airtable_records(config)
-            plan = build_airtable_mirror_plan(self.db.get_all_accounts(), records)
+            plan = build_airtable_mirror_plan(
+                self.db.get_all_accounts(), records, table_schema=table_schema,
+            )
             return config, plan
 
         def done(success, result):
@@ -5553,20 +5792,41 @@ class InstagramAutoPro(ctk.CTk):
         selected_profile = getattr(getattr(self, "forge_profile_var", None), "get", lambda: "Legacy MP4")()
         color_summary = ""
         retry_items = None
+        self.forge_iphone_assume_unknown_sdr = False
         if selected_profile != "Legacy MP4":
             from forge_iphone_profile import preflight_batch, probe_file
             profile_key = "iphone_hlg" if selected_profile == "iPhone HLG" else "iphone_sdr"
             try:
-                preflight = preflight_batch(
-                    {path: probe_file(path) for path in self.forge_video_paths}, profile_key)
+                probes = {path: probe_file(path) for path in self.forge_video_paths}
+                preflight = preflight_batch(probes, profile_key)
             except Exception as error:
                 return messagebox.showerror("Preflight iPhone", str(error))
+            unknown_paths = [
+                path for path in preflight["blocked"]
+                if preflight["sources"].get(path) == "unknown"
+            ]
+            if unknown_paths:
+                sample = "\n".join(
+                    f"- {os.path.basename(path)}" for path in unknown_paths[:12]
+                )
+                if len(unknown_paths) > 12:
+                    sample += f"\n- ... y {len(unknown_paths) - 12} más"
+                assume = messagebox.askyesno(
+                    "Fuentes sin color",
+                    f"Hay {len(unknown_paths)} fuente(s) sin tags de color reconocibles.\n\n"
+                    f"¿Confirmás asumir SDR BT.709 para esta tanda?\n\n{sample}\n\n"
+                    "Esto se registrará por archivo y se aplicará sólo a este Forge.",
+                )
+                if assume:
+                    preflight = preflight_batch(
+                        probes, profile_key, assume_unknown_sdr=True)
+                    self.forge_iphone_assume_unknown_sdr = True
             self.forge_iphone_preflight = preflight
             counts = preflight["counts"]
             color_summary = (f" · {selected_profile} MOV · SDR {counts['sdr']} / "
                              f"HLG {counts['hlg']} / desconocidos {counts['unknown']}")
             if preflight["assumptions"]:
-                color_summary += f" · WaveSpeed sin tags asumidos SDR {len(preflight['assumptions'])}"
+                color_summary += f" · sin tags asumidos SDR {len(preflight['assumptions'])}"
             if preflight["blocked"]:
                 details = "\n".join(f"{os.path.basename(path)}: {reason}"
                                     for path, reason in preflight["blocked"].items())
@@ -5584,9 +5844,8 @@ class InstagramAutoPro(ctk.CTk):
                         raise ValueError("Estado Forge desconocido")
                     if status.get("state") in ("incomplete", "processing"):
                         retry_items = status["pending"]
-                        if any(item["source_path"] not in self.forge_video_paths
-                               for item in retry_items):
-                            raise ValueError("Incluye todas las fuentes pendientes")
+                        _resolve_forge_retry_sources(
+                            retry_items, self.forge_video_paths)
                         n_total = len(retry_items)
                         color_summary += f" · reintento de {n_total} copia(s) pendiente(s)"
                 except (OSError, ValueError, KeyError, TypeError) as error:
@@ -5654,6 +5913,8 @@ class InstagramAutoPro(ctk.CTk):
         selected_profile = getattr(getattr(self, "forge_profile_var", None), "get", lambda: "Legacy MP4")()
         output_profile = {"iPhone SDR": "iphone_sdr", "iPhone HLG": "iphone_hlg"}.get(selected_profile)
         pending_retry = None
+        retry_source_paths = None
+        retry_metadata = None
         prior_status = None
         status_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                    "videos_finales", tanda_name, "forge_batch_status.json")
@@ -5668,9 +5929,10 @@ class InstagramAutoPro(ctk.CTk):
                     raise ValueError("Estado Forge desconocido")
                 if old_status.get("state") in ("incomplete", "processing"):
                     pending_retry = old_status
-                    selected = set(self.forge_video_paths)
-                    if any(item["source_path"] not in selected for item in old_status["pending"]):
-                        raise ValueError("Incluye todas las fuentes pendientes para reintentar la tanda")
+                    retry_source_paths = _resolve_forge_retry_sources(
+                        old_status["pending"], self.forge_video_paths)
+                    retry_metadata = generate_forge_retry_metadata(
+                        old_status["pending"], self.db)
             except (OSError, ValueError, KeyError, TypeError) as error:
                 return messagebox.showerror("Reintento Forge", str(error))
         preflight = None
@@ -5681,7 +5943,12 @@ class InstagramAutoPro(ctk.CTk):
                 if missing:
                     raise RuntimeError(f"FFmpeg no soporta: {', '.join(sorted(missing))}")
                 preflight = preflight_batch(
-                    {path: probe_file(path) for path in self.forge_video_paths}, output_profile)
+                    {path: probe_file(path) for path in self.forge_video_paths},
+                    output_profile,
+                    assume_unknown_sdr=bool(
+                        getattr(self, "forge_iphone_assume_unknown_sdr", False)
+                    ),
+                )
             except Exception as error:
                 return messagebox.showerror("Preflight iPhone", str(error))
             if preflight["blocked"]:
@@ -5704,7 +5971,7 @@ class InstagramAutoPro(ctk.CTk):
             "ninguna (HEVC igualmente)" if output_profile else "ninguna (solo metadata, sin re-encode)")
         profile_desc = f"\nPerfil: {selected_profile} ({'MOV' if output_profile else 'formato original'})"
         if pending_retry:
-            profile_desc += f"\nReintento: {len(pending_retry['pending'])} copia(s) pendiente(s), mismo número y metadata"
+            profile_desc += f"\nReintento: {len(pending_retry['pending'])} copia(s) pendiente(s), mismo número y metadata nueva"
         if preflight:
             counts = preflight["counts"]
             profile_desc += (f"\nFuentes: SDR {counts['sdr']} / HLG {counts['hlg']} / "
@@ -5747,15 +6014,15 @@ class InstagramAutoPro(ctk.CTk):
             meta_idx = 0
             reserved_max = {}
             if pending_retry:
-                for item in pending_retry["pending"]:
-                    vid_path = item["source_path"]
+                for item, vid_path, meta in zip(
+                    pending_retry["pending"], retry_source_paths, retry_metadata
+                ):
                     if metadata_pool.get_video_hash(vid_path) != item["video_hash"]:
                         raise ValueError(
                             f"La fuente pendiente cambió desde el intento anterior: {os.path.basename(vid_path)}")
                     filename = os.path.basename(vid_path)
                     out_name = item["output_name"]
                     out_path = os.path.join(output_dir, out_name)
-                    meta = item["meta"]
                     vh = item["video_hash"]
                     match = re.search(r"__c(\d+)\.mov$", out_name, re.I)
                     if not match:
@@ -5792,31 +6059,52 @@ class InstagramAutoPro(ctk.CTk):
             def process_copy(copy_job):
                 vid_path, out_path, filename, out_name, vh, meta, fingerprint = copy_job
                 try:
-                    if output_profile:
-                        if pending_retry and os.path.isfile(out_path):
-                            params = validate_existing_copy(
-                                vid_path, out_path, meta, output_profile,
-                                preflight["sources"][vid_path])
-                            params["recovered_published_copy"] = True
-                        else:
-                            params = render_validated_copy(
-                                vid_path, out_path, meta, output_profile,
-                                preflight["sources"][vid_path], enabled=fx_enabled,
-                                strength=forge_strength, overrides=forge_overrides,
-                                threads=performance.ffmpeg_threads,
-                            )
-                        params.update({"output_profile": output_profile,
-                                       "source_color": preflight["sources"][vid_path],
-                                       "source_color_assumption": preflight["assumptions"].get(vid_path),
-                                       "output_color": "hlg" if output_profile == "iphone_hlg" else "sdr",
-                                       "output_codec": "hevc", "output_container": "mov"})
-                    else:
-                        params = metadata_pool.apply_variant_and_metadata(
+                    def render_or_recover():
+                        if output_profile:
+                            def normal_render():
+                                return render_validated_copy(
+                                    vid_path, out_path, meta, output_profile,
+                                    preflight["sources"][vid_path], enabled=fx_enabled,
+                                    strength=forge_strength, overrides=forge_overrides,
+                                    threads=performance.ffmpeg_threads,
+                                )
+
+                            def safe_render():
+                                return render_validated_copy(
+                                    vid_path, out_path, meta, output_profile,
+                                    preflight["sources"][vid_path],
+                                    enabled={key: False for key in metadata_pool.DEFAULT_VARIANT_EFFECTS},
+                                    strength=forge_strength, overrides=None,
+                                    threads=performance.ffmpeg_threads,
+                                )
+
+                            if pending_retry and os.path.isfile(out_path):
+                                try:
+                                    params = validate_existing_copy(
+                                        vid_path, out_path, meta, output_profile,
+                                        preflight["sources"][vid_path])
+                                    params["recovered_published_copy"] = True
+                                except Exception:
+                                    quarantine_forge_retry_copy(out_path)
+                                    params = _render_with_qc_fallback(normal_render, safe_render)
+                            else:
+                                params = _render_with_qc_fallback(normal_render, safe_render)
+                            return params
+                        return metadata_pool.apply_variant_and_metadata(
                             vid_path, out_path, meta,
                             enabled=fx_enabled, strength=forge_strength,
                             overrides=forge_overrides,
                             ffmpeg_threads=performance.ffmpeg_threads,
                         )
+
+                    params, attempt_number = _run_forge_copy_with_retries(render_or_recover)
+                    params["forge_attempts"] = attempt_number
+                    if output_profile:
+                        params.update({"output_profile": output_profile,
+                                       "source_color": preflight["sources"][vid_path],
+                                       "source_color_assumption": preflight["assumptions"].get(vid_path),
+                                       "output_color": "hlg" if output_profile == "iphone_hlg" else "sdr",
+                                       "output_codec": "hevc", "output_container": "mov"})
                 except Exception as error:
                     raise RuntimeError(f"Forge falló en '{filename}': {error}") from error
                 return filename, out_name, vh, fingerprint, vid_path, out_path, meta, params
@@ -5861,7 +6149,7 @@ class InstagramAutoPro(ctk.CTk):
                     source_path=vid_path,
                     output_path=out_path,
                     tanda_name=tanda_name,
-                    source_identity=fingerprint.get("video_hash", ""),
+                    source_identity=vh,
                     params=params,
                     meta=meta,
                 )
@@ -5941,6 +6229,7 @@ class InstagramAutoPro(ctk.CTk):
         trial_tandas = self.db.get_trial_tandas()
         self.trial_account_vars = {}
         self.trial_account_panel_frames = {}
+        self.trial_panel_buttons = {}
         self.trial_expanded_accounts = set()
         self.trial_caption_editors = {}
         self.trial_thumbnail_images = []
@@ -5961,12 +6250,15 @@ class InstagramAutoPro(ctk.CTk):
                 command=lambda _value, u=username: self._trial_on_account_tanda_changed(u),
             )
             combo.pack(side="left", padx=8, pady=6)
-            GhostButton(
-                header, text="Desplegar panel de trials",
+            panel_button = GhostButton(
+                header, text="Editar caption individual",
                 command=lambda u=username: self._trial_toggle_account_panel(u),
-            ).pack(side="left", padx=8, pady=6)
+                state="disabled" if self.trial_caption_mode.get().strip().lower() == "general" else "normal",
+            )
+            panel_button.pack(side="left", padx=8, pady=6)
             panel = ctk.CTkFrame(row, fg_color=BG_CARD2)
             self.trial_account_panel_frames[username] = panel
+            self.trial_panel_buttons[username] = panel_button
             self.trial_account_vars[username] = var
         self.trial_accounts_lbl.configure(text=f"{len(active_accounts)} cuentas con TRIALS ACTIVOS")
 

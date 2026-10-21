@@ -17,6 +17,18 @@ def ensure_stdout_utf8():
     was running. errors="replace" means a character neither UTF-8 nor the
     original encoding could show still prints as-is instead of crashing.
     """
+    # GUI launches can have no standard descriptors. Reserve them before SQLite
+    # opens a file: Tcl writes callback errors directly to fd 2, which could
+    # otherwise be reused for organizador.db and corrupt its first page.
+    for descriptor in (0, 1, 2):
+        try:
+            os.fstat(descriptor)
+        except OSError:
+            mode = os.O_RDONLY if descriptor == 0 else os.O_WRONLY
+            null_fd = os.open(os.devnull, mode)
+            if null_fd != descriptor:
+                os.dup2(null_fd, descriptor)
+                os.close(null_fd)
     for stream in (sys.stdout, sys.stderr):
         if stream is None:
             continue

@@ -121,3 +121,23 @@ def test_delete_calendarizations_removes_manifest_rows_only(tmp_path, monkeypatc
     assert summary["deleted_folders"] == 0
     assert [row["username"] for row in load_entries(tmp_path / "calendar_manifest.json")] == ["bob"]
     assert legacy.exists()
+
+
+def test_deleted_manifest_calendarizations_disappear_from_account_counts(tmp_path, monkeypatch):
+    video = tmp_path / "videos_finales" / "T" / "clip.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"video")
+    entries = [
+        build_entry("alice", 1, "normal", 1, 1, "T", str(video), "a__TANDA_T.mp4"),
+        build_entry("bob", 2, "normal", 1, 1, "T", str(video), "b__TANDA_T.mp4"),
+    ]
+    replace_entries(tmp_path / "calendar_manifest.json", entries, {"alice", "bob"}, "normal")
+    monkeypatch.setattr(organizadortg, "base_dir", str(tmp_path), raising=False)
+
+    before = organizadortg.count_calendar_videos_by_account()
+    summary = organizadortg.delete_calendarizations_for_accounts(["alice"])
+    after = organizadortg.count_calendar_videos_by_account()
+
+    assert before == {"alice": {"normal": 1, "trial": 0}, "bob": {"normal": 1, "trial": 0}}
+    assert summary["deleted_files"] == 1
+    assert after == {"bob": {"normal": 1, "trial": 0}}

@@ -63,14 +63,16 @@ Cada cuenta tiene un tipo que define qué contenido recibe:
 
 ### Anti-Choque (Anti-Collision)
 El sistema garantiza que:
-1. **Ninguna cuenta ve el mismo clip P1 dos veces el mismo día** (regla dura)
-2. **Ninguna cuenta ve la misma combinación P1+P2 nunca** (regla dura)
-3. Los clips P1 se rotan entre cuentas para evitar solapamiento en el mismo horario (regla blanda)
+1. **Cada cuenta recibe la tanda completa**, una vez por origen; las variantes Forge de un mismo origen no cuentan como tandas distintas.
+2. **Una cuenta no recibe dos veces el mismo origen** al volver a distribuir esa tanda.
+3. **No se repite P1 en la misma cuenta el mismo día**; los choques de P1 entre cuentas en el mismo horario se minimizan cuando hay alternativas.
+
+La asignación sigue un **orden rotativo determinista**: las cuentas se procesan por nombre y los orígenes en un orden estable; cada cuenta empieza en el siguiente origen de la rotación y avanza por los días. Si existe una alternativa que evita un choque de P1 en el mismo horario, se prioriza esa alternativa. Así la distribución queda legible como una cuadrícula tipo sudoku, en vez de empezar con una mezcla aleatoria.
 
 Esto es crítico para que Instagram no detecte contenido duplicado entre cuentas.
 
 ### Fill-Up
-Cuando el stock de videos se agota antes de completar los días planificados, el sistema genera combinaciones adicionales automáticamente. Esto evita que el calendario quede incompleto.
+La distribución por tandas no vuelve a usar un origen para llenar espacios: se prioriza que cada cuenta reciba la tanda completa sin repetir contenido. Usa `MAX` o configura suficientes días para cubrir todos los orígenes respetando la cuota diaria.
 
 ### VAs (Asistentes Virtuales)
 Cada VA tiene su propio grupo de Telegram. El sistema crea un **topic** (hilo) por cada cuenta que administra ese VA. Los videos se envían al topic correcto con metadatos de horario.
@@ -139,7 +141,7 @@ En la interfaz gráfica del bot, el operador debe registrar:
 
 ### Miércoles — Distribución
 - [ ] En la GUI: ir a pestaña de Organización → seleccionar tanda y categoría
-- [ ] Configurar cuántos días organizar y la cuota diaria por cuenta
+- [ ] Confirmar en la vista previa que cada cuenta recibirá todos los orígenes; usa `MAX` o suficientes días según la cuota diaria
 - [ ] Ejecutar distribución
 - [ ] Verificar que se crearon las carpetas `CALENDARIO_POSTEO/Dia_X/`
 

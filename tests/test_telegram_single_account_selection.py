@@ -49,12 +49,16 @@ def test_selecting_one_account_only_sends_that_accounts_files():
             (tanda_dir / "TG_TEST__P1__P2A.mp4").write_bytes(b"TG_A")
             (tanda_dir / "TG_TEST__P1__P2B.mp4").write_bytes(b"TG_B")
 
-            Organizador.distribute_tanda("TG_TEST", "PRUEBA_TG_CAT", 1, False, "1")
+            distribution = Organizador.distribute_tanda("TG_TEST", "PRUEBA_TG_CAT", 1, False, "2")
+            assert distribution.startswith("✅"), distribution
 
             manifest = json.loads((run_root / "calendar_manifest.json").read_text(encoding="utf-8"))
             entries = [entry for entry in manifest["entries"] if entry["delivery_kind"] == "normal"]
-            assert len(entries) == 2, entries
-            by_account = {entry["username"]: entry for entry in entries}
+            assert len(entries) == 4, entries
+            by_account = {
+                username: [entry for entry in entries if entry["username"] == username]
+                for username in {entry["username"] for entry in entries}
+            }
             assert set(by_account) == {"tg_acc_one", "tg_acc_two"}
             assert not list((run_root / "CALENDARIO_POSTEO").rglob("*.mp4"))
 
@@ -67,11 +71,13 @@ def test_selecting_one_account_only_sends_that_accounts_files():
             result, events = _run_telegram(organizadortg, ["tg_acc_one"])
 
         video_events = [e for e in events if e.get("event") == "video"]
-        assert len(video_events) == 1, (
-            f"selecting only tg_acc_one must send exactly its own 1 file, got {len(video_events)}: {video_events}"
+        assert len(video_events) == 2, (
+            f"selecting only tg_acc_one must send its 2 origins, got {len(video_events)}: {video_events}"
         )
-        assert video_events[0]["username"] == "tg_acc_one"
-        assert by_account["tg_acc_one"]["source_path"] == video_events[0]["video_path"]
+        assert all(event["username"] == "tg_acc_one" for event in video_events)
+        assert {entry["source_path"] for entry in by_account["tg_acc_one"]} == {
+            event["video_path"] for event in video_events
+        }
 
         topic_events = [e for e in events if e.get("event") == "topic"]
         assert all(e["username"] == "tg_acc_one" for e in topic_events), (

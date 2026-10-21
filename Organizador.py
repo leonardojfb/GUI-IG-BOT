@@ -5,6 +5,7 @@ import random
 import string
 import math
 import json
+import re
 from collections import defaultdict
 from calendar_manifest import build_entry, manifest_path, replace_entries
 from database import DatabaseManager
@@ -28,14 +29,59 @@ def _tanda_video_inventory(tanda_path, extensions=(".mp4", ".mov")):
     try:
         with open(status_path, encoding="utf-8") as status_file:
             status = json.load(status_file)
-        if status.get("state") != "complete":
-            return [], "Tanda Forge incompleta: reintenta las copias pendientes antes de Logística."
+        pending_names = {
+            item["output_name"] for item in status["pending"]
+            if isinstance(item, dict) and item.get("output_name")
+        }
+        if status.get("state") == "processing":
+            published = sorted(name for name in videos if name in pending_names)
+            if published:
+                pending_count = len(pending_names - set(published))
+                return published, (
+                    f"Tanda Forge parcial: usando {len(published)} copias publicadas; "
+                    f"{pending_count} pendientes."
+                )
         validated = set(status["validated"])
         if not validated or not validated.issubset(set(videos)):
             return [], "Inventario Forge inválido: faltan copias validadas."
+        if status.get("state") == "incomplete":
+            pending_count = len(pending_names)
+            return [name for name in videos if name in validated], (
+                f"Tanda Forge parcial: usando {len(validated)} copias validadas; "
+                f"{pending_count} pendientes."
+            )
+        if status.get("state") != "complete":
+            return [], "Tanda Forge incompleta: reintenta las copias pendientes antes de Logística."
         return [name for name in videos if name in validated], None
     except (OSError, ValueError, KeyError, TypeError):
         return [], "Estado Forge ilegible: no se puede distribuir esta tanda."
+
+
+def _is_partial_inventory_notice(message):
+    return isinstance(message, str) and message.startswith("Tanda Forge parcial:")
+
+
+def _origin_key_from_filename(filename: str) -> str:
+    """Return the original video identity shared by its Forge copy variants."""
+    stem = os.path.splitext(os.path.basename(filename))[0]
+    stem = stem.split("__TANDA_", 1)[0]
+    stem = re.sub(r"__c\d+$", "", stem, flags=re.IGNORECASE)
+    p1, p2 = parse_combination_from_filename(stem)
+    if p1 and p2:
+        return f"{p1}__{p2}"
+    return p1 or stem
+
+
+def _minimum_days_for_origins(videos, daily_quota: int) -> int:
+    origins_by_p1 = defaultdict(set)
+    for filename in videos:
+        origin = _origin_key_from_filename(filename)
+        p1, _p2 = parse_combination_from_filename(filename)
+        origins_by_p1[p1 or origin].add(origin)
+    origin_count = len({origin for origins in origins_by_p1.values() for origin in origins})
+    same_p1_limit = max((len(origins) for origins in origins_by_p1.values()), default=0)
+    return max(math.ceil(origin_count / daily_quota), same_p1_limit)
+
 
 # Parámetros de distribución diaria
 DAILY_GOAL = 46
@@ -51,7 +97,7 @@ def build_calendar_video_filename(video_filename, tanda_name, account_id, day, s
 
 def preview_distribution_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to_organize="MAX"):
     """
-    Genera un reporte detallado de distribución, detallando VAs y Fill-up por cuenta.
+    Reporta el inventario de orígenes que recibirá cada cuenta, sin duplicarlos.
     """
     db = DatabaseManager()
     # Filtrar cuentas por categoría (account_type en V6)
@@ -68,67 +114,74 @@ def preview_distribution_tanda(tanda_name, category_dest, daily_quota, use_fillu
         db.close()
         return f"❌ ERROR: No se encuentra la carpeta de la tanda: {tanda_name}"
 
-    videos, inventory_error = _tanda_video_inventory(tanda_path)
-    if inventory_error:
+    videos, inventory_notice = _tanda_video_inventory(tanda_path)
+    if inventory_notice and not _is_partial_inventory_notice(inventory_notice):
         db.close()
-        return f"❌ {inventory_error}"
-    total_videos = len(videos)
-    
-    # --- CÁLCULOS LOGÍSTICOS ---
+        return f"❌ {inventory_notice}"
     num_cuentas = len(accounts)
-    vids_dia_grupo = num_cuentas * daily_quota
-    dias_alcance_real = total_videos / vids_dia_grupo if vids_dia_grupo > 0 else 0
+    if daily_quota < 1:
+        db.close()
+        return "❌ ERROR: La cuota diaria debe ser al menos 1."
 
-    # Lógica de Días "MAX": Redondeo hacia arriba para completar el último día
+    origins = {_origin_key_from_filename(video) for video in videos}
+    total_origins = len(origins)
+    required_days = _minimum_days_for_origins(videos, daily_quota)
     if str(days_to_organize).upper() == "MAX":
-        target_days = math.ceil(dias_alcance_real)
+        target_days = required_days
     else:
-        try: target_days = int(days_to_organize)
-        except: target_days = math.floor(dias_alcance_real)
+        try:
+            target_days = int(days_to_organize)
+        except (TypeError, ValueError):
+            db.close()
+            return "❌ ERROR: Los días a organizar deben ser un número o MAX."
+        if target_days < 1 and total_origins:
+            db.close()
+            return "❌ ERROR: Los días a organizar deben ser al menos 1."
 
-    total_necesario = target_days * vids_dia_grupo
-    vids_faltantes_total = max(0, total_necesario - total_videos)
-
-    # --- CONSTRUCCIÓN DEL REPORTE ---
     resumen =  f"╔════════════════════════════════════════════════════════════════════╗\n"
     resumen += f"║   🎬 REPORTE ESTRATÉGICO DE DISTRIBUCIÓN: {tanda_name:<16} ║\n"
     resumen += f"╚════════════════════════════════════════════════════════════════════╝\n\n"
     
     resumen += f"📈 RESUMEN DE INVENTARIO:\n"
     resumen += f"  ├─ Categoría Destino:  {category_dest}\n"
-    resumen += f"  ├─ Videos Disponibles: {total_videos}\n"
-    resumen += f"  ├─ Consumo del Grupo:  {vids_dia_grupo} videos/día\n"
-    resumen += f"  └─ Alcance Natural:    {dias_alcance_real:.2f} días\n\n"
+    resumen += f"  ├─ Archivos Forge disponibles: {len(videos)}\n"
+    resumen += f"  ├─ Orígenes únicos en la tanda: {total_origins}\n"
+    resumen += f"  ├─ Cuentas destino: {num_cuentas}\n"
+    resumen += f"  ├─ Tanda completa por cuenta: {total_origins} videos\n"
+    resumen += f"  └─ Total a distribuir: {total_origins * num_cuentas} videos\n\n"
 
     resumen += f"🗓️ PLANIFICACIÓN (Modo: {'MÁXIMO' if days_to_organize == 'MAX' else 'FIJO'}):\n"
-    resumen += f"  ├─ Objetivo:           {target_days} días completos\n"
-    resumen += f"  ├─ Necesidad Total:    {total_necesario} videos\n"
-    if use_fillup:
-        resumen += f"  ├─ ⚡ FILL-UP:         ACTIVO (Generará {vids_faltantes_total} videos extras)\n"
-    resumen += f"  └─ Estado Final:       Todas las cuentas sincronizadas hasta el Día {target_days}\n\n"
+    resumen += f"  ├─ Días mínimos para completar la tanda: {required_days}\n"
+    resumen += f"  ├─ Días solicitados: {target_days}\n"
+    resumen += f"  └─ Cuota diaria por cuenta: {daily_quota}\n\n"
 
     resumen += f"👥 DETALLE POR CUENTA Y ASISTENTE (VA):\n"
-    resumen += f"{'CUENTA':<18} | {'VA ASIGNADO':<15} | {'REAL':<6} | {'FILL-UP'}\n"
+    resumen += f"{'CUENTA':<18} | {'VA ASIGNADO':<15} | {'VIDEOS':<8} | {'ESTADO'}\n"
     resumen += f"{'-'*68}\n"
 
-    vids_stock_restante = total_videos
     for acc in accounts:
         user = f"@{acc['username']}"
         va = acc.get('assigned_va', '⚠️ SIN VA')
-        
-        # Reparto equitativo del stock real
-        meta_acc = target_days * daily_quota
-        vids_reales = min(meta_acc, vids_stock_restante // (num_cuentas - accounts.index(acc)))
-        vids_stock_restante -= vids_reales
-        
-        # Cálculo de fill-up por cuenta
-        necesita_fill = meta_acc - vids_reales
-        fill_str = f"➕ {necesita_fill} vids" if necesita_fill > 0 else "✅ OK"
-        
-        resumen += f"{user[:18]:<18} | {va[:15]:<15} | {vids_reales:<6} | {fill_str}\n"
+        fits = required_days <= target_days
+        status = "✅ tanda completa" if fits else "⚠️ faltan días"
+        resumen += f"{user[:18]:<18} | {va[:15]:<15} | {total_origins:<8} | {status}\n"
 
     resumen += f"\n{'='*68}\n"
-    resumen += f"💡 EL CONTENIDO ALCANZA PARA QUE TODO EL EQUIPO PUBLIQUE POR {target_days} DÍAS.\n"
+    if required_days > target_days:
+        resumen += (
+            f"⚠️ Faltan {required_days - target_days} día(s) para repartir la tanda completa "
+            "sin repetir un origen en la cuenta.\n"
+        )
+    else:
+        resumen += (
+            "💡 Cada cuenta recibe cada origen una vez; las copias Forge se rotan entre cuentas "
+            "y se mantienen las reglas anti-colisión.\n"
+        )
+    if use_fillup:
+        resumen += "ℹ️ Fill-up no repite orígenes dentro de una cuenta.\n"
+
+    if inventory_notice:
+        resumen = f"⚠️ {inventory_notice}\n\n" + resumen
     
     db.close()
     return resumen
@@ -190,16 +243,15 @@ def ensure_structure():
 
 def parse_combination_from_filename(filename: str) -> tuple:
     """
-    Extrae la combinación P1+P2 del nombre de archivo.
-    Formato esperado: CATEGORIA__P1ID__P2ID.mp4
+    Extrae el origen P1+P2, quitando el sufijo de copia que agrega Forge.
     """
-    try:
-        name = os.path.splitext(filename)[0]
-        parts = name.split("__")
-        if len(parts) >= 3:
-            return (parts[1], parts[2])
-    except Exception:
-        pass
+    name = os.path.splitext(os.path.basename(filename))[0].split("__TANDA_", 1)[0]
+    name = re.sub(r"__c\d+$", "", name, flags=re.IGNORECASE)
+    parts = name.split("__")
+    if len(parts) >= 3:
+        return (parts[1], parts[2])
+    if name:
+        return (name, None)
     return (None, None)
 
 
@@ -253,7 +305,7 @@ def get_all_used_combinations() -> set:
                 continue
             filename = os.path.basename(video_path)
             p1, p2 = parse_combination_from_filename(filename)
-            if p1 and p2:
+            if p1:
                 used.add((p1, p2))
     except Exception as e:
         print(f"⚠️ Error consultando fingerprint_history: {e}")
@@ -280,7 +332,7 @@ def get_account_used_combinations(account_id: int) -> set:
                 continue
             filename = os.path.basename(video_path)
             p1, p2 = parse_combination_from_filename(filename)
-            if p1 and p2:
+            if p1:
                 used.add((p1, p2))
     except Exception:
         pass
@@ -329,9 +381,9 @@ def get_account_used_combinations_for_tandas(account_id: int, tanda_names) -> se
                 continue
             p1 = row["p1_source"]
             p2 = row["p2_source"]
-            if not p1 or not p2:
+            if not p1:
                 p1, p2 = parse_combination_from_filename(os.path.basename(video_path))
-            if p1 and p2:
+            if p1:
                 used.add((p1, p2))
     except Exception:
         pass
@@ -870,16 +922,16 @@ def pick_random_video_item_for_account_day_slot(
     used_combos_account=None,
 ):
     """
-    Selecciona video usando scoring anti-colisión.
+    Selecciona video conservando el orden rotativo salvo que otro candidato
+    evite una colisión en el mismo slot.
 
     Reglas duras:
     - No repetir PT1 en la misma cuenta el mismo día.
     - No repetir la misma combinación PT1+PT2 en la misma cuenta (nunca, entre todos los días).
 
-    Reglas blandas:
-    - Evitar PT1 ya usado en el mismo slot.
-    - Preferir PT1 menos usado en el día.
-    - Preferir PT1 menos usado globalmente.
+    Regla blanda:
+    - Evitar PT1 ya usado en el mismo slot, conservando el orden rotativo como
+      criterio estable cuando no hay una alternativa que reduzca el choque.
     """
 
     if p1_usage_day is None:
@@ -902,25 +954,11 @@ def pick_random_video_item_for_account_day_slot(
             continue
 
         # REGLA DURA 2: no repetir combinación PT1+PT2 en la misma cuenta (nunca)
-        if p2 and (p1, p2) in used_combos_account:
+        if (p1, p2) in used_combos_account:
             continue
 
-        score = 0
-
-        # Penalización fuerte si choca en mismo slot de horario
-        if p1 in used_p1_this_slot:
-            score += 1000
-
-        # Penalización por uso en el mismo día
-        score += p1_usage_day.get(p1, 0) * 50
-
-        # Penalización por uso global en toda la distribución
-        score += p1_usage_global.get(p1, 0) * 10
-
-        # Ruido aleatorio pequeño para que no sea robótico
-        score += random.random()
-
-        candidates.append((score, item))
+        collides_in_slot = p1 in used_p1_this_slot
+        candidates.append((collides_in_slot, item))
 
     if not candidates:
         return None
@@ -935,6 +973,7 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
         a for a in all_accs
         if a["account_type"].upper() == category_dest.upper()
     ]
+    accounts.sort(key=lambda account: account["username"].casefold())
 
     if not accounts:
         db.close()
@@ -946,6 +985,7 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
         tanda_names.append(tanda_name_2)
 
     video_items = []
+    partial_notices = []
 
     for tn in tanda_names:
         tanda_path = os.path.join(source_root, tn)
@@ -954,10 +994,12 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
             db.close()
             return f"❌ Error: No existe la tanda: {tanda_path}"
 
-        videos, inventory_error = _tanda_video_inventory(tanda_path)
-        if inventory_error:
+        videos, inventory_notice = _tanda_video_inventory(tanda_path)
+        if inventory_notice and not _is_partial_inventory_notice(inventory_notice):
             db.close()
-            return f"❌ {inventory_error}"
+            return f"❌ {inventory_notice}"
+        if inventory_notice:
+            partial_notices.append(f"{tn}: {inventory_notice}")
         for f in videos:
             video_items.append({
                 "filename": f,
@@ -969,39 +1011,82 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
         db.close()
         return "❌ Error: No hay videos en las tandas seleccionadas."
 
-    random.shuffle(video_items)
+    if daily_quota < 1:
+        db.close()
+        return "❌ Error: La cuota diaria debe ser al menos 1."
 
-    num_cuentas = len(accounts)
-    vids_dia_total = num_cuentas * daily_quota
+    origin_groups = defaultdict(list)
+    for item in video_items:
+        item["origin"] = _origin_key_from_filename(item["filename"])
+        origin_groups[item["origin"]].append(item)
+    for variants in origin_groups.values():
+        variants.sort(key=lambda item: item["filename"].casefold())
+    ordered_origins = sorted(origin_groups)
 
+    origins_per_account = len(origin_groups)
+    origins_by_p1 = defaultdict(set)
+    for origin, variants in origin_groups.items():
+        p1, _p2 = parse_combination_from_filename(variants[0]["filename"])
+        origins_by_p1[p1 or origin].add(origin)
+    required_days = max(
+        math.ceil(origins_per_account / daily_quota),
+        max((len(origins) for origins in origins_by_p1.values()), default=0),
+    )
     if str(days_to_organize).upper() == "MAX":
-        target_days = math.ceil(len(video_items) / vids_dia_total) if vids_dia_total > 0 else 1
+        target_days = required_days
     else:
         try:
             target_days = int(days_to_organize)
-        except:
-            target_days = 1
+        except (TypeError, ValueError):
+            db.close()
+            return "❌ Error: Los días a organizar deben ser un número o MAX."
+        if target_days < 1 and origins_per_account:
+            db.close()
+            return "❌ Error: Los días a organizar deben ser al menos 1."
+    if target_days < required_days:
+        db.close()
+        return (
+            f"❌ La tanda tiene {origins_per_account} orígenes por cuenta y la cuota es "
+            f"{daily_quota} por día. Se necesitan al menos {required_days} días para "
+            "entregarla completa sin repetir orígenes."
+        )
 
     total_movidos = 0
     manifest_entries = []
     affected_usernames = {acc["username"] for acc in accounts}
     logical_filenames = set()
 
-    full_tanda_pool = video_items[:]
-    random.shuffle(full_tanda_pool)
     p1_usage_global = {}
 
-    # Lifetime: combos (p1, p2) ya asignados a cada cuenta en todos los días anteriores.
-    # Garantiza que fill-up no reutilice el mismo video en la misma cuenta nunca.
-    # Sembrado desde fingerprint_history para que la regla sobreviva entre corridas
-    # separadas de "Distribuir" (re-clicks, reinicios de la app), no solo dentro de
-    # una misma llamada.
-    from collections import defaultdict
+    # Reparte una variante de cada origen a cada cuenta. Si hay suficientes copias
+    # Forge, cada cuenta recibe una variante distinta del mismo origen.
     account_lifetime_combos = defaultdict(set)  # acc_id -> set of (p1, p2)
     for acc in accounts:
         account_lifetime_combos[acc["id"]] |= get_account_used_combinations_for_tandas(
             acc["id"], tanda_names
         )
+
+    account_video_pools = {}
+    variant_cursor = defaultdict(int)
+    for account_index, acc in enumerate(accounts):
+        acc_id = acc["id"]
+        account_pool = []
+        rotation = account_index % len(ordered_origins)
+        account_origins = ordered_origins[rotation:] + ordered_origins[:rotation]
+        for origin_key in account_origins:
+            variants = origin_groups[origin_key]
+            eligible = []
+            for item in variants:
+                p1, p2 = parse_combination_from_filename(item["filename"])
+                if p1 and (p1, p2) in account_lifetime_combos[acc_id]:
+                    continue
+                eligible.append(item)
+            if not eligible:
+                continue
+            cursor = variant_cursor[origin_key]
+            account_pool.append(eligible[cursor % len(eligible)])
+            variant_cursor[origin_key] = cursor + 1
+        account_video_pools[acc_id] = account_pool
 
     try:
         for day in range(1, target_days + 1):
@@ -1016,10 +1101,7 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
             p1_usage_day = {}
 
             for slot in range(1, daily_quota + 1):
-                shuffled_accounts = accounts[:]
-                random.shuffle(shuffled_accounts)
-
-                for acc in shuffled_accounts:
+                for acc in accounts:
                     acc_id = acc["id"]
                     acc_name = acc["username"]
 
@@ -1028,9 +1110,9 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
                     if day_key not in used_p1_by_account_today:
                         used_p1_by_account_today[day_key] = set()
 
-                    # Intento 1: pool principal (videos únicos, se consumen al usarse)
+                    account_pool = account_video_pools[acc_id]
                     vid_item = pick_random_video_item_for_account_day_slot(
-                        video_items,
+                        account_pool,
                         used_p1_by_account_today[day_key],
                         used_p1_by_slot[slot],
                         p1_usage_day,
@@ -1039,18 +1121,7 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
                     )
 
                     if vid_item:
-                        video_items.remove(vid_item)
-
-                    # Intento 2: fill-up — excluye combos ya vistos por esta cuenta (obligatorio)
-                    if not vid_item and use_fillup:
-                        vid_item = pick_random_video_item_for_account_day_slot(
-                            full_tanda_pool,
-                            used_p1_by_account_today[day_key],
-                            used_p1_by_slot[slot],
-                            p1_usage_day,
-                            p1_usage_global,
-                            account_lifetime_combos[acc_id],
-                        )
+                        account_pool.remove(vid_item)
 
                     if not vid_item:
                         print(f"⚠️ Sin video válido para {acc_name} / Día {day} / Slot {slot}")
@@ -1081,7 +1152,7 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
                         used_p1_by_slot[slot].add(p1)
                         p1_usage_day[p1] = p1_usage_day.get(p1, 0) + 1
                         p1_usage_global[p1] = p1_usage_global.get(p1, 0) + 1
-                    if p1 and p2:
+                    if p1:
                         account_lifetime_combos[acc_id].add((p1, p2))
 
                     manifest_entries.append(
@@ -1095,6 +1166,7 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
                             source_path=src,
                             telegram_filename=unique_name,
                             transform_log_id=db.get_video_transform_log_id(src),
+                            origin_identity=db.get_video_transform_source_identity(src),
                         )
                     )
                     db.add_video_to_history(
@@ -1113,17 +1185,25 @@ def distribute_tanda(tanda_name, category_dest, daily_quota, use_fillup, days_to
                 manifest_entries,
                 affected_usernames,
                 "normal",
+                tanda_names=set(tanda_names),
             )
     finally:
         db.close()
 
+    partial_message = (
+        "\n" + "\n".join(f"⚠️ {notice}" for notice in partial_notices)
+        if partial_notices else ""
+    )
     return (
         f"✅ Logística terminada.\n"
         f"{total_movidos} videos procesados.\n"
+        f"{origins_per_account} orígenes únicos por cuenta; variantes Forge rotadas entre cuentas.\n"
         f"Tandas usadas: {', '.join(tanda_names)}\n"
         f"Categoría destino: {category_dest}\n"
-        f"Regla aplicada: no repetir PT1 en la misma cuenta el mismo día.\n"
-        f"Shuffle aplicado entre tandas + día + slot + cuenta."
+        f"Reglas aplicadas: no repetir origen por cuenta, no repetir P1 por cuenta/día "
+        "y minimizar choques de P1 en el mismo horario."
+        + ("\nFill-up omitido para no repetir orígenes por cuenta." if use_fillup else "")
+        + f"{partial_message}"
     )
 if __name__ == "__main__":
     print("--- INICIANDO ORGANIZACION CON ANTI-CHOQUE GLOBAL ---")

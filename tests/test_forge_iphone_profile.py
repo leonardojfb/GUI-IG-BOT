@@ -4,6 +4,7 @@ import copy
 import importlib
 import json
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -39,7 +40,11 @@ def _probe(*, hdr=True, audio=True):
             "channel_layout": "stereo",
         })
     return {
-        "format": {"format_name": "mov,mp4,m4a,3gp,3g2,mj2", "tags": {"major_brand": "qt  "}},
+        "format": {"format_name": "mov,mp4,m4a,3gp,3g2,mj2", "tags": {
+            "major_brand": "qt  ",
+            "creation_time": "2026-09-25T12:34:56.000000Z",
+            "com.apple.quicktime.creationdate": "2026-09-25T09:34:56-0300",
+        }},
         "streams": streams,
     }
 
@@ -92,11 +97,88 @@ def test_contract_checks_quicktime_identity_when_expected():
         "com.apple.quicktime.network": "T-Mobile",
     })
     problems = profile.validate_probe(data, "iphone_hlg", expect_audio=True,
-                                      expected_meta={"iphone_model": "iPhone 14 Pro Max",
+                                      expected_meta={"iphone_model": "iPhone 17 Pro Max",
                                                      "ios_version": "26.4"})
     assert any("quicktime.model" in problem for problem in problems)
     assert any("quicktime.software" in problem for problem in problems)
     assert any("quicktime.network" in problem for problem in problems)
+
+
+def test_metadata_floor_accepts_iphone_16_and_ios_26():
+    pool = importlib.import_module("metadata_pool")
+    assert pool.validate_iphone_metadata({
+        "iphone_model": "iPhone 16 Pro Max", "ios_version": "26.0.1",
+    }) is None
+
+
+def test_metadata_floor_rejects_older_model_or_old_ios():
+    pool = importlib.import_module("metadata_pool")
+    with pytest.raises(ValueError, match="iPhone 16"):
+        pool.validate_iphone_metadata({
+            "iphone_model": "iPhone 15 Pro Max", "ios_version": "26.0",
+        })
+    with pytest.raises(ValueError, match="iOS 26"):
+        pool.validate_iphone_metadata({
+            "iphone_model": "iPhone 16", "ios_version": "18.7.9",
+        })
+
+
+def test_variant_engine_rejects_old_fingerprint_before_render():
+    pool = importlib.import_module("metadata_pool")
+    with pytest.raises(ValueError, match="iPhone 16"):
+        pool.apply_variant_and_metadata(
+            "missing-source.mp4", "output.mp4",
+            {"iphone_model": "iPhone 15 Pro", "ios_version": "26.0"},
+        )
+
+
+def test_metadata_generator_only_returns_current_floor():
+    pool = importlib.import_module("metadata_pool")
+
+    class EmptyDb:
+        def get_all_used_metadata_combos(self):
+            return set()
+
+    result = pool.generate_unique_metadata(EmptyDb(), 20)
+    assert result
+    assert all(item["iphone_model"] in pool.IPHONE_MODELS for item in result)
+    assert all(item["ios_version"] in pool.IOS_VERSIONS for item in result)
+
+
+def test_metadata_model_tables_include_only_verified_iphone_16_plus_catalog():
+    pool = importlib.import_module("metadata_pool")
+    assert set(pool.IPHONE_MODELS) == {
+        "iPhone 16", "iPhone 16 Plus", "iPhone 16 Pro", "iPhone 16 Pro Max", "iPhone 16e",
+        "iPhone 17", "iPhone Air", "iPhone 17 Pro", "iPhone 17 Pro Max", "iPhone 17e",
+    }
+    assert pool.IOS_VERSIONS == [
+        "26", "26.0.1", "26.1", "26.2", "26.2.1", "26.3", "26.3.1",
+        "26.4", "26.4.1", "26.4.2", "26.5", "26.5.1", "26.5.2",
+        "26.6", "26.6.1", "26.6.2", "26.7",
+    ]
+    assert set(pool._MODEL_IOS_RANGE) == set(pool.IPHONE_MODELS)
+
+
+def test_creation_tags_format_same_instant_in_utc_and_local_offset():
+    pool = importlib.import_module("metadata_pool")
+    now = datetime(2026, 9, 25, 12, 34, 56, tzinfo=timezone.utc)
+    tags = pool.current_creation_tags(now)
+    assert tags["creation_time"] == "2026-09-25T12:34:56.000000Z"
+    assert tags["com.apple.quicktime.creationdate"].startswith("2026-09-25T")
+    assert tags["com.apple.quicktime.creationdate"].endswith(("+0000", "-0300", "-0400", "+0100"))
+
+
+def test_contract_rejects_missing_creation_tags():
+    profile = importlib.import_module("forge_iphone_profile")
+    data = _probe()
+    data["format"]["tags"].pop("creation_time")
+    data["format"]["tags"].pop("com.apple.quicktime.creationdate")
+    problems = profile.validate_probe(
+        data, "iphone_hlg", expect_audio=True,
+        expected_meta={"iphone_model": "iPhone 17 Pro Max", "ios_version": "26.4"},
+    )
+    assert any("creation_time" in problem for problem in problems)
+    assert any("creationdate" in problem for problem in problems)
 
 
 def test_probe_file_reads_a_real_video(tmp_path):
@@ -149,14 +231,17 @@ def test_render_iphone_profile_real_sources(tmp_path, source_profile, audio_rate
     subprocess.run(cmd, check=True, capture_output=True)
 
     profile.render_iphone_video(source, output, {
-        "iphone_model": "iPhone 14 Pro Max", "ios_version": "26.4",
+        "iphone_model": "iPhone 17 Pro Max", "ios_version": "26.4",
         "lat": "+25.7617", "lon": "-080.1918",
     }, target_profile, source_profile, threads=2)
     data = profile.probe_file(output)
     assert profile.validate_probe(data, target_profile,
                                   expect_audio=audio_rate is not None) == []
+    tags = data["format"]["tags"]
+    datetime.fromisoformat(tags["creation_time"].replace("Z", "+00:00"))
+    datetime.fromisoformat(tags["com.apple.quicktime.creationdate"])
     assert data["format"]["tags"]["com.apple.quicktime.make"] == "Apple"
-    assert data["format"]["tags"]["com.apple.quicktime.model"] == "iPhone 14 Pro Max"
+    assert data["format"]["tags"]["com.apple.quicktime.model"] == "iPhone 17 Pro Max"
     assert data["format"]["tags"]["com.apple.quicktime.software"] == "26.4"
     assert "com.apple.quicktime.network" not in data["format"]["tags"]
     assert "com.apple.quicktime.location.ISO6709" not in data["format"]["tags"]
@@ -179,6 +264,20 @@ def test_preflight_classifies_and_blocks_unknown_color():
     assert "unknown.mp4" in findings["blocked"]
     findings = profile.preflight_batch({"known-generator.mp4": untagged}, "iphone_sdr")
     assert "known-generator.mp4" in findings["blocked"]
+
+
+def test_preflight_can_assume_unknown_sources_are_sdr_when_confirmed():
+    profile = importlib.import_module("forge_iphone_profile")
+    untagged = _probe(hdr=False)
+    for field in ("color_primaries", "color_transfer", "color_space"):
+        del untagged["streams"][0][field]
+    findings = profile.preflight_batch(
+        {"hf_batch.mp4": untagged}, "iphone_hlg", assume_unknown_sdr=True,
+    )
+    assert findings["counts"] == {"sdr": 1, "hlg": 0, "unknown": 0}
+    assert findings["sources"]["hf_batch.mp4"] == "sdr"
+    assert findings["blocked"] == {}
+    assert "hf_batch.mp4" in findings["assumptions"]
 
 
 @pytest.mark.parametrize("output_profile", ["iphone_sdr", "iphone_hlg"])
@@ -238,7 +337,7 @@ def test_variant_engine_transcodes_iphone_even_without_effects(tmp_path):
                     "-f", "lavfi", "-i", "testsrc2=size=64x64:rate=24:duration=0.5",
                     "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source)],
                    check=True, capture_output=True)
-    metadata = {"iphone_model": "iPhone 14 Pro Max", "ios_version": "26.4"}
+    metadata = {"iphone_model": "iPhone 17 Pro Max", "ios_version": "26.4"}
     disabled = {key: False for key in metadata_pool.DEFAULT_VARIANT_EFFECTS}
     for suffix, effects in (("none", disabled), ("mirror", {**disabled, "mirror": True})):
         output = tmp_path / f"{suffix}.mov"
@@ -268,7 +367,7 @@ def test_hlg_variant_keeps_main10_and_reports_unsafe_effects(tmp_path):
         str(source),
     ], check=True, capture_output=True)
     params = metadata_pool.apply_variant_and_metadata(
-        str(source), str(output), {"iphone_model": "iPhone 14 Pro Max", "ios_version": "26.4"},
+        str(source), str(output), {"iphone_model": "iPhone 17 Pro Max", "ios_version": "26.4"},
         rng=random.Random(2), output_profile="iphone_hlg", source_color="hlg",
         ffmpeg_threads=2,
     )
@@ -287,7 +386,7 @@ def test_validated_copy_does_not_publish_invalid_or_overwrite_existing(tmp_path)
                     "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source)],
                    check=True, capture_output=True)
     output = tmp_path / "source__c01.mov"
-    metadata = {"iphone_model": "iPhone 14 Pro Max", "ios_version": "26.4"}
+    metadata = {"iphone_model": "iPhone 17 Pro Max", "ios_version": "26.4"}
     with pytest.raises(ValueError, match="color"):
         profile.render_validated_copy(source, output, metadata, "iphone_sdr", "unknown")
     assert not output.exists()
@@ -314,7 +413,7 @@ def test_validated_copy_rejects_dark_sdr_to_hlg_grade(tmp_path, monkeypatch):
     monkeypatch.setattr(profile, "SDR_TO_HLG_NPL", 100)
     with pytest.raises(RuntimeError, match="YAVG|YHIGH|SATAVG"):
         profile.render_validated_copy(source, output, {
-            "iphone_model": "iPhone 14 Pro Max", "ios_version": "26.4",
+            "iphone_model": "iPhone 17 Pro Max", "ios_version": "26.4",
         }, "iphone_hlg", "sdr", threads=2)
     assert not output.exists()
     assert not list(tmp_path.glob("*.partial.mov"))
@@ -341,12 +440,49 @@ def test_unvalidated_mov_is_not_visible_in_logistics_folder(tmp_path, monkeypatc
 
     monkeypatch.setattr(metadata_pool, "apply_variant_and_metadata", inspect_while_rendering)
     profile.render_validated_copy(source, output, {
-        "iphone_model": "iPhone 14 Pro Max", "ios_version": "26.4",
+        "iphone_model": "iPhone 17 Pro Max", "ios_version": "26.4",
     }, "iphone_sdr", "sdr")
     assert output.is_file()
 
 
-def test_por_cuentas_inventory_blocks_incomplete_forge_and_preserves_legacy_avi(tmp_path):
+def test_processing_status_exposes_published_outputs_only(tmp_path):
+    from Organizador import _tanda_video_inventory
+
+    (tmp_path / "clip__c01.mov").touch()
+    (tmp_path / "forge_batch_status.json").write_text(json.dumps({
+        "state": "processing", "profile": "iphone_sdr",
+        "expected_count": 2, "validated": [],
+        "pending": [
+            {"output_name": "clip__c01.mov"},
+            {"output_name": "clip__c02.mov"},
+        ],
+    }), encoding="utf-8")
+
+    names, diagnostic = _tanda_video_inventory(str(tmp_path))
+
+    assert names == ["clip__c01.mov"]
+    assert "parcial" in diagnostic.lower()
+    assert "1" in diagnostic
+
+
+def test_por_cuentas_accepts_processing_published_outputs(tmp_path):
+    from gui_premium_v7 import _acct_inventory_items
+
+    (tmp_path / "clip__c01.mov").touch()
+    (tmp_path / "forge_batch_status.json").write_text(json.dumps({
+        "state": "processing", "profile": "iphone_sdr",
+        "pending": [
+            {"output_name": "clip__c01.mov"},
+            {"output_name": "clip__c02.mov"},
+        ],
+    }), encoding="utf-8")
+
+    assert _acct_inventory_items({"PARTIAL": str(tmp_path)}) == [
+        {"tanda": "PARTIAL", "name": "clip__c01.mov"},
+    ]
+
+
+def test_por_cuentas_inventory_uses_validated_incomplete_forge_outputs_and_preserves_legacy_avi(tmp_path):
     from gui_premium_v7 import _acct_inventory_items
 
     iphone_dir = tmp_path / "IPHONE"
@@ -356,14 +492,98 @@ def test_por_cuentas_inventory_blocks_incomplete_forge_and_preserves_legacy_avi(
         "state": "incomplete", "profile": "iphone_sdr",
         "validated": ["clip__c01.mov"], "pending": [{"output_name": "clip__c02.mov"}],
     }), encoding="utf-8")
-    with pytest.raises(ValueError, match="incompleta"):
-        _acct_inventory_items({"IPHONE": str(iphone_dir)})
+    assert _acct_inventory_items({"IPHONE": str(iphone_dir)}) == [
+        {"tanda": "IPHONE", "name": "clip__c01.mov"},
+    ]
 
     legacy_dir = tmp_path / "LEGACY"
     legacy_dir.mkdir()
     (legacy_dir / "old.avi").touch()
     assert _acct_inventory_items({"LEGACY": str(legacy_dir)}) == [
         {"tanda": "LEGACY", "name": "old.avi"}]
+
+
+def test_por_cuentas_inventory_summary_reports_partial_forge_without_blocking(tmp_path):
+    from gui_premium_v7 import _acct_inventory_summary
+
+    iphone_dir = tmp_path / "IPHONE"
+    iphone_dir.mkdir()
+    (iphone_dir / "clip__c01.mov").touch()
+    (iphone_dir / "forge_batch_status.json").write_text(json.dumps({
+        "state": "incomplete", "profile": "iphone_sdr",
+        "validated": ["clip__c01.mov"], "pending": [{"output_name": "clip__c02.mov"}],
+    }), encoding="utf-8")
+
+    items, notices = _acct_inventory_summary({"IPHONE": str(iphone_dir)})
+
+    assert items == [{"tanda": "IPHONE", "name": "clip__c01.mov"}]
+    assert notices == ["IPHONE: Tanda Forge parcial: usando 1 copias validadas; 1 pendientes."]
+
+
+def test_forge_retry_resolves_relocated_source_by_persisted_hash(tmp_path):
+    from gui_premium_v7 import _resolve_forge_retry_sources
+    import metadata_pool
+
+    original = tmp_path / "original" / "clip.mp4"
+    relocated = tmp_path / "relocated" / "clip.mp4"
+    original.parent.mkdir()
+    relocated.parent.mkdir()
+    original.write_bytes(b"same video content")
+    relocated.write_bytes(b"same video content")
+    pending = [{"source_path": str(original),
+                "video_hash": metadata_pool.get_video_hash(str(original))}]
+
+    assert _resolve_forge_retry_sources(pending, [str(relocated)]) == [str(relocated)]
+
+
+def test_forge_retry_prefers_original_path_when_sources_share_a_hash(tmp_path):
+    from gui_premium_v7 import _resolve_forge_retry_sources
+    import metadata_pool
+
+    first = tmp_path / "one.mp4"
+    second = tmp_path / "two.mp4"
+    first.write_bytes(b"same bytes")
+    second.write_bytes(b"same bytes")
+    pending = [{"source_path": str(second), "video_hash": metadata_pool.get_video_hash(str(second))}]
+
+    assert _resolve_forge_retry_sources(pending, [str(first), str(second)]) == [str(second)]
+
+
+def test_forge_retry_regenerates_all_persisted_metadata_at_current_floor():
+    from gui_premium_v7 import generate_forge_retry_metadata
+    import metadata_pool
+
+    class EmptyDb:
+        def get_all_used_metadata_combos(self):
+            return set()
+
+    pending = [
+        {"output_name": "clip__c01.mov", "meta": {
+            "iphone_model": "iPhone 13", "ios_version": "18.7"}},
+        {"output_name": "clip__c02.mov", "meta": {
+            "iphone_model": "iPhone 17 Pro", "ios_version": "26.1"}},
+    ]
+
+    generated = generate_forge_retry_metadata(pending, EmptyDb())
+
+    assert len(generated) == len(pending)
+    assert all(item["iphone_model"] in metadata_pool.IPHONE_MODELS for item in generated)
+    assert all(item["ios_version"] in metadata_pool.IOS_VERSIONS for item in generated)
+    assert pending[0]["meta"]["iphone_model"] == "iPhone 13"
+
+
+def test_forge_retry_quarantines_existing_copy_without_deleting_it(tmp_path):
+    from gui_premium_v7 import quarantine_forge_retry_copy
+
+    output = tmp_path / "clip__c01.mov"
+    output.write_bytes(b"old invalid forge output")
+
+    archived = quarantine_forge_retry_copy(output)
+    archived_path = Path(archived)
+
+    assert not output.exists()
+    assert archived_path.read_bytes() == b"old invalid forge output"
+    assert archived_path.parent.name == ".forge_ignored"
 
 
 def test_copy_number_reservation_counts_mp4_and_mov(tmp_path):
@@ -406,7 +626,7 @@ def test_visual_qc_accepts_iphone_hlg_from_sdr_with_calibrated_midtones(tmp_path
                     "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source)],
                    check=True, capture_output=True)
     profile.render_iphone_video(source, output, {
-        "iphone_model": "iPhone 14 Pro Max", "ios_version": "26.4",
+        "iphone_model": "iPhone 17 Pro Max", "ios_version": "26.4",
     }, "iphone_hlg", "sdr", threads=2)
     errors, metrics = profile.assess_visual_change(
         source, output, source_color="sdr", output_color="hlg")

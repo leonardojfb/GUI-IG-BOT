@@ -4,7 +4,11 @@ Limpio, sin código legacy, e integra la lógica Anti-Choque Global.
 """
 import sqlite3
 import os
+import re
 import json
+from collections import defaultdict
+from trial_content import source_key_from_filename
+from social_publishing import normalize_story_link_base, resolve_story_link
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "organizador.db")
@@ -88,6 +92,7 @@ CREATE TABLE IF NOT EXISTS forge_video_registry (
 CREATE TABLE IF NOT EXISTS trial_tandas (
     tanda_name TEXT PRIMARY KEY,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    captions_file_path TEXT,
     FOREIGN KEY (tanda_name) REFERENCES batch_tandas(tanda_name)
 );
 
@@ -100,6 +105,12 @@ CREATE TABLE IF NOT EXISTS trial_source_captions (
     FOREIGN KEY (tanda_name) REFERENCES trial_tandas(tanda_name)
 );
 
+CREATE TABLE IF NOT EXISTS global_trial_source_captions (
+    source_identity TEXT PRIMARY KEY,
+    caption_text TEXT NOT NULL,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS normal_source_captions (
     tanda_name TEXT NOT NULL,
     source_key TEXT NOT NULL,
@@ -107,6 +118,12 @@ CREATE TABLE IF NOT EXISTS normal_source_captions (
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (tanda_name, source_key),
     FOREIGN KEY (tanda_name) REFERENCES batch_tandas(tanda_name)
+);
+
+CREATE TABLE IF NOT EXISTS global_normal_source_captions (
+    source_identity TEXT PRIMARY KEY,
+    caption_text TEXT NOT NULL,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS video_transform_logs (
@@ -123,6 +140,12 @@ CREATE TABLE IF NOT EXISTS video_transform_logs (
 
 CREATE INDEX IF NOT EXISTS idx_video_transform_logs_process_created
 ON video_transform_logs(process_kind, created_at);
+
+CREATE TABLE IF NOT EXISTS social_publishing_settings (
+    setting_key TEXT PRIMARY KEY,
+    setting_value TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 class DatabaseManager:
@@ -190,7 +213,10 @@ class DatabaseManager:
             "ALTER TABLE virtual_accounts ADD COLUMN social_network TEXT DEFAULT ''",
             "ALTER TABLE virtual_accounts ADD COLUMN vpn_proxy TEXT DEFAULT ''",
             "ALTER TABLE virtual_accounts ADD COLUMN account_link TEXT DEFAULT ''",
+            "ALTER TABLE virtual_accounts ADD COLUMN story_link_override_enabled INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE virtual_accounts ADD COLUMN story_link_override TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE virtual_assistants ADD COLUMN timezone TEXT DEFAULT 'America/Argentina/Buenos_Aires'",
+            "ALTER TABLE trial_tandas ADD COLUMN captions_file_path TEXT",
         ]
         cur = self.conn.cursor()
         for sql in migrations:
@@ -293,6 +319,66 @@ class DatabaseManager:
         cur = self.conn.cursor()
         cur.execute("SELECT * FROM virtual_accounts ORDER BY account_type, username")
         return [dict(row) for row in cur.fetchall()]
+
+    def get_story_link_base_url(self):
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT setting_value FROM social_publishing_settings "
+            "WHERE setting_key = ?",
+            ("story_link_base_url",),
+        )
+        row = cur.fetchone()
+        return row["setting_value"] if row else ""
+
+    def set_story_link_base_url(self, value):
+        normalized = normalize_story_link_base(value)
+        cur = self.conn.cursor()
+        cur.execute(
+            "INSERT INTO social_publishing_settings (setting_key, setting_value) "
+            "VALUES (?, ?) "
+            "ON CONFLICT(setting_key) DO UPDATE SET "
+            "setting_value=excluded.setting_value, updated_at=CURRENT_TIMESTAMP",
+            ("story_link_base_url", normalized),
+        )
+        self.conn.commit()
+        return normalized
+
+    def set_story_link_override(self, username, enabled, value=""):
+        override_enabled = bool(enabled)
+        override_url = ""
+        if override_enabled:
+            override_url = resolve_story_link(
+                "",
+                username,
+                override_enabled=True,
+                override_url=value,
+            )
+        cur = self.conn.cursor()
+        cur.execute(
+            "UPDATE virtual_accounts "
+            "SET story_link_override_enabled = ?, story_link_override = ? "
+            "WHERE username = ?",
+            (int(override_enabled), override_url, username),
+        )
+        self.conn.commit()
+        return bool(cur.rowcount)
+
+    def resolve_story_link_for_account(self, username):
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT username, story_link_override_enabled, story_link_override "
+            "FROM virtual_accounts WHERE username = ?",
+            (username,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return ""
+        return resolve_story_link(
+            self.get_story_link_base_url(),
+            row["username"],
+            bool(row["story_link_override_enabled"]),
+            row["story_link_override"],
+        )
 
     def set_account_trials_active(self, username: str, active: bool) -> bool:
         cur = self.conn.cursor()
@@ -441,12 +527,44 @@ class DatabaseManager:
         )
         return [row["tanda_name"] for row in cur.fetchall()]
 
+    def set_trial_tanda_captions(self, name: str, path: str | None) -> bool:
+        cur = self.conn.execute(
+            "UPDATE trial_tandas SET captions_file_path=? WHERE tanda_name=?",
+            (path or None, name),
+        )
+        self.conn.commit()
+        return bool(cur.rowcount)
+
+    def get_trial_tanda_captions(self, name: str) -> str | None:
+        row = self.conn.execute(
+            "SELECT captions_file_path FROM trial_tandas WHERE tanda_name=?", (name,)
+        ).fetchone()
+        return row[0] if row else None
+
     def is_trial_tanda(self, name: str) -> bool:
         cur = self.conn.cursor()
         cur.execute("SELECT 1 FROM trial_tandas WHERE tanda_name = ?", (name,))
         return cur.fetchone() is not None
 
     def set_trial_source_caption(self, tanda_name: str, source_key: str, caption_text: str):
+        identities = self._normal_caption_identities()
+        identity = self._normal_caption_identity(identities, tanda_name, source_key)
+        if identity:
+            baseline = self._source_caption_baselines(identities).get(identity)
+            local = self.conn.execute(
+                "SELECT caption_text FROM trial_source_captions WHERE tanda_name=? AND source_key=?",
+                (tanda_name, source_key),
+            ).fetchone()
+            # Historical differences stay as exceptions for their original tanda.
+            if not local or local[0] == baseline:
+                self.conn.execute(
+                    "INSERT INTO global_normal_source_captions(source_identity, caption_text) "
+                    "VALUES(?, ?) ON CONFLICT(source_identity) DO UPDATE SET "
+                    "caption_text=excluded.caption_text, updated_at=CURRENT_TIMESTAMP",
+                    (identity, caption_text),
+                )
+                self.conn.commit()
+                return
         cur = self.conn.cursor()
         cur.execute(
             """
@@ -461,15 +579,91 @@ class DatabaseManager:
         self.conn.commit()
 
     def get_trial_source_captions(self, tanda_name: str) -> dict[str, str]:
-        cur = self.conn.cursor()
-        cur.execute(
+        identities = self._normal_caption_identities()
+        baselines = self._source_caption_baselines(identities)
+        global_captions = self._source_global_captions()
+        captions = {}
+        for (tanda, _key), (key, identity) in identities.items():
+            if tanda == tanda_name.casefold():
+                text = global_captions.get(identity, baselines.get(identity))
+                if text is not None:
+                    captions[key] = text
+        for row in self.conn.execute(
             "SELECT source_key, caption_text FROM trial_source_captions "
             "WHERE tanda_name = ? ORDER BY source_key",
             (tanda_name,),
-        )
-        return {row["source_key"]: row["caption_text"] for row in cur.fetchall()}
+        ):
+            key, text = row["source_key"], row["caption_text"]
+            identity = self._normal_caption_identity(identities, tanda_name, key)
+            captions[key] = (
+                global_captions.get(identity, text)
+                if identity and text == baselines.get(identity) else text
+            )
+        return captions
+
+    def _source_caption_baselines(self, identities):
+        baselines = {}
+        # A normal caption is the shared default when both kinds have history.
+        for table in ("normal_source_captions", "trial_source_captions"):
+            for row in self.conn.execute(
+                f"SELECT tanda_name, source_key, caption_text FROM {table} ORDER BY rowid"
+            ):
+                identity = self._normal_caption_identity(identities, row[0], row[1])
+                if identity and identity not in baselines:
+                    baselines[identity] = row[2]
+        return baselines
+
+    def _source_global_captions(self):
+        captions = {
+            row["source_identity"]: row["caption_text"]
+            for row in self.conn.execute(
+                "SELECT source_identity, caption_text FROM global_trial_source_captions"
+            )
+        }
+        captions.update({
+            row["source_identity"]: row["caption_text"]
+            for row in self.conn.execute(
+                "SELECT source_identity, caption_text FROM global_normal_source_captions"
+            )
+        })
+        return captions
 
     def set_normal_source_caption(self, tanda_name: str, source_key: str, caption_text: str):
+        identities = self._normal_caption_identities()
+        identity = self._normal_caption_identity(identities, tanda_name, source_key)
+        local_key = source_key
+        if not identity:
+            aliases = [
+                row[0] for row in self.conn.execute(
+                    "SELECT source_key FROM normal_source_captions WHERE tanda_name=?",
+                    (tanda_name,),
+                )
+                if row[0].casefold().endswith("::" + source_key.casefold())
+                and self._normal_caption_identity(identities, tanda_name, row[0])
+            ]
+            alias_identities = {
+                self._normal_caption_identity(identities, tanda_name, key) for key in aliases
+            }
+            if len(alias_identities) == 1:
+                identity = next(iter(alias_identities))
+                local_key = aliases[0]
+        if identity:
+            baseline = self._source_caption_baselines(identities).get(identity)
+            local = self.conn.execute(
+                "SELECT caption_text FROM normal_source_captions WHERE tanda_name=? AND source_key=?",
+                (tanda_name, local_key),
+            ).fetchone()
+            # A historical difference from the first saved caption is an
+            # explicit tanda exception. All other edits update the shared text.
+            if not local or local[0] == baseline:
+                self.conn.execute(
+                    "INSERT INTO global_normal_source_captions(source_identity, caption_text) "
+                    "VALUES(?, ?) ON CONFLICT(source_identity) DO UPDATE SET "
+                    "caption_text=excluded.caption_text, updated_at=CURRENT_TIMESTAMP",
+                    (identity, caption_text),
+                )
+                self.conn.commit()
+                return
         cur = self.conn.cursor()
         cur.execute(
             """
@@ -478,17 +672,100 @@ class DatabaseManager:
             ON CONFLICT(tanda_name, source_key) DO UPDATE SET
                 caption_text=excluded.caption_text, updated_at=CURRENT_TIMESTAMP
             """,
-            (tanda_name, source_key, caption_text),
+            (tanda_name, local_key, caption_text),
         )
         self.conn.commit()
 
     def get_normal_source_captions(self, tanda_name: str) -> dict[str, str]:
-        cur = self.conn.cursor()
-        cur.execute(
-            "SELECT source_key, caption_text FROM normal_source_captions "
-            "WHERE tanda_name = ? ORDER BY source_key", (tanda_name,)
+        identities = self._normal_caption_identities()
+        baselines = self._source_caption_baselines(identities)
+        global_captions = self._source_global_captions()
+        captions = {}
+        for (tanda, _key), (key, identity) in identities.items():
+            if tanda == tanda_name.casefold():
+                text = global_captions.get(identity, baselines.get(identity))
+                if text is not None:
+                    captions[key] = text
+        local_rows = list(self.conn.execute(
+            "SELECT source_key, caption_text FROM normal_source_captions WHERE tanda_name=?",
+            (tanda_name,),
+        ))
+        aliases = defaultdict(set)
+        for row in local_rows:
+            key, text = row["source_key"], row["caption_text"]
+            if "::" not in key:
+                continue
+            identity = self._normal_caption_identity(identities, tanda_name, key)
+            if identity:
+                resolved_key = key.split("::", 1)[1]
+                effective = text if text != baselines.get(identity) else global_captions.get(identity, text)
+                aliases[resolved_key].add((identity, effective))
+            else:
+                captions[key] = text
+        for key, choices in aliases.items():
+            if len(choices) == 1:
+                captions[key] = next(iter(choices))[1]
+            else:
+                captions.pop(key, None)
+        for row in local_rows:
+            key, text = row["source_key"], row["caption_text"]
+            if "::" in key:
+                continue
+            identity = self._normal_caption_identity(identities, tanda_name, key)
+            match = identities.get((tanda_name.casefold(), key.casefold()))
+            resolved_key = match[0] if match else key
+            captions[resolved_key] = (
+                global_captions.get(identity, text)
+                if identity and text == baselines.get(identity) else text
+            )
+        return captions
+
+    @staticmethod
+    def _normal_caption_identity(identities, tanda_name, source_key):
+        if "::" in source_key:
+            tanda_name, source_key = source_key.split("::", 1)
+        match = identities.get((tanda_name.casefold(), source_key.casefold()))
+        return match[1] if match else None
+
+    def _normal_caption_identities(self):
+        """Map a source key to a hash only when Forge evidence is unique."""
+        version = (
+            self.conn.total_changes,
+            self.conn.execute("PRAGMA data_version").fetchone()[0],
         )
-        return {row["source_key"]: row["caption_text"] for row in cur.fetchall()}
+        if getattr(self, "_normal_caption_identity_cache_version", None) == version:
+            return self._normal_caption_identity_cache
+        candidates = defaultdict(set)
+        display_keys = {}
+        for row in self.conn.execute(
+            "SELECT tanda_name, output_name, video_hash FROM forge_video_registry "
+            "WHERE video_hash IS NOT NULL AND video_hash != ''"
+        ):
+            source_key = source_key_from_filename(row[1])
+            key = (row[0].casefold(), source_key.casefold())
+            candidates[key].add(row[2].lower())
+            display_keys.setdefault(key, source_key)
+        for row in self.conn.execute(
+            "SELECT tanda_name, output_filename, process_kind, source_identity "
+            "FROM video_transform_logs WHERE process_kind IN ('forge', 'forge_trial') "
+            "AND tanda_name IS NOT NULL AND source_identity IS NOT NULL"
+        ):
+            identity = normalize_video_transform_source_identity(row[2], row[3])
+            if identity:
+                source_key = source_key_from_filename(row[1])
+                key = (row[0].casefold(), source_key.casefold())
+                candidates[key].add(identity)
+                display_keys.setdefault(key, source_key)
+        identities = {
+            key: (display_keys[key], next(iter(values)))
+            for key, values in candidates.items() if len(values) == 1
+        }
+        self._normal_caption_identity_cache = identities
+        self._normal_caption_identity_cache_version = version
+        return identities
+
+    def _normal_caption_baselines(self, identities):
+        return self._source_caption_baselines(identities)
 
     def get_tandas(self, active_only=False):
         """Alias de get_all_tandas para compatibilidad."""
@@ -640,7 +917,84 @@ class DatabaseManager:
             "SELECT id FROM video_transform_logs WHERE output_path=?",
             (output_path,),
         ).fetchone()
+        if not row:
+            matches = self.conn.execute(
+                "SELECT id FROM video_transform_logs WHERE output_path=? COLLATE NOCASE LIMIT 2",
+                (output_path,),
+            ).fetchall()
+            row = matches[0] if len(matches) == 1 else None
         return int(row[0]) if row else None
+
+    def get_video_transform_source_identity(self, output_path):
+        output_path = os.path.abspath(output_path)
+        row = self.conn.execute(
+            "SELECT process_kind, source_identity FROM video_transform_logs WHERE output_path=?",
+            (output_path,),
+        ).fetchone()
+        if not row:
+            matches = self.conn.execute(
+                "SELECT process_kind, source_identity FROM video_transform_logs "
+                "WHERE output_path=? COLLATE NOCASE LIMIT 2",
+                (output_path,),
+            ).fetchall()
+            row = matches[0] if len(matches) == 1 else None
+        if row:
+            identity = normalize_video_transform_source_identity(row[0], row[1])
+            if identity:
+                return identity
+
+        # Recovered Forge outputs can be validated on disk without a transform
+        # log of their own. Copies in the same tanda share a logical source.
+        filename = os.path.basename(output_path)
+        copy_match = re.fullmatch(r"(.+)__c\d+(\.[^.]+)", filename, re.IGNORECASE)
+        if not copy_match:
+            return None
+        prefix, extension = copy_match.groups()
+        tanda_name = os.path.basename(os.path.dirname(output_path))
+        siblings = self.conn.execute(
+            "SELECT output_filename, process_kind, source_identity "
+            "FROM video_transform_logs WHERE tanda_name=? COLLATE NOCASE "
+            "AND process_kind IN ('forge', 'forge_trial') "
+            "AND substr(output_filename, 1, ?)=?",
+            (tanda_name, len(prefix) + 3, prefix + "__c"),
+        ).fetchall()
+        identities = {
+            normalize_video_transform_source_identity(process_kind, identity)
+            for sibling_name, process_kind, identity in siblings
+            if re.fullmatch(
+                re.escape(prefix) + r"__c\d+" + re.escape(extension),
+                sibling_name, re.IGNORECASE,
+            )
+        }
+        identities.discard(None)
+        return next(iter(identities)) if len(identities) == 1 else None
+
+    def get_video_transform_source_identity_by_id(self, log_id):
+        if log_id is None:
+            return None
+        row = self.conn.execute(
+            "SELECT process_kind, source_identity FROM video_transform_logs WHERE id=?",
+            (int(log_id),),
+        ).fetchone()
+        return normalize_video_transform_source_identity(row[0], row[1]) if row else None
+
+    def normalize_forge_transform_source_identities(self, apply=True):
+        """Persist the common source hash for legacy Forge copy log rows."""
+        rows = self.conn.execute(
+            "SELECT id, process_kind, source_identity FROM video_transform_logs "
+            "WHERE process_kind IN ('forge', 'forge_trial')"
+        ).fetchall()
+        updates = []
+        for row in rows:
+            normalized = normalize_video_transform_source_identity(row[1], row[2])
+            if normalized and normalized != row[2]:
+                updates.append((normalized, row[0]))
+        if updates and apply:
+            self.conn.executemany(
+                "UPDATE video_transform_logs SET source_identity=? WHERE id=?", updates
+            )
+            self.conn.commit()
+        return len(updates)
 
     def list_video_transform_logs(self, limit=500):
         rows = self.conn.execute(
@@ -672,3 +1026,14 @@ class DatabaseManager:
             except Exception as e:
                 print(f"⚠️ Error guardando fingerprint: {e}")
         self.conn.commit()
+_FORGE_COPY_IDENTITY_RE = re.compile(r"^([0-9a-f]{64})_\d+$", re.IGNORECASE)
+
+
+def normalize_video_transform_source_identity(process_kind, source_identity):
+    """Collapse Forge copy identities to the byte-identical source video hash."""
+    value = str(source_identity or "").strip()
+    if process_kind in ("forge", "forge_trial"):
+        match = _FORGE_COPY_IDENTITY_RE.fullmatch(value)
+        if match:
+            return match.group(1).lower()
+    return value or None

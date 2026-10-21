@@ -130,7 +130,7 @@ def test_por_cuentas_distributes_manual_cross_category_accounts_without_mixing(t
         os.makedirs(tanda_dir, exist_ok=True)
         needed = 2 * 1 * 7  # 2 accounts x 1 video/day x "1 semana"
         for i in range(1, needed + 1):
-            with open(os.path.join(tanda_dir, f"PC_SRC__SRC{i:02d}__P2.mp4"), "wb") as fh:
+            with open(os.path.join(tanda_dir, f"PC_SRC__c{i:02d}.mp4"), "wb") as fh:
                 fh.write(f"fake-video-{i}".encode())
         app.db.add_tanda(tanda_name, tanda_name, tanda_name, "")
 
@@ -276,16 +276,17 @@ def test_por_cuentas_can_shuffle_two_source_tandas_into_one_account_batch(tmp_pa
 
         app.db.add_category("PC_MIX_CAT")
         app.db.add_va("PC_MIX_VA")
-        for username in ("pc_mix_a", "pc_mix_b"):
-            app.db.add_virtual_account(username, "PC_MIX_CAT")
-            app.db.update_account(username, assigned_va="PC_MIX_VA")
+        app.db.add_virtual_account("pc_mix_a", "PC_MIX_CAT")
+        app.db.update_account("pc_mix_a", assigned_va="PC_MIX_VA")
+        app.db.add_virtual_account("pc_mix_b", "PC_MIX_CAT")
+        app.db.update_account("pc_mix_b", assigned_va="PC_MIX_VA")
 
         for tanda_name in ("PC_MIX_ONE", "PC_MIX_TWO"):
             tanda_dir = os.path.join(base_dir, "videos_finales", tanda_name)
             os.makedirs(tanda_dir, exist_ok=True)
-            for i in range(1, 3):
-                with open(os.path.join(tanda_dir, f"{tanda_name}__SRC{i:02d}__P2.mp4"), "wb") as fh:
-                    fh.write(f"fake-video-{tanda_name}-{i}".encode())
+            for index in range(1, 3):
+                with open(os.path.join(tanda_dir, f"{tanda_name}__SRC{index:02d}__P2.mp4"), "wb") as fh:
+                    fh.write(f"{tanda_name}-{index}".encode())
             app.db.add_tanda(tanda_name, tanda_name, tanda_name, "")
 
         app.reload_dist_lists()
@@ -328,87 +329,101 @@ def test_por_cuentas_can_shuffle_two_source_tandas_into_one_account_batch(tmp_pa
             Path(row["source_path"]).parent.name for row in produced
         } == {"PC_MIX_ONE", "PC_MIX_TWO"}
         assert all(f"__TANDA_{row['tanda']}__" in row["telegram_filename"] for row in produced)
-        assert sum(1 for row in produced if row["username"] == "pc_mix_a") == 2
-        assert sum(1 for row in produced if row["username"] == "pc_mix_b") == 2
+        for username in {"pc_mix_a", "pc_mix_b"}:
+            assert sum(1 for row in produced if row["username"] == username) == 2
     finally:
         cleanup()
 
 
-def test_por_cuentas_reuses_copy_sets_across_accounts_without_daily_origin_collisions(
-    tmp_path, monkeypatch
-):
+def test_por_cuentas_mixed_caption_modes_send_both_tandas_to_each_account(tmp_path, monkeypatch):
     app, cleanup = _make_app()
     try:
         import Organizador
         import gui_premium_v7 as gui
-        from trial_content import source_key_from_filename
+        import organizadortg
 
         base_dir = str(tmp_path)
         monkeypatch.setattr(Organizador, "output_root", os.path.join(base_dir, "CALENDARIO_POSTEO"))
         monkeypatch.setattr(gui, "_BASE_DIR", base_dir)
         monkeypatch.setattr(gui, "_ACCT_HIST_FILE", os.path.join(base_dir, "acct_hist.json"))
         monkeypatch.setattr(gui, "WorkerThread", _SyncWorkerThread)
+        monkeypatch.setattr(gui.random, "shuffle", lambda _items: None)
         monkeypatch.setattr(gui.messagebox, "showinfo", lambda *a, **k: None)
         monkeypatch.setattr(gui.messagebox, "showerror", lambda *a, **k: None)
         monkeypatch.setattr(gui.messagebox, "showwarning", lambda *a, **k: None)
         monkeypatch.setattr(gui.messagebox, "askyesno", lambda *a, **k: True)
 
-        app.db.add_category("PC_COPY_SET_CAT")
-        app.db.add_va("PC_COPY_SET_VA")
-        usernames = [f"pc_copy_set_{index:02d}" for index in range(1, 21)]
+        app.db.add_category("PC_MODE_CAT")
+        app.db.add_va("PC_MODE_VA")
+        usernames = [f"pc_mode_{index:02d}" for index in range(1, 11)]
         for username in usernames:
-            app.db.add_virtual_account(username, "PC_COPY_SET_CAT")
-            app.db.update_account(username, assigned_va="PC_COPY_SET_VA")
+            app.db.add_virtual_account(username, "PC_MODE_CAT")
+            app.db.update_account(username, assigned_va="PC_MODE_VA")
 
-        tanda_name = "PC_COPY_SET"
-        tanda_dir = os.path.join(base_dir, "videos_finales", tanda_name)
-        os.makedirs(tanda_dir, exist_ok=True)
-        for origin_number in range(1, 31):
-            for copy_number in range(1, 21):
-                with open(
-                    os.path.join(
-                        tanda_dir,
-                        f"PC_COPY_SET__ORIGIN{origin_number:02d}__P2__c{copy_number:02d}.mp4",
-                    ),
-                    "wb",
-                ) as fh:
-                    fh.write(f"origin-{origin_number}-copy-{copy_number}".encode())
-        app.db.add_tanda(tanda_name, tanda_name, tanda_name, "")
+        for tanda_name, source_prefix in (
+            ("PC_MODE_INDIVIDUAL", "I"),
+            ("PC_MODE_GENERAL", "G"),
+        ):
+            tanda_dir = os.path.join(base_dir, "videos_finales", tanda_name)
+            os.makedirs(tanda_dir, exist_ok=True)
+            for index in range(1, 11):
+                with open(os.path.join(tanda_dir, f"{tanda_name}__{source_prefix}{index:02d}__P2.mp4"), "wb") as fh:
+                    fh.write(f"{tanda_name}-{index}".encode())
+            app.db.add_tanda(tanda_name, tanda_name, tanda_name, "")
+
+        for source_key in (f"I{index:02d}" for index in range(1, 11)):
+            app.db.set_normal_source_caption("PC_MODE_INDIVIDUAL", source_key, f"individual {source_key}")
+        general_caption_path = os.path.join(base_dir, "PC_MODE_GENERAL_CAPTIONS.txt")
+        with open(general_caption_path, "w", encoding="utf-8") as fh:
+            fh.write("general caption\n#general\n")
+        app.db.set_tanda_captions("PC_MODE_GENERAL", general_caption_path)
 
         app.reload_dist_lists()
-        app.acct_dist_tanda.set(tanda_name)
+        app.acct_dist_tanda.set("PC_MODE_INDIVIDUAL")
+        app.acct_dist_tanda_2.set("PC_MODE_GENERAL")
+        app.acct_dist_caption_mode_1.set("Individual")
+        app.acct_dist_caption_mode_2.set("General")
         app.acct_dist_list.delete("1.0", "end")
         app.acct_dist_list.insert("end", "\n".join(usernames) + "\n")
-        app.acct_dist_vpd.set(3)
+        app.acct_dist_vpd.set(2)
         app.acct_dist_period.set("MAX")
 
         app._acct_dist_run(preview_only=False)
 
         result_text = app.acct_dist_result.get("1.0", "end")
-        assert "❌" not in result_text, result_text
+        assert "Error" not in result_text, result_text
 
         payload = json.loads((Path(base_dir) / "calendar_manifest.json").read_text(encoding="utf-8"))
         produced = [
-            row
-            for row in payload["entries"]
+            row for row in payload["entries"]
             if row["delivery_kind"] == "normal" and row["username"] in set(usernames)
         ]
-        assert len(produced) == 20 * 30
-        assert {row["username"] for row in produced} == set(usernames)
 
+        assert len(produced) == 20
+        pools = organizadortg.load_tanda_caption_pools(app.db.get_all_tandas())
+        caption_indexes = {}
         for username in usernames:
             rows = [row for row in produced if row["username"] == username]
-            assert len(rows) == 30
-            assert len({source_key_from_filename(row["source_path"]) for row in rows}) == 30
-            for day in {row["day"] for row in rows}:
-                day_rows = [row for row in rows if row["day"] == day]
-                origins = [source_key_from_filename(row["source_path"]) for row in day_rows]
-                assert len(origins) == len(set(origins))
-
-        day_one_rows = [row for row in produced if row["day"] == 1]
-        assert len(day_one_rows) == 20 * 3
-        assert len({source_key_from_filename(row["source_path"]) for row in day_one_rows}) < len(
-            day_one_rows
-        )
+            assert len(rows) == 2
+            assert {row["tanda"] for row in rows} == {"PC_MODE_INDIVIDUAL", "PC_MODE_GENERAL"}
+            assert {
+                row["caption_mode"] for row in rows if row["tanda"] == "PC_MODE_INDIVIDUAL"
+            } == {"individual"}
+            assert {
+                row["caption_mode"] for row in rows if row["tanda"] == "PC_MODE_GENERAL"
+            } == {"general"}
+            for row in rows:
+                normal_map = app.db.get_normal_source_captions(row["tanda"])
+                caption = organizadortg.caption_for_normal_calendar_video(
+                    row["telegram_filename"],
+                    row["caption_mode"],
+                    normal_map,
+                    pools,
+                    caption_indexes,
+                )
+                if row["caption_mode"] == "individual":
+                    assert caption and caption.startswith("individual ")
+                else:
+                    assert caption and caption.startswith("general caption")
     finally:
         cleanup()

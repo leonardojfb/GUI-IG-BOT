@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 
 import organizadortg
@@ -71,38 +72,151 @@ def test_telegram_account_video_count_splits_normal_and_trial(tmp_path):
     assert counts == {"normal": 1, "trial": 2}
 
 
+def test_batch_account_counts_use_telegram_manifest_rows_without_origin_lookups(
+    tmp_path, monkeypatch
+):
+    manifest = tmp_path / "calendar_manifest.json"
+    normal_video = tmp_path / "normal.mp4"
+    trial_video = tmp_path / "trial.mp4"
+    inactive_trial_video = tmp_path / "inactive-trial.mp4"
+    missing_video = tmp_path / "missing.mp4"
+    for path in (normal_video, trial_video, inactive_trial_video):
+        path.write_bytes(b"video")
+
+    entries = [
+        {
+            "username": "eve",
+            "delivery_kind": "normal",
+            "source_path": str(normal_video),
+            "publication_target": "instagram_reel",
+        },
+        {
+            "username": "eve",
+            "delivery_kind": "trial",
+            "source_path": str(trial_video),
+            "publication_target": "instagram_trial_reel",
+        },
+        {
+            "username": "inactive",
+            "delivery_kind": "trial",
+            "source_path": str(inactive_trial_video),
+            "publication_target": "instagram_trial_reel",
+        },
+        {
+            "username": "eve",
+            "delivery_kind": "normal",
+            "source_path": str(tmp_path / "facebook.mp4"),
+            "publication_target": "facebook_reel",
+        },
+        {
+            "username": "eve",
+            "delivery_kind": "normal",
+            "source_path": str(missing_video),
+            "publication_target": "instagram_reel",
+        },
+    ]
+    manifest.write_text(json.dumps({"version": 1, "entries": entries}), encoding="utf-8")
+
+    monkeypatch.setattr(organizadortg, "_manifest_exists", lambda: True)
+    monkeypatch.setattr(organizadortg, "_calendar_manifest_file", lambda: str(manifest))
+    original_load_entries = organizadortg.load_entries
+    load_calls = []
+
+    def counted_load_entries(path, require_source=True):
+        load_calls.append((path, require_source))
+        return original_load_entries(path, require_source=require_source)
+
+    monkeypatch.setattr(organizadortg, "load_entries", counted_load_entries)
+    monkeypatch.setattr(
+        organizadortg,
+        "_manifest_origin_identity",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("origin lookup")),
+    )
+    monkeypatch.setattr(
+        organizadortg,
+        "get_accounts_with_va_info",
+        lambda: (_ for _ in ()).throw(AssertionError("account database lookup")),
+    )
+
+    counts = organizadortg.count_calendar_videos_by_account()
+
+    assert counts == {
+        "eve": {"normal": 1, "trial": 1},
+        "inactive": {"normal": 0, "trial": 1},
+    }
+    assert load_calls == [(str(manifest), True)]
+
+
+def test_batch_account_counts_scan_explicit_roots_once_per_delivery_kind(tmp_path):
+    normal_root = tmp_path / "normal"
+    trial_root = tmp_path / "trial"
+    (normal_root / "Dia_1" / "eve").mkdir(parents=True)
+    (normal_root / "NotADay" / "eve").mkdir(parents=True)
+    (trial_root / "Dia_2" / "eve").mkdir(parents=True)
+    (normal_root / "Dia_3").write_bytes(b"not a folder")
+    (normal_root / "Dia_1" / "eve" / "normal.mp4").write_bytes(b"x")
+    (normal_root / "Dia_1" / "eve" / "ignored.txt").write_bytes(b"x")
+    (normal_root / "NotADay" / "eve" / "ignored.mp4").write_bytes(b"x")
+    (trial_root / "Dia_2" / "eve" / "trial.mov").write_bytes(b"x")
+
+    counts = organizadortg.count_calendar_videos_by_account(
+        normal_root=normal_root,
+        trial_root=trial_root,
+    )
+
+    assert counts["eve"] == {"normal": 1, "trial": 1}
+
+
 def test_telegram_video_label_marks_trial_only_accounts():
     assert organizadortg.format_account_calendar_video_label({"normal": 0, "trial": 125}) == "125 videos TRIALS"
     assert organizadortg.format_account_calendar_video_label({"normal": 2, "trial": 3}) == "5 videos (2 normales, 3 TRIALS)"
 
 
-def test_trial_only_send_precreates_only_trial_topic(monkeypatch):
+def test_trial_only_send_precreates_only_trial_topic(monkeypatch, tmp_path):
     created = []
     state = {}
+    video_path = tmp_path / "trial.mp4"
+    video_path.write_bytes(b"trial video")
 
     monkeypatch.setattr(organizadortg, "load_tanda_caption_pools", lambda: {})
     monkeypatch.setattr(organizadortg, "load_trial_caption_maps", lambda: {})
     monkeypatch.setattr(organizadortg, "load_normal_individual_caption_maps", lambda: {})
     monkeypatch.setattr(organizadortg, "get_accounts_with_va_info", lambda: [
-        {"username": "eve", "account_type": "MAIN", "trials_active": True, "tg_group_id": "-1001", "assigned_va": "Leo"},
+        {"id": 1, "username": "eve", "account_type": "MAIN", "trials_active": True, "tg_group_id": "-1001", "assigned_va": "Leo"},
     ])
     monkeypatch.setattr(organizadortg, "scan_calendar_structure", lambda: [
         {
-            "path": "trial.mp4",
+            "path": str(video_path),
             "filename": "vid1__c01__TANDA_T__ACC1__D1__S1.mp4",
             "category": "main",
             "day": "Dia_1",
             "username": "eve",
+            "account_id": 1,
             "delivery_kind": "trial",
+            "caption_mode": "general",
+            "caption": "caption fijo por copia",
         },
     ])
     monkeypatch.setattr(organizadortg, "load_json", lambda _path: state)
     monkeypatch.setattr(organizadortg, "save_json", lambda _path, _data: None)
+    monkeypatch.setattr(organizadortg, "_load_delivery_history", lambda _path: {})
+    monkeypatch.setattr(organizadortg, "_source_sha256", lambda _path: "a" * 64)
+    monkeypatch.setattr(organizadortg, "load_airtable_config", lambda: object())
+    monkeypatch.setattr(
+        organizadortg, "fetch_published_video_publications",
+        lambda _config: (_ for _ in ()).throw(AssertionError("trial must not query Airtable publications")),
+    )
     monkeypatch.setattr(organizadortg, "get_slots_for_set", lambda *_args: ["9:00 AM"])
     monkeypatch.setattr(organizadortg, "convert_et_to_va_tz", lambda slot, _tz: (slot, slot))
     monkeypatch.setattr(organizadortg.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(organizadortg, "call_tg", lambda *_args, **_kwargs: {"ok": True})
-    monkeypatch.setattr(organizadortg, "_send_video_to_topic", lambda *args: (True, args[1]))
+    sent_captions = []
+
+    def fake_send(*args, **_kwargs):
+        sent_captions.append(args[2])
+        return True, args[1]
+
+    monkeypatch.setattr(organizadortg, "_send_video_to_topic", fake_send)
 
     def fake_get_or_create(chat_id, username, tag, topics_state, is_admin=False, force_recreate=False, delivery_kind="normal"):
         state_key = organizadortg.topic_state_key(chat_id, username, delivery_kind)
@@ -119,6 +233,9 @@ def test_trial_only_send_precreates_only_trial_topic(monkeypatch):
 
     assert result.startswith("✨ PROCESO TERMINADO")
     assert created == ["trial"]
+    assert sent_captions == ["caption fijo por copia"]
+
+
 def test_execute_plan_can_use_gui_database_manager(monkeypatch):
     class BrokenDb:
         def get_all_tandas(self):
@@ -158,10 +275,15 @@ def test_execute_plan_can_use_gui_database_manager(monkeypatch):
         "category": "main",
         "day": "Dia_1",
         "username": "eve",
+        "account_id": "1",
         "delivery_kind": "normal",
     }])
     monkeypatch.setattr(organizadortg, "load_json", lambda _path: state)
     monkeypatch.setattr(organizadortg, "save_json", lambda _path, _data: None)
+    monkeypatch.setattr(organizadortg, "_load_delivery_history", lambda _path: {})
+    monkeypatch.setattr(organizadortg, "load_airtable_config", lambda: object())
+    monkeypatch.setattr(organizadortg, "fetch_published_video_publications", lambda _config: (set(), set()))
+    monkeypatch.setattr(organizadortg, "_source_sha256", lambda _path: "a" * 64)
     monkeypatch.setattr(organizadortg, "convert_et_to_va_tz", lambda slot, _tz: (slot, slot))
     monkeypatch.setattr(organizadortg.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(organizadortg, "call_tg", lambda *_args, **_kwargs: {"ok": True, "result": True})
