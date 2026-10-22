@@ -393,6 +393,39 @@ def test_successful_send_blocks_same_origin_in_later_run(monkeypatch, tmp_path):
     assert "Omitidos por origin ya enviado a la cuenta: 1" in result
 
 
+def test_opt_in_resends_delivered_origin_without_erasing_history(monkeypatch, tmp_path):
+    alpha = tmp_path / "alpha.mp4"
+    alpha_copy = tmp_path / "alpha-copy.mp4"
+    beta = tmp_path / "beta.mp4"
+    for path in (alpha, alpha_copy, beta):
+        path.write_bytes(path.name.encode())
+    videos = [
+        _video(alpha, "alpha", origin_identity="shared-origin"),
+        _video(alpha_copy, "alpha", origin_identity="shared-origin"),
+        _video(beta, "beta", origin_identity="shared-origin"),
+    ]
+    _calls, sent = _stub_common_telegram_plan(
+        monkeypatch, videos,
+        [_account("alpha", "-1001"), _account("beta", "-1002")],
+    )
+    token = organizadortg.origin_token_from_identity("shared-origin")
+    history_path = tmp_path / organizadortg.DELIVERY_HISTORY_FILE
+    organizadortg._save_delivery_history(history_path, {"1": {token}, "2": {token}})
+    monkeypatch.setattr(
+        organizadortg, "fetch_published_video_publications",
+        lambda _config: (set(), {("2", token)}),
+    )
+
+    result = organizadortg.execute_telegram_plan(
+        datetime(2026, 10, 14), allow_delivered_repeats=True,
+    )
+
+    assert [(video[2], video[3]) for video in sent] == [("alpha", str(alpha))]
+    assert "Omitidos por origin duplicado en la cuenta: 1" in result
+    assert "Omitidos publicados: 1" in result
+    assert organizadortg._load_delivery_history(history_path) == {"1": {token}, "2": {token}}
+
+
 def test_corrupt_delivery_history_stops_before_telegram_calls(monkeypatch, tmp_path):
     video = tmp_path / "video.mp4"
     video.write_bytes(b"video")

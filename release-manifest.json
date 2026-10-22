@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.50",
+    "version":  "1.0.51",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.50",
-    "asset_name":  "MetodoIG-v1.0.50.zip",
-    "sha256":  "641b9a0113c4101e52014a95a5922c4ea6a9a8c806049e8c504c5d7146408a52",
-    "notes":  "Forge SDR/HLG Preview: compatibilidad con instalaciones actualizadas, errores visibles y helper FFmpeg sincronizado.",
+    "github_release_tag":  "v1.0.51",
+    "asset_name":  "MetodoIG-v1.0.51.zip",
+    "sha256":  "42b69b273598206cfdd2ab3a1795f7273a893ba890be854ae1c290360a2abc5e",
+    "notes":  "Reenvio explicito de videos ya entregados a las cuentas seleccionadas, conservando el historial.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",

@@ -1105,7 +1105,7 @@ def _account_tag(acc_info):
         return "SUICIDE"
     return category.upper() if category else "GENERAL"
 
-def execute_telegram_plan(start_date, selected_accounts=None, controller=None, reset_topics=False, express_mode=False, db_manager=None, allow_published_repeats=False):
+def execute_telegram_plan(start_date, selected_accounts=None, controller=None, reset_topics=False, express_mode=False, db_manager=None, allow_published_repeats=False, allow_delivered_repeats=False):
     if db_manager is not None:
         global db
         previous_db = db
@@ -1118,13 +1118,15 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                 reset_topics=reset_topics,
                 express_mode=express_mode,
                 allow_published_repeats=allow_published_repeats,
+                allow_delivered_repeats=allow_delivered_repeats,
             )
         finally:
             db = previous_db
 
     print(
         f"Telegram opciones efectivas: borrar_topics={bool(reset_topics)}, "
-        f"envio_express={bool(express_mode)}, repetir_publicados={bool(allow_published_repeats)}"
+        f"envio_express={bool(express_mode)}, repetir_publicados={bool(allow_published_repeats)}, "
+        f"repetir_enviados={bool(allow_delivered_repeats)}"
     )
     caption_pools = load_tanda_caption_pools()
     trial_caption_maps = load_trial_caption_maps()
@@ -1188,6 +1190,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                 origin_key = origin_token or family_key or source_hash
                 scheduled_key = (account_id, origin_key)
                 if (origin_key in delivered_origins.get(account_id, set())
+                        and not allow_delivered_repeats
                         and not (allow_published_repeats and already_published)):
                     omitted_delivered_origins += 1
                     continue
@@ -1466,12 +1469,13 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
 
 # --- 4. CONTROLADOR DE HILOS Y MOTOR DE EJECUCIÓN ---
 class TelegramBotController:
-    def __init__(self, start_date_str, selected_accounts=None, reset_topics=False, express_mode=False, db_manager=None, allow_published_repeats=False):
+    def __init__(self, start_date_str, selected_accounts=None, reset_topics=False, express_mode=False, db_manager=None, allow_published_repeats=False, allow_delivered_repeats=False):
         self.start_date_str = start_date_str
         self.selected_accounts = selected_accounts
         self.reset_topics = reset_topics
         self.express_mode = express_mode
         self.allow_published_repeats = allow_published_repeats
+        self.allow_delivered_repeats = allow_delivered_repeats
         self.db_manager = db_manager
         self._paused = threading.Event()
         self._paused.set()
@@ -1496,6 +1500,7 @@ class TelegramBotController:
                 "reset_topics": self.reset_topics,
                 "express_mode": self.express_mode,
                 "allow_published_repeats": self.allow_published_repeats,
+                "allow_delivered_repeats": self.allow_delivered_repeats,
             }
             if self.db_manager is not None:
                 execute_kwargs["db_manager"] = self.db_manager
