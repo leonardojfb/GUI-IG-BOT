@@ -420,8 +420,10 @@ def test_opt_in_resends_delivered_origin_without_erasing_history(monkeypatch, tm
         datetime(2026, 10, 14), allow_delivered_repeats=True,
     )
 
-    assert [(video[2], video[3]) for video in sent] == [("alpha", str(alpha))]
-    assert "Omitidos por origin duplicado en la cuenta: 1" in result
+    assert [(video[2], video[3]) for video in sent] == [
+        ("alpha", str(alpha)), ("alpha", str(alpha_copy)),
+    ]
+    assert "Omitidos por origin duplicado en la cuenta: 0" in result
     assert "Omitidos publicados: 1" in result
     assert organizadortg._load_delivery_history(history_path) == {"1": {token}, "2": {token}}
 

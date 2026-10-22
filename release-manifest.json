@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.51",
+    "version":  "1.0.52",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.51",
-    "asset_name":  "MetodoIG-v1.0.51.zip",
-    "sha256":  "42b69b273598206cfdd2ab3a1795f7273a893ba890be854ae1c290360a2abc5e",
-    "notes":  "Reenvio explicito de videos ya entregados a las cuentas seleccionadas, conservando el historial.",
+    "github_release_tag":  "v1.0.52",
+    "asset_name":  "MetodoIG-v1.0.52.zip",
+    "sha256":  "157d4f8ef5ad360e258e47c05c85f4e5fe8876cc9d125ec5bdbef90b66c0035d",
+    "notes":  "Reenvio explicito de toda la calendarizacion seleccionada, incluidas copias del mismo origen en la cuenta; conserva historial y filtro Publicado.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",

@@ -1194,7 +1194,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                         and not (allow_published_repeats and already_published)):
                     omitted_delivered_origins += 1
                     continue
-                if scheduled_key in scheduled_origins:
+                if scheduled_key in scheduled_origins and not allow_delivered_repeats:
                     omitted_duplicate_origins += 1
                     continue
                 scheduled_origins.add(scheduled_key)
