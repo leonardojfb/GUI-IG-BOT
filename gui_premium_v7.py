@@ -2677,7 +2677,7 @@ class InstagramAutoPro(ctk.CTk):
         # ── Header ──────────────────────────────────────────────────────
         PageHeader(
             f, "DISTRIBUCIÓN", "Logística",
-            "Reparto anti-colisión de tandas entre cuentas y días."
+            "Distribución de videos por tandas, cuentas y TRIALS."
         ).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 10))
 
         # ── TabView: Por Tandas / Por Cuentas ───────────────────────────
@@ -3048,23 +3048,16 @@ class InstagramAutoPro(ctk.CTk):
         except ValueError:
             return messagebox.showwarning("Trials", "Dias invalidos.")
         try:
-            existing_entries = load_entries(manifest_path(_BASE_DIR), require_source=False)
+            # Validate the manifest before preview; its rows do not affect TRIAL order.
+            load_entries(manifest_path(_BASE_DIR), require_source=False)
             origin_by_file = {}
             for tanda, filenames in files_by_tanda.items():
                 for filename in filenames:
                     source_path = os.path.abspath(os.path.join(_BASE_DIR, "videos_finales", tanda, filename))
                     origin_by_file[(tanda, filename)] = self.db.get_video_transform_source_identity(source_path)
-            existing_trials = []
-            for entry in existing_entries:
-                if entry.get("delivery_kind") != "trial":
-                    continue
-                row = dict(entry)
-                if not row.get("origin_identity") and row.get("source_path"):
-                    row["origin_identity"] = self.db.get_video_transform_source_identity(row["source_path"])
-                existing_trials.append(row)
             plan = build_trial_account_plan(
                 assignments, files_by_tanda, per_day, days,
-                origin_by_file=origin_by_file, existing_entries=existing_trials,
+                origin_by_file=origin_by_file,
             )
             general_captions = assign_trial_general_captions(
                 plan, assignments, modes, pools, per_day,
@@ -3082,10 +3075,6 @@ class InstagramAutoPro(ctk.CTk):
                 if modes[user] == "general":
                     line += f" | Caption: {general_captions[(user, filename)].replace(chr(10), ' ⏎ ')}"
                 lines.append(line)
-        total_repeats = sum((plan.daily_repeats or {}).values())
-        lines.append(f"Orígenes repetidos en el mismo día: {total_repeats}")
-        for day, count in sorted((plan.daily_repeats or {}).items()):
-            lines.append(f"  Día {day}: {count} repetición(es)")
         result = "\n".join(lines)
         if preview_only:
             self.trial_dist_result.delete("1.0", "end"); self.trial_dist_result.insert("1.0", result); return
@@ -3097,8 +3086,7 @@ class InstagramAutoPro(ctk.CTk):
                 "No se calendariza incompleto. Revisa VISTA PREVIA y asigna una tanda con videos suficientes por cuenta.",
             )
         if not messagebox.askyesno("Distribuir Trials", "\n\n".join(warnings + [
-            f"Calendarizar {sum(map(len, plan.assigned.values()))} videos sin reutilizar metadata?",
-            f"Orígenes repetidos en el mismo día: {total_repeats}",
+            f"Calendarizar {sum(map(len, plan.assigned.values()))} videos Trial?",
         ])):
             return
         ids = {r["username"]: r["id"] for r in self.db.get_trials_active_accounts()}
