@@ -37,8 +37,8 @@ def group_trial_sources(filenames: list[str]) -> list[tuple[str, list[str]]]:
     return list(groups.items())
 
 
-def _consecutive_trial_files(filenames, tanda, origin_by_file):
-    """Keep every copy of each verified or filename-derived origin together."""
+def _interleave_trial_files(filenames, tanda, origin_by_file):
+    """Send one copy per origin before the next round of copies."""
     groups = {}
     for filename in sorted(filenames):
         verified = origin_by_file.get((tanda, filename))
@@ -51,8 +51,13 @@ def _consecutive_trial_files(filenames, tanda, origin_by_file):
         match = re.search(r"__c(\d+)$", os.path.splitext(filename)[0], re.IGNORECASE)
         return (int(match.group(1)) if match else 0, filename.casefold())
 
-    return [filename for copies in groups.values()
-            for filename in sorted(copies, key=copy_order)]
+    copies_by_origin = [sorted(copies, key=copy_order) for copies in groups.values()]
+    return [
+        copies[copy_index]
+        for copy_index in range(max(map(len, copies_by_origin), default=0))
+        for copies in copies_by_origin
+        if copy_index < len(copies)
+    ]
 
 
 def missing_trial_caption_sources(filenames: list[str], captions: dict[str, str]) -> list[str]:
@@ -128,13 +133,13 @@ def assign_trial_general_captions(plan: TrialPlan, assignments: dict[str, str],
 
 def build_trial_account_plan(assignments, files_by_tanda, videos_per_day, days,
                              *, origin_by_file=None, existing_entries=()):
-    """Allocate copies consecutively; existing_entries is ignored for TRIAL order."""
+    """Allocate copy rounds across origins; existing_entries is ignored for TRIAL order."""
     max_mode = str(days).strip().upper() == "MAX"
     per_day = int(videos_per_day)
     per_account = None if max_mode else per_day * int(days)
     origin_by_file = origin_by_file or {}
     remaining = {
-        tanda: _consecutive_trial_files(files_by_tanda.get(tanda, ()), tanda, origin_by_file)
+        tanda: _interleave_trial_files(files_by_tanda.get(tanda, ()), tanda, origin_by_file)
         for tanda in set(assignments.values()) if tanda
     }
     max_quotas = {}

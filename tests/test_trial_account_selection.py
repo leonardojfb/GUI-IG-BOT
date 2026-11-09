@@ -78,7 +78,7 @@ def test_max_balances_each_tanda_independently():
     assert plan.shortfalls == {}
 
 
-def test_trial_plan_sends_every_copy_of_an_origin_before_the_next_origin():
+def test_trial_plan_interleaves_origins_before_repeating_a_copy():
     plan = build_trial_account_plan(
         {"eve": "T1"},
         {
@@ -98,13 +98,13 @@ def test_trial_plan_sends_every_copy_of_an_origin_before_the_next_origin():
     )
     assert plan.assigned["eve"] == [
         "vid1__c01.mp4",
-        "vid1__c02.mp4",
-        "vid1__c03.mp4",
         "vid2__c01.mp4",
-        "vid2__c02.mp4",
-        "vid2__c03.mp4",
         "vid3__c01.mp4",
+        "vid1__c02.mp4",
+        "vid2__c02.mp4",
         "vid3__c02.mp4",
+        "vid1__c03.mp4",
+        "vid2__c03.mp4",
     ]
 
 
@@ -121,10 +121,13 @@ def test_trial_plan_does_not_delay_copies_used_by_another_account():
             for day in range(1, 6)
         ],
     )
-    assert plan.assigned["eve"] == files
+    assert plan.assigned["eve"] == [
+        "a__c01.mp4", "b__c01.mp4", "a__c02.mp4",
+        "b__c02.mp4", "a__c03.mp4", "b__c03.mp4",
+    ]
 
 
-def test_trial_plan_keeps_each_account_copies_consecutive_with_shared_tanda():
+def test_trial_plan_assigns_each_account_one_origin_round_with_shared_tanda():
     plan = build_trial_account_plan(
         {"eve": "T1", "luna": "T1"},
         {
@@ -142,8 +145,8 @@ def test_trial_plan_keeps_each_account_copies_consecutive_with_shared_tanda():
     )
     assert len(plan.assigned["eve"]) == len(plan.assigned["luna"]) == 3
     assert len(set(plan.assigned["eve"] + plan.assigned["luna"])) == 6
-    assert plan.assigned["eve"] == ["vid1__c01.mp4", "vid1__c02.mp4", "vid2__c01.mp4"]
-    assert plan.assigned["luna"] == ["vid2__c02.mp4", "vid3__c01.mp4", "vid3__c02.mp4"]
+    assert plan.assigned["eve"] == ["vid1__c01.mp4", "vid2__c01.mp4", "vid3__c01.mp4"]
+    assert plan.assigned["luna"] == ["vid1__c02.mp4", "vid2__c02.mp4", "vid3__c02.mp4"]
 
 
 def test_trial_plan_does_not_reuse_an_output_when_accounts_share_a_tanda():
@@ -154,8 +157,8 @@ def test_trial_plan_does_not_reuse_an_output_when_accounts_share_a_tanda():
         days=2,
     )
     assert plan.assigned == {
-        "eve": ["x__c01.mp4", "x__c02.mp4"],
-        "luna": ["y__c01.mp4", "y__c02.mp4"],
+        "eve": ["x__c01.mp4", "y__c01.mp4"],
+        "luna": ["x__c02.mp4", "y__c02.mp4"],
     }
 
 
