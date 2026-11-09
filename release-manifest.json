@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.53",
+    "version":  "1.0.54",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.53",
-    "asset_name":  "MetodoIG-v1.0.53.zip",
-    "sha256":  "df2c0c62e0171394c07d1cb0d353312e2df20363bf371832aebfc64ce49d5f97",
-    "notes":  "TRIAL: copias de cada origen consecutivas y captions individuales persistentes por cuenta y origen, con respaldo global.",
+    "github_release_tag":  "v1.0.54",
+    "asset_name":  "MetodoIG-v1.0.54.zip",
+    "sha256":  "f31b2c5ce2fdf3a9b61fdffc3845a7ae0aa1009b8e1f5babae2d2e956933905d",
+    "notes":  "TRIAL: alterna los origenes por ronda de copia (1, 2, 3, 4, 1, 2...) y conserva captions individuales por cuenta.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",
