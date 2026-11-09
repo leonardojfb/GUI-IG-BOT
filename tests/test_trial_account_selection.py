@@ -259,7 +259,7 @@ def test_trial_preview_ignores_other_account_manifest_occupancy(tmp_path, monkey
     fake = SimpleNamespace(
         _trial_selected_assignments=lambda: {"eve": "T1"},
         _save_trial_captions=lambda: None,
-        _trial_missing_caption_sources=lambda _tanda: [],
+        _trial_missing_caption_sources=lambda _tanda, _username: [],
         trial_dist_vpd=SimpleNamespace(get=lambda: "1"),
         trial_dist_days=SimpleNamespace(get=lambda: "1"),
         _trial_tanda_files=lambda _tanda: ["x__c01.mp4", "y__c01.mp4"],
@@ -302,7 +302,7 @@ def test_trial_preview_stops_on_invalid_manifest(tmp_path, monkeypatch):
     fake = SimpleNamespace(
         _trial_selected_assignments=lambda: {"eve": "T1"},
         _save_trial_captions=lambda: None,
-        _trial_missing_caption_sources=lambda _tanda: [],
+        _trial_missing_caption_sources=lambda _tanda, _username: [],
         trial_dist_vpd=SimpleNamespace(get=lambda: "1"),
         trial_dist_days=SimpleNamespace(get=lambda: "1"),
         _trial_tanda_files=lambda _tanda: ["x__c01.mp4"],
@@ -346,7 +346,7 @@ def test_trial_max_preview_and_manifest_split_40_copies_across_10_accounts(tmp_p
     fake = SimpleNamespace(
         _trial_selected_assignments=lambda: {user: "T1" for user in accounts},
         _save_trial_captions=lambda: None,
-        _trial_missing_caption_sources=lambda _tanda: [],
+        _trial_missing_caption_sources=lambda _tanda, _username: [],
         trial_dist_vpd=SimpleNamespace(get=lambda: "3"),
         trial_dist_days=SimpleNamespace(get=lambda: "MAX"),
         _trial_tanda_files=lambda _tanda: files,
@@ -403,7 +403,7 @@ def test_trial_general_preview_and_manifest_bind_captions_per_copy(tmp_path, mon
     fake = SimpleNamespace(
         _trial_selected_assignments=lambda: {"a": "T", "b": "T"},
         _save_trial_captions=lambda: None,
-        _trial_missing_caption_sources=lambda _tanda: ["clip"],
+        _trial_missing_caption_sources=lambda _tanda, _username: ["clip"],
         trial_caption_mode=SimpleNamespace(get=lambda: "General"),
         trial_general_txt_path=SimpleNamespace(get=lambda: str(caption_txt)),
         trial_dist_vpd=SimpleNamespace(get=lambda: "1"),

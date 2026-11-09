@@ -649,6 +649,23 @@ def caption_for_trial_calendar_video(filename, captions, caption_mode=None, mani
     return captions.get(extract_source_key_from_calendar_filename(filename))
 
 
+def resolve_trial_caption(video, global_captions, db_manager):
+    """Prefer the account's saved origin caption for Individual TRIALs."""
+    filename = video["filename"]
+    mode = video.get("caption_mode")
+    if str(mode or "").strip().lower() != "general":
+        account_id = video.get("account_id")
+        tanda = video.get("tanda")
+        if account_id and tanda and hasattr(db_manager, "get_trial_account_source_caption"):
+            source_key = extract_source_key_from_calendar_filename(filename)
+            caption = db_manager.get_trial_account_source_caption(account_id, tanda, source_key)
+            if caption is not None:
+                return caption
+    return caption_for_trial_calendar_video(
+        filename, global_captions, mode, video.get("caption")
+    )
+
+
 def load_trial_caption_maps():
     return {
         _tanda_tag(tanda): db.get_trial_source_captions(tanda)
@@ -1336,10 +1353,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     trial_map = trial_caption_maps.get(
                         extract_tanda_tag_from_calendar_filename(vid["filename"]), {}
                     )
-                    cap = caption_for_trial_calendar_video(
-                        vid["filename"], trial_map,
-                        vid.get("caption_mode"), vid.get("caption"),
-                    )
+                    cap = resolve_trial_caption(vid, trial_map, db)
                 else:
                     normal_map = normal_individual_caption_maps.get(
                         extract_tanda_tag_from_calendar_filename(vid["filename"]), {}

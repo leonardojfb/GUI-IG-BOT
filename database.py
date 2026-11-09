@@ -111,6 +111,15 @@ CREATE TABLE IF NOT EXISTS global_trial_source_captions (
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS trial_account_source_captions (
+    account_id INTEGER NOT NULL,
+    origin_key TEXT NOT NULL,
+    caption_text TEXT NOT NULL,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (account_id, origin_key),
+    FOREIGN KEY (account_id) REFERENCES virtual_accounts(id)
+);
+
 CREATE TABLE IF NOT EXISTS normal_source_captions (
     tanda_name TEXT NOT NULL,
     source_key TEXT NOT NULL,
@@ -600,6 +609,66 @@ class DatabaseManager:
                 if identity and text == baselines.get(identity) else text
             )
         return captions
+
+    def _trial_account_origin_key(self, tanda_name: str, source_key: str) -> str:
+        identities = self._normal_caption_identities()
+        identity = self._normal_caption_identity(identities, tanda_name, source_key)
+        if identity:
+            return json.dumps(["origin", identity], ensure_ascii=False)
+
+        return self._trial_account_local_key(tanda_name, source_key)
+
+    @staticmethod
+    def _trial_account_local_key(tanda_name: str, source_key: str) -> str:
+        return json.dumps(
+            ["tanda", tanda_name.casefold(), source_key.casefold()],
+            ensure_ascii=False,
+        )
+
+    def set_trial_account_source_caption(
+        self, account_id: int, tanda_name: str, source_key: str, caption_text: str
+    ) -> None:
+        key = self._trial_account_origin_key(tanda_name, source_key)
+        local_key = self._trial_account_local_key(tanda_name, source_key)
+        text = str(caption_text or "").strip()
+        if text:
+            self.conn.execute(
+                "INSERT INTO trial_account_source_captions(account_id, origin_key, caption_text) "
+                "VALUES (?, ?, ?) ON CONFLICT(account_id, origin_key) DO UPDATE SET "
+                "caption_text=excluded.caption_text, updated_at=CURRENT_TIMESTAMP",
+                (account_id, key, text),
+            )
+            if key != local_key:
+                self.conn.execute(
+                    "DELETE FROM trial_account_source_captions "
+                    "WHERE account_id=? AND origin_key=?",
+                    (account_id, local_key),
+                )
+        else:
+            self.conn.execute(
+                "DELETE FROM trial_account_source_captions "
+                "WHERE account_id=? AND origin_key IN (?, ?)",
+                (account_id, key, local_key),
+            )
+        self.conn.commit()
+
+    def get_trial_account_source_caption(
+        self, account_id: int, tanda_name: str, source_key: str
+    ) -> str | None:
+        key = self._trial_account_origin_key(tanda_name, source_key)
+        keys = [key]
+        local_key = self._trial_account_local_key(tanda_name, source_key)
+        if local_key != key:
+            keys.append(local_key)
+        for candidate in keys:
+            row = self.conn.execute(
+                "SELECT caption_text FROM trial_account_source_captions "
+                "WHERE account_id=? AND origin_key=?",
+                (account_id, candidate),
+            ).fetchone()
+            if row:
+                return row["caption_text"]
+        return None
 
     def _source_caption_baselines(self, identities):
         baselines = {}
