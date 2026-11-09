@@ -78,7 +78,7 @@ def test_max_balances_each_tanda_independently():
     assert plan.shortfalls == {}
 
 
-def test_trial_plan_interleaves_sources_before_repeating_copies():
+def test_trial_plan_sends_every_copy_of_an_origin_before_the_next_origin():
     plan = build_trial_account_plan(
         {"eve": "T1"},
         {
@@ -98,17 +98,33 @@ def test_trial_plan_interleaves_sources_before_repeating_copies():
     )
     assert plan.assigned["eve"] == [
         "vid1__c01.mp4",
-        "vid2__c01.mp4",
-        "vid3__c01.mp4",
         "vid1__c02.mp4",
-        "vid2__c02.mp4",
-        "vid3__c02.mp4",
         "vid1__c03.mp4",
+        "vid2__c01.mp4",
+        "vid2__c02.mp4",
         "vid2__c03.mp4",
+        "vid3__c01.mp4",
+        "vid3__c02.mp4",
     ]
 
 
-def test_trial_plan_continues_interleaved_tanda_pool_per_individual_account():
+def test_trial_plan_does_not_delay_copies_used_by_another_account():
+    files = [f"a__c{i:02d}.mp4" for i in range(1, 4)] + [
+        f"b__c{i:02d}.mp4" for i in range(1, 4)
+    ]
+    plan = build_trial_account_plan(
+        {"eve": "NEW"}, {"NEW": files}, 1, "MAX",
+        origin_by_file={("NEW", name): "shared" for name in files[:3]},
+        existing_entries=[
+            {"username": "other", "delivery_kind": "trial", "day": day,
+             "tanda": "OLD", "source_path": "old.mp4", "origin_identity": "shared"}
+            for day in range(1, 6)
+        ],
+    )
+    assert plan.assigned["eve"] == files
+
+
+def test_trial_plan_keeps_each_account_copies_consecutive_with_shared_tanda():
     plan = build_trial_account_plan(
         {"eve": "T1", "luna": "T1"},
         {
@@ -126,21 +142,24 @@ def test_trial_plan_continues_interleaved_tanda_pool_per_individual_account():
     )
     assert len(plan.assigned["eve"]) == len(plan.assigned["luna"]) == 3
     assert len(set(plan.assigned["eve"] + plan.assigned["luna"])) == 6
-    assert plan.daily_repeats == {1: 3}
+    assert plan.assigned["eve"] == ["vid1__c01.mp4", "vid1__c02.mp4", "vid2__c01.mp4"]
+    assert plan.assigned["luna"] == ["vid2__c02.mp4", "vid3__c01.mp4", "vid3__c02.mp4"]
 
 
-def test_trial_plan_spreads_origins_between_accounts_on_same_day():
+def test_trial_plan_does_not_reuse_an_output_when_accounts_share_a_tanda():
     plan = build_trial_account_plan(
         {"eve": "T1", "luna": "T1"},
         {"T1": ["x__c01.mp4", "x__c02.mp4", "y__c01.mp4", "y__c02.mp4"]},
         videos_per_day=1,
         days=2,
     )
-    for day in range(2):
-        assert {plan.assigned[user][day].split("__")[0] for user in ("eve", "luna")} == {"x", "y"}
+    assert plan.assigned == {
+        "eve": ["x__c01.mp4", "x__c02.mp4"],
+        "luna": ["y__c01.mp4", "y__c02.mp4"],
+    }
 
 
-def test_trial_plan_avoids_existing_other_account_origin_but_replaces_selected_account():
+def test_trial_plan_ignores_existing_other_account_origin():
     plan = build_trial_account_plan(
         {"eve": "T1"},
         {"T1": ["x__c01.mp4", "y__c01.mp4"]},
@@ -153,10 +172,10 @@ def test_trial_plan_avoids_existing_other_account_origin_but_replaces_selected_a
              "tanda": "T1", "source_path": "y__c99.mp4"},
         ],
     )
-    assert plan.assigned["eve"] == ["y__c01.mp4"]
+    assert plan.assigned["eve"] == ["x__c01.mp4"]
 
 
-def test_trial_plan_uses_verified_origin_across_tandas_and_ignores_normal_entries():
+def test_trial_plan_ignores_existing_entries_across_tandas():
     plan = build_trial_account_plan(
         {"eve": "NEW"},
         {"NEW": ["a.mp4", "b.mp4"]},
@@ -169,7 +188,7 @@ def test_trial_plan_uses_verified_origin_across_tandas_and_ignores_normal_entrie
              "tanda": "NEW", "source_path": "b.mp4", "origin_identity": "other"},
         ],
     )
-    assert plan.assigned["eve"] == ["b.mp4"]
+    assert plan.assigned["eve"] == ["a.mp4"]
     assert plan.daily_repeats == {}
 
 
@@ -183,7 +202,7 @@ def test_trial_repeat_report_counts_collisions_between_accounts_only():
     assert plan.daily_repeats == {}
 
 
-def test_trial_max_balances_verified_origins_across_tandas_deterministically():
+def test_trial_max_allows_same_verified_origin_on_the_same_day_across_tandas():
     args = (
         {"eve": "A", "luna": "B"},
         {"A": ["a1.mp4", "a2.mp4"], "B": ["b1.mp4", "b2.mp4"]},
@@ -197,12 +216,11 @@ def test_trial_max_balances_verified_origins_across_tandas_deterministically():
     second = build_trial_account_plan(*args, origin_by_file=origins)
     assert first == second
     assert first.daily_repeats == {}
-    for day in range(2):
-        assert {origins[("A", first.assigned["eve"][day])],
-                origins[("B", first.assigned["luna"][day])]} == {"x", "y"}
+    assert first.assigned == {"eve": ["a1.mp4", "a2.mp4"],
+                              "luna": ["b1.mp4", "b2.mp4"]}
 
 
-def test_trial_plan_reserves_scarce_origin_for_account_without_alternative():
+def test_trial_plan_does_not_reserve_origins_across_accounts():
     plan = build_trial_account_plan(
         {"flexible": "A", "only_x": "B"},
         {"A": ["x.mp4", "y.mp4"], "B": ["x_copy.mp4"]},
@@ -210,11 +228,11 @@ def test_trial_plan_reserves_scarce_origin_for_account_without_alternative():
         origin_by_file={("A", "x.mp4"): "x", ("A", "y.mp4"): "y",
                         ("B", "x_copy.mp4"): "x"},
     )
-    assert plan.assigned == {"flexible": ["y.mp4"], "only_x": ["x_copy.mp4"]}
+    assert plan.assigned == {"flexible": ["x.mp4"], "only_x": ["x_copy.mp4"]}
     assert plan.daily_repeats == {}
 
 
-def test_trial_preview_accounts_for_existing_manifest(tmp_path, monkeypatch):
+def test_trial_preview_ignores_other_account_manifest_occupancy(tmp_path, monkeypatch):
     import gui_premium_v7
 
     monkeypatch.setattr(gui_premium_v7, "_BASE_DIR", str(tmp_path))
@@ -241,7 +259,7 @@ def test_trial_preview_accounts_for_existing_manifest(tmp_path, monkeypatch):
     fake = SimpleNamespace(
         _trial_selected_assignments=lambda: {"eve": "T1"},
         _save_trial_captions=lambda: None,
-        _trial_missing_caption_sources=lambda _tanda: [],
+        _trial_missing_caption_sources=lambda _tanda, _username: [],
         trial_dist_vpd=SimpleNamespace(get=lambda: "1"),
         trial_dist_days=SimpleNamespace(get=lambda: "1"),
         _trial_tanda_files=lambda _tanda: ["x__c01.mp4", "y__c01.mp4"],
@@ -253,8 +271,8 @@ def test_trial_preview_accounts_for_existing_manifest(tmp_path, monkeypatch):
         trial_dist_result=textbox,
     )
     gui_premium_v7.InstagramAutoPro._trial_dist_run_per_account(fake, True)
-    assert "y__c01.mp4" in textbox.value
-    assert "x__c01.mp4" not in textbox.value
+    assert "x__c01.mp4" in textbox.value
+    assert "Orígenes repetidos" not in textbox.value
 
     class SyncWorker:
         def __init__(self, _owner, done, task):
@@ -270,7 +288,7 @@ def test_trial_preview_accounts_for_existing_manifest(tmp_path, monkeypatch):
     rows = json.loads((tmp_path / "calendar_manifest.json").read_text(encoding="utf-8"))["entries"]
     assert len(rows) == 2
     assert {(row["username"], Path(row["source_path"]).name) for row in rows} == {
-        ("other", "x__c99.mp4"), ("eve", "y__c01.mp4"),
+        ("other", "x__c99.mp4"), ("eve", "x__c01.mp4"),
     }
 
 
@@ -284,7 +302,7 @@ def test_trial_preview_stops_on_invalid_manifest(tmp_path, monkeypatch):
     fake = SimpleNamespace(
         _trial_selected_assignments=lambda: {"eve": "T1"},
         _save_trial_captions=lambda: None,
-        _trial_missing_caption_sources=lambda _tanda: [],
+        _trial_missing_caption_sources=lambda _tanda, _username: [],
         trial_dist_vpd=SimpleNamespace(get=lambda: "1"),
         trial_dist_days=SimpleNamespace(get=lambda: "1"),
         _trial_tanda_files=lambda _tanda: ["x__c01.mp4"],
@@ -328,7 +346,7 @@ def test_trial_max_preview_and_manifest_split_40_copies_across_10_accounts(tmp_p
     fake = SimpleNamespace(
         _trial_selected_assignments=lambda: {user: "T1" for user in accounts},
         _save_trial_captions=lambda: None,
-        _trial_missing_caption_sources=lambda _tanda: [],
+        _trial_missing_caption_sources=lambda _tanda, _username: [],
         trial_dist_vpd=SimpleNamespace(get=lambda: "3"),
         trial_dist_days=SimpleNamespace(get=lambda: "MAX"),
         _trial_tanda_files=lambda _tanda: files,
@@ -385,7 +403,7 @@ def test_trial_general_preview_and_manifest_bind_captions_per_copy(tmp_path, mon
     fake = SimpleNamespace(
         _trial_selected_assignments=lambda: {"a": "T", "b": "T"},
         _save_trial_captions=lambda: None,
-        _trial_missing_caption_sources=lambda _tanda: ["clip"],
+        _trial_missing_caption_sources=lambda _tanda, _username: ["clip"],
         trial_caption_mode=SimpleNamespace(get=lambda: "General"),
         trial_general_txt_path=SimpleNamespace(get=lambda: str(caption_txt)),
         trial_dist_vpd=SimpleNamespace(get=lambda: "1"),

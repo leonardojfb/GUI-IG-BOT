@@ -5,7 +5,7 @@ import hashlib
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from collections import Counter, defaultdict
+from collections import defaultdict
 
 _COPY_SUFFIX = re.compile(r"__c\d+$", re.IGNORECASE)
 
@@ -37,18 +37,22 @@ def group_trial_sources(filenames: list[str]) -> list[tuple[str, list[str]]]:
     return list(groups.items())
 
 
-def _interleave_trial_files(filenames: list[str]) -> list[str]:
-    """Order copies by source round: vid1c1, vid2c1, then vid1c2."""
-    groups = group_trial_sources(filenames)
-    if not groups:
-        return []
-    max_copies = max(len(copies) for _source_key, copies in groups)
-    interleaved = []
-    for copy_index in range(max_copies):
-        for _source_key, copies in groups:
-            if copy_index < len(copies):
-                interleaved.append(copies[copy_index])
-    return interleaved
+def _consecutive_trial_files(filenames, tanda, origin_by_file):
+    """Keep every copy of each verified or filename-derived origin together."""
+    groups = {}
+    for filename in sorted(filenames):
+        verified = origin_by_file.get((tanda, filename))
+        key = ("verified", str(verified)) if verified else (
+            "source", source_key_from_filename(filename)
+        )
+        groups.setdefault(key, []).append(filename)
+
+    def copy_order(filename):
+        match = re.search(r"__c(\d+)$", os.path.splitext(filename)[0], re.IGNORECASE)
+        return (int(match.group(1)) if match else 0, filename.casefold())
+
+    return [filename for copies in groups.values()
+            for filename in sorted(copies, key=copy_order)]
 
 
 def missing_trial_caption_sources(filenames: list[str], captions: dict[str, str]) -> list[str]:
@@ -124,13 +128,13 @@ def assign_trial_general_captions(plan: TrialPlan, assignments: dict[str, str],
 
 def build_trial_account_plan(assignments, files_by_tanda, videos_per_day, days,
                              *, origin_by_file=None, existing_entries=()):
-    """Allocate each output once, preferring origins unused on that Trial day."""
+    """Allocate copies consecutively; existing_entries is ignored for TRIAL order."""
     max_mode = str(days).strip().upper() == "MAX"
     per_day = int(videos_per_day)
     per_account = None if max_mode else per_day * int(days)
     origin_by_file = origin_by_file or {}
     remaining = {
-        tanda: _interleave_trial_files(list(files_by_tanda.get(tanda, ())))
+        tanda: _consecutive_trial_files(files_by_tanda.get(tanda, ()), tanda, origin_by_file)
         for tanda in set(assignments.values()) if tanda
     }
     max_quotas = {}
@@ -140,7 +144,7 @@ def build_trial_account_plan(assignments, files_by_tanda, videos_per_day, days,
             base, extra = divmod(len(pool), len(users))
             for index, username in enumerate(users):
                 max_quotas[username] = base + (index < extra)
-    assigned, shortfalls, targets = {}, {}, {}
+    assigned, shortfalls = {}, {}
     stats = {
         tanda: {"accounts": [], "available": len(pool), "requested": 0, "assigned": 0, "shortfall": 0}
         for tanda, pool in remaining.items()
@@ -154,76 +158,16 @@ def build_trial_account_plan(assignments, files_by_tanda, videos_per_day, days,
         requested = max_quotas[username] if max_mode else per_account
         detail["requested"] += requested
         target = min(requested, len(pool))
-        targets[username] = target
         remaining[tanda] = pool[target:]
-        assigned[username] = []
+        assigned[username] = pool[:target]
         detail["assigned"] += target
         missing = requested - target
         if missing:
             shortfalls[username] = missing
             detail["shortfall"] += missing
 
-    def identity(tanda, filename):
-        verified = origin_by_file.get((tanda, filename))
-        if verified:
-            return ("verified", str(verified))
-        return ("tanda", tanda.casefold(), source_key_from_filename(filename).casefold())
-
-    usage = defaultdict(Counter)
-    owners = defaultdict(lambda: defaultdict(set))
-    selected = set(assigned)
-    for entry in existing_entries:
-        if entry.get("delivery_kind") != "trial" or entry.get("username") in selected:
-            continue
-        try:
-            day = int(entry["day"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if day < 1:
-            continue
-        filename = os.path.basename(str(entry.get("source_path") or ""))
-        tanda = str(entry.get("tanda") or "")
-        verified = entry.get("origin_identity")
-        key = ("verified", str(verified)) if verified else identity(tanda, filename)
-        usage[day][key] += 1
-        owners[day][key].add(str(entry.get("username") or ""))
-
-    available = {
-        tanda: _interleave_trial_files(list(files_by_tanda.get(tanda, ())))
-        for tanda in remaining
-    }
-    lifetime = defaultdict(Counter)
-    repeats = Counter()
-    max_days = max((target + per_day - 1) // per_day for target in targets.values()) if targets else 0
-    for day in range(1, max_days + 1):
-        for slot in range(per_day):
-            slot_index = (day - 1) * per_day + slot
-            due = [
-                (username, tanda) for username, tanda in assignments.items()
-                if username in targets and slot_index < targets[username]
-            ]
-            due.sort(key=lambda item: len({
-                identity(item[1], filename) for filename in available[item[1]]
-            }))
-            for username, tanda in due:
-                pool = available[tanda]
-                if not pool:
-                    continue
-                best_index = min(range(len(pool)), key=lambda index: (
-                    usage[day][identity(tanda, pool[index])],
-                    lifetime[username][identity(tanda, pool[index])],
-                    index,
-                ))
-                filename = pool.pop(best_index)
-                key = identity(tanda, filename)
-                if owners[day][key] - {username}:
-                    repeats[day] += 1
-                usage[day][key] += 1
-                owners[day][key].add(username)
-                lifetime[username][key] += 1
-                assigned[username].append(filename)
     return TrialPlan(assigned=assigned, shortfalls=shortfalls,
-                     tanda_stats=stats, daily_repeats=dict(repeats))
+                     tanda_stats=stats, daily_repeats={})
 
 
 def reused_trial_tanda_warnings(plan):

@@ -2677,7 +2677,7 @@ class InstagramAutoPro(ctk.CTk):
         # ── Header ──────────────────────────────────────────────────────
         PageHeader(
             f, "DISTRIBUCIÓN", "Logística",
-            "Reparto anti-colisión de tandas entre cuentas y días."
+            "Distribución de videos por tandas, cuentas y TRIALS."
         ).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 10))
 
         # ── TabView: Por Tandas / Por Cuentas ───────────────────────────
@@ -2810,7 +2810,7 @@ class InstagramAutoPro(ctk.CTk):
 
         caption_cfg = ctk.CTkFrame(parent, fg_color=BG_CARD2)
         caption_cfg.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 8))
-        ctk.CTkLabel(caption_cfg, text="Modo captions TRIAL (todas las cuentas):", text_color=TEXT_BODY).pack(side="left", padx=(12, 8), pady=10)
+        ctk.CTkLabel(caption_cfg, text="Modo captions TRIAL (Individual por cuenta):", text_color=TEXT_BODY).pack(side="left", padx=(12, 8), pady=10)
         self.trial_caption_mode = tk.StringVar(value="Individual")
         ctk.CTkComboBox(
             caption_cfg, values=["Individual", "General"], variable=self.trial_caption_mode,
@@ -2959,6 +2959,7 @@ class InstagramAutoPro(ctk.CTk):
             ctk.CTkLabel(panel, text="Escoge una tanda para esta cuenta.", text_color=TEXT_MUTED).pack(anchor="w", padx=10, pady=8)
             return
         captions = self.db.get_trial_source_captions(tanda)
+        account_id = self.trial_account_ids.get(username)
         folder = os.path.join(_BASE_DIR, "videos_finales", tanda)
         source_groups = group_trial_sources(self._trial_tanda_files(tanda))
         if not source_groups:
@@ -2974,7 +2975,18 @@ class InstagramAutoPro(ctk.CTk):
             ctk.CTkLabel(body, text=f"{tanda} / {source_key} ({len(copies)} copias)", text_color=TEXT_BODY).pack(anchor="w")
             editor = ctk.CTkTextbox(body, height=72, fg_color=BG_INPUT, border_color=BORDER, border_width=1)
             editor.pack(fill="x", pady=(2, 0))
-            editor.insert("1.0", captions.get(source_key, ""))
+            account_caption = (
+                self.db.get_trial_account_source_caption(account_id, tanda, source_key)
+                if account_id is not None else None
+            )
+            editor.insert("1.0", account_caption if account_caption is not None else captions.get(source_key, ""))
+            ctk.CTkLabel(
+                body,
+                text=("Caption de esta cuenta · vaciar y guardar para usar el global"
+                      if account_caption is not None else
+                      "Caption global del origen · editar para esta cuenta"),
+                text_color=TEXT_MUTED,
+            ).pack(anchor="w")
             self.trial_caption_editors[(username, tanda, source_key)] = editor
             self._trial_load_thumbnail(preview_label, os.path.join(folder, copies[0]))
 
@@ -2990,19 +3002,43 @@ class InstagramAutoPro(ctk.CTk):
             if getattr(self, "_trial_saving_silently", False):
                 return
             return messagebox.showwarning("Trials", "Selecciona una tanda para al menos una cuenta.")
+        global_captions = {}
         for key, editor in self.trial_caption_editors.items():
             if len(key) == 3:
-                _username, tanda, source_key = key
+                username, tanda, source_key = key
             else:
                 tanda, source_key = key
-            self.db.set_trial_source_caption(tanda, source_key, editor.get("1.0", "end-1c").strip())
+                username = None
+            caption = editor.get("1.0", "end-1c").strip()
+            if username is None:
+                self.db.set_trial_source_caption(tanda, source_key, caption)
+                continue
+            account_id = self.trial_account_ids.get(username)
+            if account_id is None:
+                raise ValueError(f"Cuenta TRIAL sin ID: {username}")
+            if tanda not in global_captions:
+                global_captions[tanda] = self.db.get_trial_source_captions(tanda)
+            global_text = global_captions[tanda].get(source_key, "")
+            self.db.set_trial_account_source_caption(
+                account_id, tanda, source_key,
+                "" if caption == global_text else caption,
+            )
         if not getattr(self, "_trial_saving_silently", False):
             messagebox.showinfo("Trials", "Captions Trial guardados.")
 
-    def _trial_missing_caption_sources(self, tanda_name):
+    def _trial_missing_caption_sources(self, tanda_name, username):
+        captions = self.db.get_trial_source_captions(tanda_name)
+        account_id = self.trial_account_ids.get(username)
+        if account_id is not None:
+            for source_key, _copies in group_trial_sources(self._trial_tanda_files(tanda_name)):
+                account_caption = self.db.get_trial_account_source_caption(
+                    account_id, tanda_name, source_key
+                )
+                if account_caption is not None:
+                    captions[source_key] = account_caption
         return missing_trial_caption_sources(
             self._trial_tanda_files(tanda_name),
-            self.db.get_trial_source_captions(tanda_name),
+            captions,
         )
 
     def _trial_calendar_root(self):
@@ -3022,8 +3058,8 @@ class InstagramAutoPro(ctk.CTk):
             finally:
                 self._trial_saving_silently = False
         missing = [
-            f"{t}/{s}" for t in {assignments[u] for u in assignments if mode == "individual"}
-            for s in self._trial_missing_caption_sources(t)
+            f"{u}/{t}/{s}" for u, t in assignments.items() if mode == "individual"
+            for s in self._trial_missing_caption_sources(t, u)
         ]
         if missing:
             return messagebox.showwarning("Captions Trial faltantes", ", ".join(missing))
@@ -3048,23 +3084,16 @@ class InstagramAutoPro(ctk.CTk):
         except ValueError:
             return messagebox.showwarning("Trials", "Dias invalidos.")
         try:
-            existing_entries = load_entries(manifest_path(_BASE_DIR), require_source=False)
+            # Validate the manifest before preview; its rows do not affect TRIAL order.
+            load_entries(manifest_path(_BASE_DIR), require_source=False)
             origin_by_file = {}
             for tanda, filenames in files_by_tanda.items():
                 for filename in filenames:
                     source_path = os.path.abspath(os.path.join(_BASE_DIR, "videos_finales", tanda, filename))
                     origin_by_file[(tanda, filename)] = self.db.get_video_transform_source_identity(source_path)
-            existing_trials = []
-            for entry in existing_entries:
-                if entry.get("delivery_kind") != "trial":
-                    continue
-                row = dict(entry)
-                if not row.get("origin_identity") and row.get("source_path"):
-                    row["origin_identity"] = self.db.get_video_transform_source_identity(row["source_path"])
-                existing_trials.append(row)
             plan = build_trial_account_plan(
                 assignments, files_by_tanda, per_day, days,
-                origin_by_file=origin_by_file, existing_entries=existing_trials,
+                origin_by_file=origin_by_file,
             )
             general_captions = assign_trial_general_captions(
                 plan, assignments, modes, pools, per_day,
@@ -3082,10 +3111,6 @@ class InstagramAutoPro(ctk.CTk):
                 if modes[user] == "general":
                     line += f" | Caption: {general_captions[(user, filename)].replace(chr(10), ' ⏎ ')}"
                 lines.append(line)
-        total_repeats = sum((plan.daily_repeats or {}).values())
-        lines.append(f"Orígenes repetidos en el mismo día: {total_repeats}")
-        for day, count in sorted((plan.daily_repeats or {}).items()):
-            lines.append(f"  Día {day}: {count} repetición(es)")
         result = "\n".join(lines)
         if preview_only:
             self.trial_dist_result.delete("1.0", "end"); self.trial_dist_result.insert("1.0", result); return
@@ -3097,8 +3122,7 @@ class InstagramAutoPro(ctk.CTk):
                 "No se calendariza incompleto. Revisa VISTA PREVIA y asigna una tanda con videos suficientes por cuenta.",
             )
         if not messagebox.askyesno("Distribuir Trials", "\n\n".join(warnings + [
-            f"Calendarizar {sum(map(len, plan.assigned.values()))} videos sin reutilizar metadata?",
-            f"Orígenes repetidos en el mismo día: {total_repeats}",
+            f"Calendarizar {sum(map(len, plan.assigned.values()))} videos Trial?",
         ])):
             return
         ids = {r["username"]: r["id"] for r in self.db.get_trials_active_accounts()}
@@ -6253,6 +6277,7 @@ class InstagramAutoPro(ctk.CTk):
         active_accounts = self.db.get_trials_active_accounts()
         trial_tandas = self.db.get_trial_tandas()
         self.trial_account_vars = {}
+        self.trial_account_ids = {row["username"]: row.get("id") for row in active_accounts}
         self.trial_account_panel_frames = {}
         self.trial_panel_buttons = {}
         self.trial_expanded_accounts = set()
