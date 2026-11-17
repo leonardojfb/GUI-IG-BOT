@@ -2805,6 +2805,16 @@ class InstagramAutoPro(ctk.CTk):
         self.trial_dist_days = ctk.CTkEntry(cfg, width=70, fg_color=BG_INPUT, border_color=BORDER)
         self.trial_dist_days.insert(0, "MAX")
         self.trial_dist_days.pack(side="left", padx=8)
+        ctk.CTkLabel(cfg, text="Orden:", text_color=TEXT_MUTED).pack(side="left", padx=(12, 0))
+        self.trial_order_mode = tk.StringVar(value="Intercalado")
+        ctk.CTkComboBox(
+            cfg,
+            values=["Intercalado", "Agrupado por ID"],
+            variable=self.trial_order_mode,
+            fg_color=BG_INPUT,
+            border_color=BORDER,
+            width=170,
+        ).pack(side="left", padx=(8, 20))
         self.trial_accounts_lbl = ctk.CTkLabel(cfg, text="0 cuentas con TRIALS ACTIVOS", text_color=TEXT_MUTED)
         self.trial_accounts_lbl.pack(side="right")
 
@@ -3083,6 +3093,9 @@ class InstagramAutoPro(ctk.CTk):
                 raise ValueError
         except ValueError:
             return messagebox.showwarning("Trials", "Dias invalidos.")
+        order_selector = getattr(self, "trial_order_mode", None)
+        order_label = order_selector.get().strip() if order_selector is not None else "Intercalado"
+        order_mode = "grouped" if order_label == "Agrupado por ID" else "interleaved"
         try:
             # Validate the manifest before preview; its rows do not affect TRIAL order.
             load_entries(manifest_path(_BASE_DIR), require_source=False)
@@ -3094,6 +3107,7 @@ class InstagramAutoPro(ctk.CTk):
             plan = build_trial_account_plan(
                 assignments, files_by_tanda, per_day, days,
                 origin_by_file=origin_by_file,
+                order_mode=order_mode,
             )
             general_captions = assign_trial_general_captions(
                 plan, assignments, modes, pools, per_day,
@@ -3101,7 +3115,7 @@ class InstagramAutoPro(ctk.CTk):
         except (OSError, ValueError, TypeError) as error:
             return messagebox.showerror("Trials", f"No se pudo leer la ocupación TRIAL: {error}")
         warnings = reused_trial_tanda_warnings(plan)
-        lines = warnings + [
+        lines = [f"Orden: {order_label}"] + warnings + [
             f"@{user}: {len(files)} videos" + (f" (faltan {plan.shortfalls[user]})" if user in plan.shortfalls else "")
             for user, files in plan.assigned.items()
         ]
