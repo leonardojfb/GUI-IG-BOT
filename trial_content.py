@@ -37,8 +37,10 @@ def group_trial_sources(filenames: list[str]) -> list[tuple[str, list[str]]]:
     return list(groups.items())
 
 
-def _interleave_trial_files(filenames, tanda, origin_by_file):
-    """Send one copy per origin before the next round of copies."""
+def _order_trial_files(filenames, tanda, origin_by_file, order_mode):
+    """Order copies by origin rounds or as consecutive origin groups."""
+    if order_mode not in {"interleaved", "grouped"}:
+        raise ValueError(f"Modo de orden TRIAL desconocido: {order_mode}")
     groups = {}
     for filename in sorted(filenames):
         verified = origin_by_file.get((tanda, filename))
@@ -52,6 +54,8 @@ def _interleave_trial_files(filenames, tanda, origin_by_file):
         return (int(match.group(1)) if match else 0, filename.casefold())
 
     copies_by_origin = [sorted(copies, key=copy_order) for copies in groups.values()]
+    if order_mode == "grouped":
+        return [filename for copies in copies_by_origin for filename in copies]
     return [
         copies[copy_index]
         for copy_index in range(max(map(len, copies_by_origin), default=0))
@@ -132,14 +136,17 @@ def assign_trial_general_captions(plan: TrialPlan, assignments: dict[str, str],
 
 
 def build_trial_account_plan(assignments, files_by_tanda, videos_per_day, days,
-                             *, origin_by_file=None, existing_entries=()):
-    """Allocate copy rounds across origins; existing_entries is ignored for TRIAL order."""
+                             *, origin_by_file=None, existing_entries=(),
+                             order_mode="interleaved"):
+    """Allocate copies in the requested origin order; existing entries do not reorder them."""
     max_mode = str(days).strip().upper() == "MAX"
     per_day = int(videos_per_day)
     per_account = None if max_mode else per_day * int(days)
     origin_by_file = origin_by_file or {}
     remaining = {
-        tanda: _interleave_trial_files(files_by_tanda.get(tanda, ()), tanda, origin_by_file)
+        tanda: _order_trial_files(
+            files_by_tanda.get(tanda, ()), tanda, origin_by_file, order_mode
+        )
         for tanda in set(assignments.values()) if tanda
     }
     max_quotas = {}

@@ -108,6 +108,67 @@ def test_trial_plan_interleaves_origins_before_repeating_a_copy():
     ]
 
 
+def test_trial_plan_groups_every_copy_of_an_origin_before_the_next_origin():
+    plan = build_trial_account_plan(
+        {"eve": "T1"},
+        {
+            "T1": [
+                "vid1__c03.mp4",
+                "vid2__c02.mp4",
+                "vid1__c01.mp4",
+                "vid2__c03.mp4",
+                "vid1__c02.mp4",
+                "vid2__c01.mp4",
+            ],
+        },
+        videos_per_day=6,
+        days=1,
+        order_mode="grouped",
+    )
+    assert plan.assigned["eve"] == [
+        "vid1__c01.mp4",
+        "vid1__c02.mp4",
+        "vid1__c03.mp4",
+        "vid2__c01.mp4",
+        "vid2__c02.mp4",
+        "vid2__c03.mp4",
+    ]
+
+
+def test_grouped_trial_order_uses_verified_origin_across_different_names():
+    files = ["a__c01.mp4", "b__c01.mp4", "z__c02.mp4"]
+    plan = build_trial_account_plan(
+        {"eve": "T1"},
+        {"T1": files},
+        videos_per_day=3,
+        days=1,
+        origin_by_file={
+            ("T1", "a__c01.mp4"): "shared",
+            ("T1", "b__c01.mp4"): "other",
+            ("T1", "z__c02.mp4"): "shared",
+        },
+        order_mode="grouped",
+    )
+    assert plan.assigned["eve"] == ["a__c01.mp4", "z__c02.mp4", "b__c01.mp4"]
+
+
+def test_grouped_trial_order_preserves_shared_tanda_quotas_without_duplicates():
+    files = [f"vid1__c{i:02d}.mp4" for i in range(1, 4)] + [
+        f"vid2__c{i:02d}.mp4" for i in range(1, 4)
+    ]
+    plan = build_trial_account_plan(
+        {"eve": "T1", "luna": "T1"},
+        {"T1": files},
+        videos_per_day=3,
+        days="MAX",
+        order_mode="grouped",
+    )
+    assert [len(plan.assigned[user]) for user in ("eve", "luna")] == [3, 3]
+    assert plan.assigned["eve"] == files[:3]
+    assert plan.assigned["luna"] == files[3:]
+    assert len(set(plan.assigned["eve"] + plan.assigned["luna"])) == len(files)
+
+
 def test_trial_plan_does_not_delay_copies_used_by_another_account():
     files = [f"a__c{i:02d}.mp4" for i in range(1, 4)] + [
         f"b__c{i:02d}.mp4" for i in range(1, 4)
