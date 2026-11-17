@@ -221,4 +221,3 @@ Expected: compilation succeeds, no whitespace errors, and only intentional commi
 - [ ] **Step 3: Review the final diff against the specification**
 
 Confirm the default is interleaved, grouped mode is explicit, preview reports the choice, no physical output is duplicated, and normal distribution/Telegram code is untouched.
-

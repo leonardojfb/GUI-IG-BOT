@@ -63,4 +63,3 @@ Las pruebas deben demostrar:
 5. La GUI crea un solo selector global con `Intercalado` predeterminado.
 6. Vista previa y distribución pasan el mismo modo al planificador y muestran el modo elegido.
 7. Las pruebas existentes de TRIAL, captions y Logística continúan pasando.
-
