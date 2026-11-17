@@ -1003,7 +1003,10 @@ def _send_video_to_topic(
                 continue
             if "thread not found" in r.text:
                 print(f"⚠️ Topic expirado al enviar video @{username}, recreando...")
-                t_id = get_or_create_topic(chat_id, username, tag, topics_state, force_recreate=True)
+                t_id = get_or_create_topic(
+                    chat_id, username, tag, topics_state,
+                    force_recreate=True, delivery_kind=delivery_kind,
+                )
                 if not t_id:
                     print(f"❌ No se pudo recrear topic para @{username}.")
                     return False, None
@@ -1432,6 +1435,14 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                 if controller.stopped:
                     aborted = True
                     break
+            with state_lock:
+                current_topic_id = _topic_id_from_state_value(
+                    topics_state.get(topic_state_key(
+                        job["chat_id"], job["username"], job["delivery_kind"]
+                    ))
+                )
+                if current_topic_id:
+                    job["topic_id"] = current_topic_id
             print(f"📤 Enviando a @{job['username']} [{job['tag']}] (Día {job['dia_str']} - {job['hora_et']} ET)...")
             try:
                 topic_id = send_metadata(job)

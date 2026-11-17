@@ -6,6 +6,7 @@ import sqlite3
 import os
 import re
 import json
+from datetime import datetime
 from collections import defaultdict
 from trial_content import source_key_from_filename
 from social_publishing import normalize_story_link_base, resolve_story_link
@@ -528,6 +529,87 @@ class DatabaseManager:
             cur.execute("DELETE FROM trial_tandas WHERE tanda_name = ?", (name,))
         self.conn.commit()
         return bool(cur.rowcount)
+
+    def preview_completed_forge_trial_conversion(self, name, videos_root):
+        """Validate one existing Forge folder before offering TRIAL conversion."""
+        name = str(name or "").strip()
+        if not name or os.path.basename(name) != name or name in (".", ".."):
+            raise ValueError("Nombre de tanda Forge inválido.")
+        tanda = self.get_tanda_by_name(name)
+        if not tanda or tanda["p1_folder"] != name or tanda["p2_folder"] != name:
+            raise ValueError("La tanda no está registrada como tanda Forge.")
+        if self.is_trial_tanda(name):
+            raise ValueError("La tanda ya está marcada como TRIAL.")
+        folder = os.path.join(os.fspath(videos_root), name)
+        if not os.path.isdir(folder):
+            raise ValueError("No existe la carpeta de la tanda Forge.")
+        files = {
+            filename for filename in os.listdir(folder)
+            if filename.lower().endswith((".mp4", ".mov"))
+            and os.path.isfile(os.path.join(folder, filename))
+        }
+        if not files:
+            raise ValueError("La tanda Forge no contiene videos.")
+        registered = {
+            row[0] for row in self.conn.execute(
+                "SELECT output_name FROM forge_video_registry WHERE tanda_name=?", (name,)
+            )
+        }
+        if not files.issubset(registered):
+            raise ValueError("La tanda contiene videos sin registrar en Forge.")
+        status_path = os.path.join(folder, "forge_batch_status.json")
+        if os.path.isfile(status_path):
+            try:
+                with open(status_path, encoding="utf-8") as stream:
+                    status = json.load(stream)
+                validated = status["validated"]
+                complete = (
+                    status.get("state") == "complete"
+                    and status.get("pending") == []
+                    and isinstance(validated, list)
+                    and len(validated) == status.get("expected_count")
+                    and len(validated) == len(set(validated))
+                    and set(validated) == files
+                )
+            except (OSError, ValueError, KeyError, TypeError):
+                complete = False
+            if not complete:
+                raise ValueError("La tanda Forge está incompleta o su estado no es válido.")
+        return {"tanda_name": name, "video_count": len(files), "folder": folder,
+                "filenames": files, "has_completion_status": os.path.isfile(status_path)}
+
+    def convert_completed_forge_tanda_to_trial(self, name, videos_root, backup_dir):
+        """Back up SQLite, then mark only current Forge outputs as TRIAL."""
+        preview = self.preview_completed_forge_trial_conversion(name, videos_root)
+        current_paths = {
+            os.path.normcase(os.path.abspath(os.path.join(preview["folder"], filename)))
+            for filename in preview["filenames"]
+        }
+        log_ids = [
+            row["id"] for row in self.conn.execute(
+                "SELECT id, output_path FROM video_transform_logs "
+                "WHERE tanda_name=? AND process_kind='forge'", (name,)
+            )
+            if os.path.normcase(os.path.abspath(row["output_path"])) in current_paths
+        ]
+        os.makedirs(backup_dir, exist_ok=True)
+        backup_path = os.path.join(
+            os.fspath(backup_dir),
+            f"organizador-before-forge-trial-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.db",
+        )
+        with sqlite3.connect(backup_path) as backup:
+            self.conn.backup(backup)
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO trial_tandas (tanda_name) VALUES (?)", (name,)
+            )
+            if log_ids:
+                self.conn.executemany(
+                    "UPDATE video_transform_logs SET process_kind='forge_trial' WHERE id=?",
+                    [(log_id,) for log_id in log_ids],
+                )
+        return {"tanda_name": name, "video_count": preview["video_count"],
+                "converted_logs": len(log_ids), "backup_path": backup_path}
 
     def get_trial_tandas(self) -> list[str]:
         cur = self.conn.cursor()

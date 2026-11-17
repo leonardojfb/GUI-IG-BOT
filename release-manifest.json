@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.55",
+    "version":  "1.0.56",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.55",
-    "asset_name":  "MetodoIG-v1.0.55.zip",
-    "sha256":  "fb82b690d62c1cb3d70367310aa89037ce7e1391ec45c950f5fa9be990f5aa7a",
-    "notes":  "TRIAL: agrega un selector de orden para alternar por ronda o agrupar todas las copias por ID; Intercalado sigue siendo el modo predeterminado.",
+    "github_release_tag":  "v1.0.56",
+    "asset_name":  "MetodoIG-v1.0.56.zip",
+    "sha256":  "966f01b38b9d07a27df73526b8c22a27226781e96c968ceb990c88206573b437",
+    "notes":  "Telegram: reutiliza el topic vigente tras un thread obsoleto. Forge: permite convertir tandas completadas a TRIAL para futuras distribuciones.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",

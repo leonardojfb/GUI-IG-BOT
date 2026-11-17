@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 import json
+import sqlite3
 import shutil
 from pathlib import Path
 from uuid import uuid4
@@ -5799,13 +5800,84 @@ class InstagramAutoPro(ctk.CTk):
                                           text_color=TEXT_MUTED)
         self.forge_pb_lbl.grid(row=1, column=0, sticky="w")
 
+        convert_bar = ctk.CTkFrame(scroll, fg_color=BG_CARD, corner_radius=CARD_RADIUS)
+        convert_bar.grid(row=4, column=0, sticky="ew", padx=24, pady=(0, 14))
+        ctk.CTkLabel(convert_bar, text="Convertir tanda Forge completada a TRIAL",
+                     text_color=TEXT_BODY).pack(side="left", padx=(18, 10), pady=12)
+        self.forge_convert_tanda_var = tk.StringVar(value="")
+        self.forge_convert_combo = ctk.CTkComboBox(
+            convert_bar, values=[""], variable=self.forge_convert_tanda_var,
+            fg_color=BG_INPUT, border_color=BORDER, width=240,
+        )
+        self.forge_convert_combo.pack(side="left", padx=(0, 10), pady=12)
+        self.forge_convert_button = GhostButton(
+            convert_bar, text="Marcar como TRIAL",
+            command=self.forge_convert_completed_to_trial,
+        )
+        self.forge_convert_button.pack(side="left", padx=(0, 18), pady=12)
+        self._refresh_forge_convert_tandas()
+
         self._build_transform_log_panel(scroll).grid(
-            row=4, column=0, sticky="nsew", padx=24, pady=(0, 20)
+            row=5, column=0, sticky="nsew", padx=24, pady=(0, 20)
         )
 
         # Estado inicial "Default": ocultar toggles manuales y slider de Custom.
         self._forge_on_efectos_change("Default")
         self._forge_on_fuerza_change("Default")
+
+    def _refresh_forge_convert_tandas(self):
+        root = Path(_BASE_DIR) / "videos_finales"
+        choices = []
+        if root.is_dir():
+            for folder in root.iterdir():
+                if not folder.is_dir():
+                    continue
+                try:
+                    self.db.preview_completed_forge_trial_conversion(folder.name, root)
+                except (OSError, ValueError, sqlite3.Error):
+                    continue
+                choices.append(folder.name)
+        choices.sort(key=str.casefold)
+        previous = self.forge_convert_tanda_var.get()
+        self.forge_convert_combo.configure(values=choices or [""])
+        self.forge_convert_tanda_var.set(previous if previous in choices else (choices[0] if choices else ""))
+        self.forge_convert_button.configure(state="normal" if choices else "disabled")
+
+    def forge_convert_completed_to_trial(self):
+        name = self.forge_convert_tanda_var.get().strip()
+        root = Path(_BASE_DIR) / "videos_finales"
+        try:
+            preview = self.db.preview_completed_forge_trial_conversion(name, root)
+        except (OSError, ValueError, sqlite3.Error) as error:
+            messagebox.showerror("Convertir tanda Forge", str(error))
+            self._refresh_forge_convert_tandas()
+            return
+        warning = (
+            "Esta tanda antigua no tiene estado de completitud; confirma que Forge terminó.\n\n"
+            if not preview.get("has_completion_status") else ""
+        )
+        prompt = (
+            f"Tanda: {name}\nVideos: {preview['video_count']}\n\n{warning}"
+            "Se usará como TRIAL en futuras distribuciones. "
+            "Las calendarizaciones existentes no cambian. ¿Continuar?"
+        )
+        if not messagebox.askyesno("Convertir tanda Forge a TRIAL", prompt):
+            return
+        try:
+            result = self.db.convert_completed_forge_tanda_to_trial(
+                name, root, Path(_BASE_DIR) / "backups"
+            )
+        except (OSError, ValueError, sqlite3.Error) as error:
+            messagebox.showerror("Convertir tanda Forge", str(error))
+            return
+        self._refresh_forge_convert_tandas()
+        if hasattr(self, "trial_account_scroll"):
+            self._trial_refresh_account_rows()
+        messagebox.showinfo(
+            "Tanda TRIAL lista",
+            f"{name}: {result['video_count']} videos disponibles para futuras distribuciones TRIAL.\n"
+            f"Respaldo de base: {result['backup_path']}",
+        )
 
     def _forge_on_efectos_change(self, level: str) -> None:
         self.forge_efectos_var.set(level)
@@ -6273,6 +6345,7 @@ class InstagramAutoPro(ctk.CTk):
             elif success:
                 self.forge_pb_lbl.configure(text="✅ Completado", text_color=SUCCESS)
                 messagebox.showinfo("✅ Forge completado", result)
+                self._refresh_forge_convert_tandas()
                 self.reload_dist_lists()
                 self.refresh_dashboard()
             else:
