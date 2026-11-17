@@ -108,6 +108,67 @@ def test_trial_plan_interleaves_origins_before_repeating_a_copy():
     ]
 
 
+def test_trial_plan_groups_every_copy_of_an_origin_before_the_next_origin():
+    plan = build_trial_account_plan(
+        {"eve": "T1"},
+        {
+            "T1": [
+                "vid1__c03.mp4",
+                "vid2__c02.mp4",
+                "vid1__c01.mp4",
+                "vid2__c03.mp4",
+                "vid1__c02.mp4",
+                "vid2__c01.mp4",
+            ],
+        },
+        videos_per_day=6,
+        days=1,
+        order_mode="grouped",
+    )
+    assert plan.assigned["eve"] == [
+        "vid1__c01.mp4",
+        "vid1__c02.mp4",
+        "vid1__c03.mp4",
+        "vid2__c01.mp4",
+        "vid2__c02.mp4",
+        "vid2__c03.mp4",
+    ]
+
+
+def test_grouped_trial_order_uses_verified_origin_across_different_names():
+    files = ["a__c01.mp4", "b__c01.mp4", "z__c02.mp4"]
+    plan = build_trial_account_plan(
+        {"eve": "T1"},
+        {"T1": files},
+        videos_per_day=3,
+        days=1,
+        origin_by_file={
+            ("T1", "a__c01.mp4"): "shared",
+            ("T1", "b__c01.mp4"): "other",
+            ("T1", "z__c02.mp4"): "shared",
+        },
+        order_mode="grouped",
+    )
+    assert plan.assigned["eve"] == ["a__c01.mp4", "z__c02.mp4", "b__c01.mp4"]
+
+
+def test_grouped_trial_order_preserves_shared_tanda_quotas_without_duplicates():
+    files = [f"vid1__c{i:02d}.mp4" for i in range(1, 4)] + [
+        f"vid2__c{i:02d}.mp4" for i in range(1, 4)
+    ]
+    plan = build_trial_account_plan(
+        {"eve": "T1", "luna": "T1"},
+        {"T1": files},
+        videos_per_day=3,
+        days="MAX",
+        order_mode="grouped",
+    )
+    assert [len(plan.assigned[user]) for user in ("eve", "luna")] == [3, 3]
+    assert plan.assigned["eve"] == files[:3]
+    assert plan.assigned["luna"] == files[3:]
+    assert len(set(plan.assigned["eve"] + plan.assigned["luna"])) == len(files)
+
+
 def test_trial_plan_does_not_delay_copies_used_by_another_account():
     files = [f"a__c{i:02d}.mp4" for i in range(1, 4)] + [
         f"b__c{i:02d}.mp4" for i in range(1, 4)
@@ -295,6 +356,50 @@ def test_trial_preview_ignores_other_account_manifest_occupancy(tmp_path, monkey
     }
 
 
+def test_grouped_preview_lists_each_origin_copies_consecutively(tmp_path, monkeypatch):
+    import gui_premium_v7
+
+    monkeypatch.setattr(gui_premium_v7, "_BASE_DIR", str(tmp_path))
+    (tmp_path / "calendar_manifest.json").write_text(
+        json.dumps({"version": 1, "entries": []}), encoding="utf-8"
+    )
+    files = [
+        "vid1__c01.mp4",
+        "vid1__c02.mp4",
+        "vid2__c01.mp4",
+        "vid2__c02.mp4",
+    ]
+
+    class Textbox:
+        value = ""
+
+        def delete(self, *_args):
+            self.value = ""
+
+        def insert(self, *_args):
+            self.value = _args[-1]
+
+    textbox = Textbox()
+    fake = SimpleNamespace(
+        _trial_selected_assignments=lambda: {"eve": "T1"},
+        _save_trial_captions=lambda: None,
+        _trial_missing_caption_sources=lambda _tanda, _username: [],
+        trial_caption_mode=SimpleNamespace(get=lambda: "Individual"),
+        trial_order_mode=SimpleNamespace(get=lambda: "Agrupado por ID"),
+        trial_dist_vpd=SimpleNamespace(get=lambda: "4"),
+        trial_dist_days=SimpleNamespace(get=lambda: "1"),
+        _trial_tanda_files=lambda _tanda: files,
+        db=SimpleNamespace(get_video_transform_source_identity=lambda _path: None),
+        trial_dist_result=textbox,
+    )
+
+    gui_premium_v7.InstagramAutoPro._trial_dist_run_per_account(fake, True)
+
+    assert "Orden: Agrupado por ID" in textbox.value
+    positions = [textbox.value.index(filename) for filename in files]
+    assert positions == sorted(positions)
+
+
 def test_trial_preview_stops_on_invalid_manifest(tmp_path, monkeypatch):
     import gui_premium_v7
 
@@ -445,7 +550,7 @@ def test_trial_general_missing_txt_blocks_before_manifest_write(tmp_path, monkey
     assert not (tmp_path / "calendar_manifest.json").exists()
 
 
-def test_trial_caption_mode_and_txt_are_global_controls(monkeypatch):
+def test_trial_caption_mode_txt_and_order_are_global_controls(monkeypatch):
     import gui_premium_v7
 
     widgets = []
@@ -515,8 +620,14 @@ def test_trial_caption_mode_and_txt_are_global_controls(monkeypatch):
     gui_premium_v7.InstagramAutoPro._build_dist_trials_tab(fake, Widget())
     gui_premium_v7.InstagramAutoPro._trial_refresh_account_rows(fake)
     assert fake.trial_caption_mode.get() == "Individual"
+    assert fake.trial_order_mode.get() == "Intercalado"
     assert sum(w.kwargs.get("values") == ["Individual", "General"] for w in widgets) == 1
+    assert sum(
+        w.kwargs.get("values") == ["Intercalado", "Agrupado por ID"]
+        for w in widgets
+    ) == 1
     assert any("Modo captions TRIAL" in w.kwargs.get("text", "") for w in widgets)
+    assert any(w.kwargs.get("text") == "Orden:" for w in widgets)
     assert any("Elegir TXT" in w.kwargs.get("text", "") for w in widgets)
     assert not hasattr(fake, "trial_account_modes")
 

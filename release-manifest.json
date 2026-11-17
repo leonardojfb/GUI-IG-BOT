@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.54",
+    "version":  "1.0.55",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.54",
-    "asset_name":  "MetodoIG-v1.0.54.zip",
-    "sha256":  "f31b2c5ce2fdf3a9b61fdffc3845a7ae0aa1009b8e1f5babae2d2e956933905d",
-    "notes":  "TRIAL: alterna los origenes por ronda de copia (1, 2, 3, 4, 1, 2...) y conserva captions individuales por cuenta.",
+    "github_release_tag":  "v1.0.55",
+    "asset_name":  "MetodoIG-v1.0.55.zip",
+    "sha256":  "fb82b690d62c1cb3d70367310aa89037ce7e1391ec45c950f5fa9be990f5aa7a",
+    "notes":  "TRIAL: agrega un selector de orden para alternar por ronda o agrupar todas las copias por ID; Intercalado sigue siendo el modo predeterminado.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",
