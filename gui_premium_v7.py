@@ -3937,7 +3937,7 @@ class InstagramAutoPro(ctk.CTk):
         ctrl_card = Card(f, title="Cuentas programadas")
         ctrl_card.grid(row=1, column=0, sticky="nsew", padx=(24, 12), pady=10)
         ctrl = ctrl_card.body
-        ctrl.grid_rowconfigure(8, weight=1)
+        ctrl.grid_rowconfigure(9, weight=1)
         ctrl.grid_columnconfigure(0, weight=1)
 
         # Fila 0: título + botón cargar
@@ -4002,7 +4002,18 @@ class InstagramAutoPro(ctk.CTk):
         self._tg_reset_topics_switch = reset_topics_toggle.switch
         reset_topics_toggle.grid(row=5, column=0, sticky="ew", pady=(4, 4))
 
-        # Fila 6: permitir reenvíos de videos marcados como Publicado.
+        # Fila 6: consulta opcional de publicaciones en Airtable.
+        self._tg_use_airtable_publications = tk.BooleanVar(value=False)
+        airtable_toggle = ToggleRow(
+            ctrl,
+            "Consultar publicados en Airtable (opcional)",
+            variable=self._tg_use_airtable_publications,
+            fg_color=BG_CARD2,
+        )
+        self._tg_use_airtable_switch = airtable_toggle.switch
+        airtable_toggle.grid(row=6, column=0, sticky="ew", pady=(4, 4))
+
+        # Fila 7: permitir reenvíos de videos marcados como Publicado.
         self._tg_allow_published_repeats = tk.BooleanVar(value=False)
         repeat_published_toggle = ToggleRow(
             ctrl,
@@ -4011,7 +4022,9 @@ class InstagramAutoPro(ctk.CTk):
             fg_color=BG_CARD2,
         )
         self._tg_allow_published_repeats_switch = repeat_published_toggle.switch
-        repeat_published_toggle.grid(row=6, column=0, sticky="ew", pady=(4, 10))
+        repeat_published_toggle.grid(row=7, column=0, sticky="ew", pady=(4, 10))
+        self._tg_allow_published_repeats_switch.configure(state="disabled")
+        self._tg_use_airtable_switch.configure(command=self._sync_tg_airtable_toggle)
 
         self._tg_allow_delivered_repeats = tk.BooleanVar(value=False)
         repeat_delivered_toggle = ToggleRow(
@@ -4021,20 +4034,20 @@ class InstagramAutoPro(ctk.CTk):
             fg_color=BG_CARD2,
         )
         self._tg_allow_delivered_repeats_switch = repeat_delivered_toggle.switch
-        repeat_delivered_toggle.grid(row=7, column=0, sticky="ew", pady=(4, 10))
+        repeat_delivered_toggle.grid(row=8, column=0, sticky="ew", pady=(4, 10))
 
-        # Fila 7: listbox con selección múltiple
+        # Fila 9: listbox con selección múltiple
         self.list_tg = tk.Listbox(ctrl, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
                                   selectbackground=self.themed(ACCENT),
                                   selectforeground=self.themed(ACCENT_TEXT),
                                   selectmode=tk.EXTENDED,
                                   borderwidth=0, highlightthickness=1,
                                   highlightbackground=self.themed(BORDER), font=FONT_BODY)
-        self.list_tg.grid(row=8, column=0, sticky="nsew", pady=(0, 10))
+        self.list_tg.grid(row=9, column=0, sticky="nsew", pady=(0, 10))
 
         # Controles inferiores
         bot_ctrl = ctk.CTkFrame(ctrl, fg_color="transparent")
-        bot_ctrl.grid(row=9, column=0, sticky="ew", pady=(10, 20))
+        bot_ctrl.grid(row=10, column=0, sticky="ew", pady=(10, 20))
         
         ctk.CTkLabel(bot_ctrl, text="Fecha Inicio (YYYY-MM-DD):", text_color=TEXT_MUTED).pack(side="left")
         self.e_date_tg = ctk.CTkEntry(bot_ctrl, fg_color=BG_INPUT, border_color=BORDER, width=120)
@@ -4042,7 +4055,7 @@ class InstagramAutoPro(ctk.CTk):
         self.e_date_tg.insert(0, datetime.now().strftime("%Y-%m-%d"))
 
         btn_row = ctk.CTkFrame(ctrl, fg_color="transparent")
-        btn_row.grid(row=10, column=0, sticky="ew", pady=(0, 0))
+        btn_row.grid(row=11, column=0, sticky="ew", pady=(0, 0))
         
         self.btn_start_tg = PrimaryButton(btn_row, text="▶ INICIAR", fg_color=TELEGRAM,
                                           text_color=TEXT_ON_DANGER, command=self.start_tg_bot)
@@ -4057,7 +4070,7 @@ class InstagramAutoPro(ctk.CTk):
         self.btn_stop_tg.pack(side="left", expand=True, padx=(5, 0))
 
         cleanup_row = ctk.CTkFrame(ctrl, fg_color="transparent")
-        cleanup_row.grid(row=11, column=0, sticky="ew", pady=(8, 0))
+        cleanup_row.grid(row=12, column=0, sticky="ew", pady=(8, 0))
         self.btn_delete_calendar_tg = DangerButton(
             cleanup_row,
             text="Borrar calendarizaciones",
@@ -4323,6 +4336,14 @@ class InstagramAutoPro(ctk.CTk):
         )
         self.load_organized_accounts()
 
+    def _sync_tg_airtable_toggle(self):
+        enabled = self._tg_use_airtable_publications.get()
+        if not enabled:
+            self._tg_allow_published_repeats.set(False)
+        self._tg_allow_published_repeats_switch.configure(
+            state="normal" if enabled else "disabled"
+        )
+
     def start_tg_bot(self):
         date_str = self.e_date_tg.get().strip()
 
@@ -4345,6 +4366,8 @@ class InstagramAutoPro(ctk.CTk):
         reset_topics = bool(reset_topics_var.get()) if reset_topics_var is not None else False
         express_mode_var = getattr(self, "_tg_express_mode", None)
         express_mode = bool(express_mode_var.get()) if express_mode_var is not None else False
+        airtable_var = getattr(self, "_tg_use_airtable_publications", None)
+        use_airtable_publications = bool(airtable_var.get()) if airtable_var is not None else False
         repeat_published_var = getattr(self, "_tg_allow_published_repeats", None)
         allow_published_repeats = bool(repeat_published_var.get()) if repeat_published_var is not None else False
         repeat_delivered_var = getattr(self, "_tg_allow_delivered_repeats", None)
@@ -4372,6 +4395,8 @@ class InstagramAutoPro(ctk.CTk):
         self.bot_log("📝 Captions: se resuelven por tanda desde Logística.", "INFO")
         if express_mode:
             self.bot_log("Envío express activado: se omite el mensaje de metadata.", "WARNING")
+        if not use_airtable_publications:
+            self.bot_log("Airtable desactivado: Publicado será solo una marca visual en Telegram.", "WARNING")
         if allow_published_repeats:
             self.bot_log("Reenvío de videos marcados como Publicado activado para estas cuentas.", "WARNING")
         if allow_delivered_repeats:
@@ -4385,10 +4410,12 @@ class InstagramAutoPro(ctk.CTk):
             express_mode=express_mode,
             allow_published_repeats=allow_published_repeats,
             allow_delivered_repeats=allow_delivered_repeats,
+            use_airtable_publications=use_airtable_publications,
             db_manager=self.db,
         )
         self._tg_express_switch.configure(state="disabled")
         self._tg_reset_topics_switch.configure(state="disabled")
+        self._tg_use_airtable_switch.configure(state="disabled")
         self._tg_allow_published_repeats_switch.configure(state="disabled")
         self._tg_allow_delivered_repeats_switch.configure(state="disabled")
         
@@ -4423,7 +4450,8 @@ class InstagramAutoPro(ctk.CTk):
             builtins.print = self._original_print
             self._tg_express_switch.configure(state="normal")
             self._tg_reset_topics_switch.configure(state="normal")
-            self._tg_allow_published_repeats_switch.configure(state="normal")
+            self._tg_use_airtable_switch.configure(state="normal")
+            self._sync_tg_airtable_toggle()
             self._tg_allow_delivered_repeats_switch.configure(state="normal")
             self.btn_start_tg.configure(state="normal")
             self.btn_pause_tg.configure(state="disabled")

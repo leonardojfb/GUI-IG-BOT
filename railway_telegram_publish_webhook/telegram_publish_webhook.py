@@ -17,6 +17,7 @@ from pathlib import Path
 
 PENDING_CALLBACK = "pub"
 PUBLISHED_CALLBACK = "published"
+VISUAL_ONLY_CALLBACK = "trial"
 ORIGIN_TOKEN_RE = r"[A-Za-z0-9_-]{16}"
 CALLBACK_PATH = "/telegram/callback"
 ALLOWED_UPDATES = [
@@ -124,7 +125,7 @@ def published_markup(reply_markup: dict | None) -> dict | None:
     for row in (reply_markup or {}).get("inline_keyboard") or []:
         kept = [
             button for button in row
-            if button.get("callback_data") not in {PENDING_CALLBACK, PUBLISHED_CALLBACK}
+            if button.get("callback_data") not in {PENDING_CALLBACK, PUBLISHED_CALLBACK, VISUAL_ONLY_CALLBACK}
             and not str(button.get("callback_data") or "").startswith(f"{PENDING_CALLBACK}:")
             and published_callback_details(button.get("callback_data")) is None
         ]
@@ -267,6 +268,7 @@ def handle_update(update: dict, token: str) -> dict:
     callback_account_id = callback_details[2] if callback_details else None
     callback_kind = (
         "already_published" if already_published else
+        "visual_only" if data == VISUAL_ONLY_CALLBACK else
         "legacy_visual_only" if data == PENDING_CALLBACK else
         "hashed" if source_hash else
         "unsupported"
@@ -283,7 +285,7 @@ def handle_update(update: dict, token: str) -> dict:
         f"has_caption={message.get('caption') is not None}",
         flush=True,
     )
-    if not already_published and data != PENDING_CALLBACK and source_hash is None:
+    if not already_published and data not in {PENDING_CALLBACK, VISUAL_ONLY_CALLBACK} and source_hash is None:
         print(f"publication callback ignored: kind=unsupported message_id={message_id}", flush=True)
         if callback_id:
             post_telegram_method(token, "answerCallbackQuery", {"callback_query_id": callback_id})
@@ -344,7 +346,7 @@ def handle_update(update: dict, token: str) -> dict:
             f"publication persistence ok: account_id={account_id} message_id={message_id}",
             flush=True,
         )
-    elif data == PENDING_CALLBACK:
+    elif data in {PENDING_CALLBACK, VISUAL_ONLY_CALLBACK}:
         print(
             f"legacy publish callback is visual-only: message_id={message_id}",
             flush=True,

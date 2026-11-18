@@ -38,3 +38,17 @@ def test_controller_passes_published_repeat_choice_to_sender(monkeypatch):
     controller.start()
 
     assert captured["allow_published_repeats"] is True
+    assert captured["use_airtable_publications"] is False
+
+
+def test_controller_passes_enabled_airtable_choice_to_sender(monkeypatch):
+    captured = {}
+
+    def fake_execute(_date, _accounts, _controller, **kwargs):
+        captured.update(kwargs)
+        return "planned"
+
+    monkeypatch.setattr(organizadortg, "execute_telegram_plan", fake_execute)
+    TelegramBotController("2026-10-14", use_airtable_publications=True).start()
+
+    assert captured["use_airtable_publications"] is True

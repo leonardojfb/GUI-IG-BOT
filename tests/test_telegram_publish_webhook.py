@@ -4,6 +4,40 @@ import organizadortg
 from railway_telegram_publish_webhook import telegram_publish_webhook as webhook
 
 
+def test_visual_publication_callback_marks_telegram_without_airtable(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        webhook, "upsert_published_video",
+        lambda _fields: (_ for _ in ()).throw(AssertionError("Airtable must not be called")),
+    )
+    monkeypatch.setattr(
+        webhook, "post_telegram_method",
+        lambda _token, method, payload: calls.append((method, payload)) or {"ok": True},
+    )
+    button = organizadortg._publish_button_markup(
+        "caption", source_hash="a" * 64, account_id=1, visual_only=True,
+    )["inline_keyboard"][0][0]
+
+    result = webhook.handle_update({"callback_query": {
+        "id": "cb-visual",
+        "data": button["callback_data"],
+        "message": {
+            "chat": {"id": -1001},
+            "message_id": 77,
+            "caption": "caption",
+            "reply_markup": {"inline_keyboard": [[button]]},
+        },
+    }}, "token")
+
+    assert result == {"ok": True, "handled": True}
+    assert calls[-1] == ("editMessageCaption", {
+        "chat_id": -1001,
+        "message_id": 77,
+        "caption": "caption\n\n✅ YA PUBLICADO",
+        "reply_markup": {"inline_keyboard": []},
+    })
+
+
 def test_new_published_callback_round_trips_hash_and_origin_token():
     source_hash = "a" * 64
     origin_token = "b" * 16

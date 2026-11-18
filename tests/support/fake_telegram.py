@@ -24,7 +24,7 @@ class FakeTelegramSender:
         return topic
 
     def fake_send_video(self, chat_id, t_id, caption, video_path, topics_state, username, tag,
-                        source_hash=None, origin_token=None, upload_filename=None, delivery_kind="normal"):
+                        source_hash=None, origin_token=None, upload_filename=None, delivery_kind="normal", visual_only_publication=False):
         self.events.append(
             {
                 "event": "video",

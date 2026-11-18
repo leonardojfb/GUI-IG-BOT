@@ -170,8 +170,9 @@ def _published_callback_data(source_hash, origin_token=None, account_id=None):
     return f"{callback}:{origin_token}" if origin_token else callback
 
 
-def _publish_button_markup(caption=None, source_hash=None, origin_token=None, account_id=None):
+def _publish_button_markup(caption=None, source_hash=None, origin_token=None, account_id=None, visual_only=False):
     callback_data = (
+        "trial" if visual_only else
         _published_callback_data(source_hash, origin_token, account_id)
         if source_hash else PUBLISH_CALLBACK_DATA
     )
@@ -928,6 +929,7 @@ def delete_known_topics_for_accounts(account_names, topics_state, delivery_kinds
 def _send_video_to_topic(
     chat_id, t_id, caption, video_path, topics_state, username, tag,
     source_hash=None, origin_token=None, upload_filename=None, delivery_kind="normal",
+    visual_only_publication=False,
 ):
     readable_video_path = _windows_long_path(video_path)
     active_path = readable_video_path
@@ -960,6 +962,7 @@ def _send_video_to_topic(
                         None if delivery_kind == "trial" else source_hash,
                         origin_token,
                         account_id,
+                        visual_only=visual_only_publication or delivery_kind == "trial",
                     ), ensure_ascii=False
                 ),
             }
@@ -1125,7 +1128,7 @@ def _account_tag(acc_info):
         return "SUICIDE"
     return category.upper() if category else "GENERAL"
 
-def execute_telegram_plan(start_date, selected_accounts=None, controller=None, reset_topics=False, express_mode=False, db_manager=None, allow_published_repeats=False, allow_delivered_repeats=False):
+def execute_telegram_plan(start_date, selected_accounts=None, controller=None, reset_topics=False, express_mode=False, db_manager=None, allow_published_repeats=False, allow_delivered_repeats=False, use_airtable_publications=False):
     if db_manager is not None:
         global db
         previous_db = db
@@ -1139,13 +1142,15 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                 express_mode=express_mode,
                 allow_published_repeats=allow_published_repeats,
                 allow_delivered_repeats=allow_delivered_repeats,
+                use_airtable_publications=use_airtable_publications,
             )
         finally:
             db = previous_db
 
     print(
         f"Telegram opciones efectivas: borrar_topics={bool(reset_topics)}, "
-        f"envio_express={bool(express_mode)}, repetir_publicados={bool(allow_published_repeats)}, "
+        f"envio_express={bool(express_mode)}, airtable_publicados={bool(use_airtable_publications)}, "
+        f"repetir_publicados={bool(allow_published_repeats)}, "
         f"repetir_enviados={bool(allow_delivered_repeats)}"
     )
     caption_pools = load_tanda_caption_pools()
@@ -1176,12 +1181,16 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"⚠️ No se pudo leer el historial de envíos: {exc}")
         return "❌ No se pudo leer el historial de envíos; no se enviaron videos."
-    try:
-        published_hashes, published_origins = (set(), set())
-        if any(video.get("delivery_kind", "normal") != "trial" for video in all_videos):
+    published_hashes, published_origins = (set(), set())
+    if use_airtable_publications and any(video.get("delivery_kind", "normal") != "trial" for video in all_videos):
+        try:
             published_hashes, published_origins = fetch_published_video_publications(
                 load_airtable_config()
             )
+        except (AirtableSyncError, OSError, ValueError) as exc:
+            print(f"⚠️ No se pudo verificar Airtable: {exc}")
+            return "❌ No se pudo verificar Airtable; no se enviaron videos."
+    try:
         eligible_videos = []
         omitted_published = 0
         omitted_duplicate_origins = 0
@@ -1222,9 +1231,9 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
             video["origin_token"] = origin_token
             video["delivery_origin_key"] = None if is_trial else (origin_token or family_key or source_hash)
             eligible_videos.append(video)
-    except (AirtableSyncError, OSError, ValueError) as exc:
-        print(f"⚠️ No se pudo verificar Airtable: {exc}")
-        return "❌ No se pudo verificar Airtable; no se enviaron videos."
+    except (OSError, ValueError) as exc:
+        print(f"⚠️ No se pudo verificar un video del calendario: {exc}")
+        return "❌ No se pudo verificar un video del calendario; no se enviaron videos."
 
     all_videos = eligible_videos
     if not all_videos:
@@ -1454,6 +1463,7 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
                     origin_token=job.get("origin_token"),
                     upload_filename=job.get("filename"),
                     delivery_kind=job["delivery_kind"],
+                    visual_only_publication=not use_airtable_publications,
                 )
                 if ok:
                     sent += 1
@@ -1494,13 +1504,14 @@ def execute_telegram_plan(start_date, selected_accounts=None, controller=None, r
 
 # --- 4. CONTROLADOR DE HILOS Y MOTOR DE EJECUCIÓN ---
 class TelegramBotController:
-    def __init__(self, start_date_str, selected_accounts=None, reset_topics=False, express_mode=False, db_manager=None, allow_published_repeats=False, allow_delivered_repeats=False):
+    def __init__(self, start_date_str, selected_accounts=None, reset_topics=False, express_mode=False, db_manager=None, allow_published_repeats=False, allow_delivered_repeats=False, use_airtable_publications=False):
         self.start_date_str = start_date_str
         self.selected_accounts = selected_accounts
         self.reset_topics = reset_topics
         self.express_mode = express_mode
         self.allow_published_repeats = allow_published_repeats
         self.allow_delivered_repeats = allow_delivered_repeats
+        self.use_airtable_publications = use_airtable_publications
         self.db_manager = db_manager
         self._paused = threading.Event()
         self._paused.set()
@@ -1526,6 +1537,7 @@ class TelegramBotController:
                 "express_mode": self.express_mode,
                 "allow_published_repeats": self.allow_published_repeats,
                 "allow_delivered_repeats": self.allow_delivered_repeats,
+                "use_airtable_publications": self.use_airtable_publications,
             }
             if self.db_manager is not None:
                 execute_kwargs["db_manager"] = self.db_manager

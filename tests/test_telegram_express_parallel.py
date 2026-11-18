@@ -69,7 +69,7 @@ def _stub_common_telegram_plan(monkeypatch, videos, accounts):
         calls.append((method, dict(data), silent))
         return {"ok": True}
 
-    def fake_send_video(chat_id, topic_id, caption, video_path, topics_state, username, tag, source_hash=None, origin_token=None, upload_filename=None, delivery_kind="normal"):
+    def fake_send_video(chat_id, topic_id, caption, video_path, topics_state, username, tag, source_hash=None, origin_token=None, upload_filename=None, delivery_kind="normal", visual_only_publication=False):
         sent_videos.append((chat_id, topic_id, username, video_path, delivery_kind))
         return True, topic_id
 
@@ -103,6 +103,31 @@ def _video(path, username, filename=None, origin_identity=None, account_id=None)
     if origin_identity:
         video["origin_identity"] = origin_identity
     return video
+
+
+def test_plan_sends_without_airtable_configuration_by_default(monkeypatch, tmp_path):
+    source = tmp_path / "video.mp4"
+    source.write_bytes(b"normal")
+    _calls, sent = _stub_common_telegram_plan(
+        monkeypatch, [_video(source, "alpha")], [_account("alpha", "-1001")],
+    )
+
+    def missing_config():
+        raise AirtableSyncError("Airtable not configured")
+
+    monkeypatch.setattr(organizadortg, "load_airtable_config", missing_config)
+    result = organizadortg.execute_telegram_plan(datetime(2026, 8, 14))
+
+    assert [item[3] for item in sent] == [str(source)]
+    assert "Se enviaron 1 videos" in result
+
+
+def test_visual_only_published_button_has_no_airtable_identity():
+    button = organizadortg._publish_button_markup(
+        "caption", source_hash="a" * 64, account_id=1, visual_only=True,
+    )["inline_keyboard"][0][0]
+
+    assert button["callback_data"] == "trial"
 
 
 def test_send_video_uses_calendar_filename_with_account_id(monkeypatch, tmp_path):
@@ -158,7 +183,7 @@ def test_trial_video_publish_button_is_visual_only(monkeypatch, tmp_path):
     )
 
     assert ok is True
-    assert captured["callback"] == "pub"
+    assert captured["callback"] == "trial"
 
 
 def test_plan_fails_closed_when_manifest_account_id_is_missing(monkeypatch, tmp_path):
@@ -216,7 +241,9 @@ def test_plan_omits_identical_published_bytes_only_for_matching_account(monkeypa
         raising=False,
     )
 
-    result = organizadortg.execute_telegram_plan(datetime(2026, 8, 14))
+    result = organizadortg.execute_telegram_plan(
+        datetime(2026, 8, 14), use_airtable_publications=True,
+    )
 
     assert [video[3] for video in sent_videos] == [str(old), str(new)]
     assert [video[2] for video in sent_videos] == ["beta", "beta"]
@@ -238,7 +265,9 @@ def test_plan_fails_closed_before_topic_creation_on_airtable_error(monkeypatch, 
         organizadortg, "fetch_published_video_publications", unavailable, raising=False
     )
 
-    result = organizadortg.execute_telegram_plan(datetime(2026, 8, 14))
+    result = organizadortg.execute_telegram_plan(
+        datetime(2026, 8, 14), use_airtable_publications=True,
+    )
 
     assert result == "❌ No se pudo verificar Airtable; no se enviaron videos."
     assert calls == []
@@ -246,6 +275,7 @@ def test_plan_fails_closed_before_topic_creation_on_airtable_error(monkeypatch, 
 
     opted_in_result = organizadortg.execute_telegram_plan(
         datetime(2026, 8, 14), allow_published_repeats=True,
+        use_airtable_publications=True,
     )
     assert opted_in_result == result
     assert calls == []
@@ -277,7 +307,9 @@ def test_plan_omits_published_origin_only_for_matching_account(monkeypatch, tmp_
         ),
     )
 
-    result = organizadortg.execute_telegram_plan(datetime(2026, 8, 14))
+    result = organizadortg.execute_telegram_plan(
+        datetime(2026, 8, 14), use_airtable_publications=True,
+    )
 
     assert [video[3] for video in sent_videos] == [str(second), str(other)]
     assert [video[2] for video in sent_videos] == ["beta", "beta"]
@@ -311,6 +343,7 @@ def test_opt_in_repeats_published_origin_only_for_its_account(monkeypatch, tmp_p
 
     result = organizadortg.execute_telegram_plan(
         datetime(2026, 10, 14), allow_published_repeats=True,
+        use_airtable_publications=True,
     )
 
     assert [(video[2], video[3]) for video in sent] == [("alpha", str(alpha))]
@@ -418,6 +451,7 @@ def test_opt_in_resends_delivered_origin_without_erasing_history(monkeypatch, tm
 
     result = organizadortg.execute_telegram_plan(
         datetime(2026, 10, 14), allow_delivered_repeats=True,
+        use_airtable_publications=True,
     )
 
     assert [(video[2], video[3]) for video in sent] == [
@@ -459,7 +493,7 @@ def test_publication_without_account_does_not_omit_origin_for_any_account(monkey
     )
     result = organizadortg.execute_telegram_plan(
         datetime(2026, 8, 14), selected_accounts=["alpha"],
-        reset_topics=True, express_mode=True,
+        reset_topics=True, express_mode=True, use_airtable_publications=True,
     )
     assert "Omitidos publicados: 0" in result
     assert [video[3] for video in sent_videos] == [str(video)]
@@ -480,7 +514,7 @@ def test_unscoped_wavespeed_publication_does_not_block_another_account(monkeypat
     )
     result = organizadortg.execute_telegram_plan(
         datetime(2026, 8, 14), selected_accounts=["alpha"],
-        reset_topics=True, express_mode=True,
+        reset_topics=True, express_mode=True, use_airtable_publications=True,
     )
     assert "Omitidos publicados: 0" in result
     assert calls == []
@@ -500,7 +534,9 @@ def test_unscoped_published_hash_does_not_block_other_accounts(monkeypatch, tmp_
         lambda _config: ({("*", published_hash)}, set()),
     )
 
-    result = organizadortg.execute_telegram_plan(datetime(2026, 8, 14))
+    result = organizadortg.execute_telegram_plan(
+        datetime(2026, 8, 14), use_airtable_publications=True,
+    )
 
     assert "Omitidos publicados: 0" in result
     assert [item[3] for item in sent_videos] == [str(video)]
@@ -557,7 +593,7 @@ def test_topic_reset_preserves_topic_when_all_normal_videos_are_published(monkey
     )
     result = organizadortg.execute_telegram_plan(
         datetime(2026, 8, 14), selected_accounts=["alpha"],
-        reset_topics=True, express_mode=True,
+        reset_topics=True, express_mode=True, use_airtable_publications=True,
     )
     assert "Se enviaron 0 videos" in result
     assert calls == []
@@ -587,7 +623,7 @@ def test_trial_video_reuses_published_origin_and_resets_only_trial_topic(monkeyp
 
     result = organizadortg.execute_telegram_plan(
         datetime(2026, 8, 14), selected_accounts=["alpha"],
-        reset_topics=True, express_mode=True,
+        reset_topics=True, express_mode=True, use_airtable_publications=True,
     )
 
     assert "Se enviaron 1 videos" in result
