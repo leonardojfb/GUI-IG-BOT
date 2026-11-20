@@ -3924,20 +3924,23 @@ class InstagramAutoPro(ctk.CTk):
     def _build_tg_frame(self):
         """TAREA 6 — Bot Telegram."""
         f = self._frames["Telegram"]
-        f.grid_rowconfigure(1, weight=1)
-        f.grid_columnconfigure((0, 1), weight=1)
+        f.grid_rowconfigure(0, weight=1)
+        f.grid_columnconfigure(0, weight=1)
+        scroll = ctk.CTkScrollableFrame(f, fg_color="transparent")
+        self.tg_scroll = scroll
+        scroll.grid(row=0, column=0, sticky="nsew")
+        scroll.grid_columnconfigure(0, weight=1)
 
         # ── Header ──────────────────────────────────────────────────────
         PageHeader(
-            f, "DISTRIBUCIÓN", "Telegram",
+            scroll, "DISTRIBUCIÓN", "Telegram",
             "Envío programado vía Telegram."
-        ).grid(row=0, column=0, columnspan=2, sticky="ew", padx=24, pady=(20, 10))
+        ).grid(row=0, column=0, sticky="ew", padx=24, pady=(20, 10))
 
         # ── Panel Izquierdo: Cuentas y Controles ────────────────────────
-        ctrl_card = Card(f, title="Cuentas programadas")
-        ctrl_card.grid(row=1, column=0, sticky="nsew", padx=(24, 12), pady=10)
+        ctrl_card = Card(scroll, title="Cuentas programadas")
+        ctrl_card.grid(row=1, column=0, sticky="ew", padx=24, pady=10)
         ctrl = ctrl_card.body
-        ctrl.grid_rowconfigure(9, weight=1)
         ctrl.grid_columnconfigure(0, weight=1)
 
         # Fila 0: título + botón cargar
@@ -3948,27 +3951,34 @@ class InstagramAutoPro(ctk.CTk):
                                        command=self.load_organized_accounts)
         self.btn_load_tg.grid(row=0, column=1, sticky="e")
 
-        # Fila 1: filtro + seleccionar todos/ninguno
-        filter_row = ctk.CTkFrame(ctrl, fg_color="transparent")
-        filter_row.grid(row=1, column=0, sticky="ew", pady=(0, 4))
-        filter_row.grid_columnconfigure(0, weight=1)
+        self._tg_options_expanded = False
+        self.btn_toggle_tg_options = GhostButton(
+            ctrl, text="▶ Opciones y filtros", anchor="w",
+            command=self._toggle_tg_options,
+        )
+        self.btn_toggle_tg_options.grid(row=1, column=0, sticky="ew", pady=(4, 4))
+        self.tg_options_panel = ctk.CTkFrame(ctrl, fg_color="transparent")
+        self.tg_options_panel.grid_columnconfigure(0, weight=1)
+
         self._tg_only_with_videos = tk.BooleanVar(value=True)
         tg_filter_toggle = ToggleRow(
-            filter_row, "Solo con videos", variable=self._tg_only_with_videos
+            self.tg_options_panel, "Solo con videos", variable=self._tg_only_with_videos,
+            fg_color=BG_CARD2,
         )
         tg_filter_toggle.switch.configure(command=self.load_organized_accounts)
-        tg_filter_toggle.grid(row=0, column=0, sticky="w")
-        sel_frame = ctk.CTkFrame(filter_row, fg_color="transparent")
-        sel_frame.grid(row=0, column=1, sticky="e")
+        tg_filter_toggle.grid(row=0, column=0, sticky="ew", pady=(0, 4))
+
+        sel_frame = ctk.CTkFrame(ctrl, fg_color="transparent")
+        sel_frame.grid(row=3, column=0, sticky="e", pady=(0, 4))
         GhostButton(sel_frame, text="Todos", width=72,
                     command=lambda: self.list_tg.select_set(0, "end")).pack(side="left", padx=(0, 4))
         GhostButton(sel_frame, text="Ninguno", width=78,
                     command=lambda: self.list_tg.selection_clear(0, "end")).pack(side="left")
 
-        # Fila 2: toggle "Configurar Horarios"
+        # Horarios mantienen su propio panel desplegable.
         self._schedule_panel_expanded = False
         sched_header = ctk.CTkFrame(ctrl, fg_color="transparent")
-        sched_header.grid(row=2, column=0, sticky="ew", pady=(4, 0))
+        sched_header.grid(row=4, column=0, sticky="ew", pady=(4, 0))
         sched_header.grid_columnconfigure(0, weight=1)
         self.btn_toggle_sched = GhostButton(
             sched_header, text="▶ Configurar Horarios", anchor="w",
@@ -3983,71 +3993,71 @@ class InstagramAutoPro(ctk.CTk):
         # Fila 4: modo express
         self._tg_express_mode = tk.BooleanVar(value=False)
         express_toggle = ToggleRow(
-            ctrl,
+            self.tg_options_panel,
             "Envío express",
             variable=self._tg_express_mode,
             fg_color=BG_CARD2,
         )
         self._tg_express_switch = express_toggle.switch
-        express_toggle.grid(row=4, column=0, sticky="ew", pady=(8, 4))
+        express_toggle.grid(row=1, column=0, sticky="ew", pady=(4, 4))
 
         # Fila 5: reset opcional de topics
         self._tg_reset_topics = tk.BooleanVar(value=False)
         reset_topics_toggle = ToggleRow(
-            ctrl,
+            self.tg_options_panel,
             "Borrar topics existentes y recrear",
             variable=self._tg_reset_topics,
             fg_color=BG_CARD2,
         )
         self._tg_reset_topics_switch = reset_topics_toggle.switch
-        reset_topics_toggle.grid(row=5, column=0, sticky="ew", pady=(4, 4))
+        reset_topics_toggle.grid(row=2, column=0, sticky="ew", pady=(4, 4))
 
         # Fila 6: consulta opcional de publicaciones en Airtable.
         self._tg_use_airtable_publications = tk.BooleanVar(value=False)
         airtable_toggle = ToggleRow(
-            ctrl,
+            self.tg_options_panel,
             "Consultar publicados en Airtable (opcional)",
             variable=self._tg_use_airtable_publications,
             fg_color=BG_CARD2,
         )
         self._tg_use_airtable_switch = airtable_toggle.switch
-        airtable_toggle.grid(row=6, column=0, sticky="ew", pady=(4, 4))
+        airtable_toggle.grid(row=3, column=0, sticky="ew", pady=(4, 4))
 
         # Fila 7: permitir reenvíos de videos marcados como Publicado.
         self._tg_allow_published_repeats = tk.BooleanVar(value=False)
         repeat_published_toggle = ToggleRow(
-            ctrl,
+            self.tg_options_panel,
             "Repetir videos marcados como Publicado en la cuenta",
             variable=self._tg_allow_published_repeats,
             fg_color=BG_CARD2,
         )
         self._tg_allow_published_repeats_switch = repeat_published_toggle.switch
-        repeat_published_toggle.grid(row=7, column=0, sticky="ew", pady=(4, 10))
+        repeat_published_toggle.grid(row=4, column=0, sticky="ew", pady=(4, 4))
         self._tg_allow_published_repeats_switch.configure(state="disabled")
         self._tg_use_airtable_switch.configure(command=self._sync_tg_airtable_toggle)
 
         self._tg_allow_delivered_repeats = tk.BooleanVar(value=False)
         repeat_delivered_toggle = ToggleRow(
-            ctrl,
+            self.tg_options_panel,
             "Reenviar videos ya enviados a estas cuentas",
             variable=self._tg_allow_delivered_repeats,
             fg_color=BG_CARD2,
         )
         self._tg_allow_delivered_repeats_switch = repeat_delivered_toggle.switch
-        repeat_delivered_toggle.grid(row=8, column=0, sticky="ew", pady=(4, 10))
+        repeat_delivered_toggle.grid(row=5, column=0, sticky="ew", pady=(4, 10))
 
-        # Fila 9: listbox con selección múltiple
-        self.list_tg = tk.Listbox(ctrl, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
+        # Fila 7: listbox con selección múltiple
+        self.list_tg = tk.Listbox(ctrl, height=10, bg=self.themed(BG_INPUT), fg=self.themed(TEXT_BODY),
                                   selectbackground=self.themed(ACCENT),
                                   selectforeground=self.themed(ACCENT_TEXT),
                                   selectmode=tk.EXTENDED,
                                   borderwidth=0, highlightthickness=1,
                                   highlightbackground=self.themed(BORDER), font=FONT_BODY)
-        self.list_tg.grid(row=9, column=0, sticky="nsew", pady=(0, 10))
+        self.list_tg.grid(row=6, column=0, sticky="ew", pady=(0, 10))
 
         # Controles inferiores
         bot_ctrl = ctk.CTkFrame(ctrl, fg_color="transparent")
-        bot_ctrl.grid(row=10, column=0, sticky="ew", pady=(10, 20))
+        bot_ctrl.grid(row=7, column=0, sticky="ew", pady=(10, 20))
         
         ctk.CTkLabel(bot_ctrl, text="Fecha Inicio (YYYY-MM-DD):", text_color=TEXT_MUTED).pack(side="left")
         self.e_date_tg = ctk.CTkEntry(bot_ctrl, fg_color=BG_INPUT, border_color=BORDER, width=120)
@@ -4055,7 +4065,7 @@ class InstagramAutoPro(ctk.CTk):
         self.e_date_tg.insert(0, datetime.now().strftime("%Y-%m-%d"))
 
         btn_row = ctk.CTkFrame(ctrl, fg_color="transparent")
-        btn_row.grid(row=11, column=0, sticky="ew", pady=(0, 0))
+        btn_row.grid(row=8, column=0, sticky="ew", pady=(0, 0))
         
         self.btn_start_tg = PrimaryButton(btn_row, text="▶ INICIAR", fg_color=TELEGRAM,
                                           text_color=TEXT_ON_DANGER, command=self.start_tg_bot)
@@ -4070,7 +4080,7 @@ class InstagramAutoPro(ctk.CTk):
         self.btn_stop_tg.pack(side="left", expand=True, padx=(5, 0))
 
         cleanup_row = ctk.CTkFrame(ctrl, fg_color="transparent")
-        cleanup_row.grid(row=12, column=0, sticky="ew", pady=(8, 0))
+        cleanup_row.grid(row=9, column=0, sticky="ew", pady=(8, 0))
         self.btn_delete_calendar_tg = DangerButton(
             cleanup_row,
             text="Borrar calendarizaciones",
@@ -4079,13 +4089,13 @@ class InstagramAutoPro(ctk.CTk):
         self.btn_delete_calendar_tg.pack(side="left", fill="x", expand=True)
 
         # ── Panel Derecho: Live Log ─────────────────────────────────────
-        log_card = Card(f, title="Registro de actividad")
-        log_card.grid(row=1, column=1, sticky="nsew", padx=(12, 24), pady=10)
+        log_card = Card(scroll, title="Registro de actividad")
+        log_card.grid(row=2, column=0, sticky="ew", padx=24, pady=(10, 20))
         log = log_card.body
         log.grid_rowconfigure(0, weight=1)
         log.grid_columnconfigure(0, weight=1)
         
-        self.tg_log = ctk.CTkTextbox(log, fg_color=BG_INPUT, text_color=TEXT_BODY, font=FONT_MONO,
+        self.tg_log = ctk.CTkTextbox(log, height=280, fg_color=BG_INPUT, text_color=TEXT_BODY, font=FONT_MONO,
                                      border_width=1, border_color=BORDER)
         self.tg_log.grid(row=0, column=0, sticky="nsew")
         
@@ -4100,12 +4110,21 @@ class InstagramAutoPro(ctk.CTk):
 
     # ── Horarios: toggle / editor de grilla ─────────────────────────────────
 
+    def _toggle_tg_options(self):
+        self._tg_options_expanded = not self._tg_options_expanded
+        if self._tg_options_expanded:
+            self.btn_toggle_tg_options.configure(text="▼ Opciones y filtros")
+            self.tg_options_panel.grid(row=2, column=0, sticky="ew", pady=(0, 4))
+        else:
+            self.btn_toggle_tg_options.configure(text="▶ Opciones y filtros")
+            self.tg_options_panel.grid_forget()
+
     def _toggle_schedule_panel(self):
         """Expande o colapsa el panel de configuración de horarios."""
         self._schedule_panel_expanded = not self._schedule_panel_expanded
         if self._schedule_panel_expanded:
             self.btn_toggle_sched.configure(text="▼ Configurar Horarios")
-            self.sched_panel.grid(row=3, column=0, sticky="ew", padx=20, pady=(4, 4))
+            self.sched_panel.grid(row=5, column=0, sticky="ew", padx=20, pady=(4, 4))
             self._refresh_schedule_panel()
         else:
             self.btn_toggle_sched.configure(text="▶ Configurar Horarios")

@@ -1,11 +1,11 @@
 {
-    "version":  "1.0.57",
+    "version":  "1.0.58",
     "url":  "",
     "github_repository":  "leonardojfb/GUI-IG-BOT",
-    "github_release_tag":  "v1.0.57",
-    "asset_name":  "MetodoIG-v1.0.57.zip",
-    "sha256":  "e4dddce985177fa316484bbc22addfa84692c1baf2c2a1949d6a473a790072fe",
-    "notes":  "Telegram: Airtable opcional y desactivado por defecto; Publicado funciona como marca visual sin Airtable.",
+    "github_release_tag":  "v1.0.58",
+    "asset_name":  "MetodoIG-v1.0.58.zip",
+    "sha256":  "f71f735b82f8380f0a14f228c054e02b39db0eafa886e69f7683fa494e687bb7",
+    "notes":  "Telegram: pestaña con scroll vertical y opciones de switches desplegables.",
     "files":  [
                   "Abrir GUI.bat",
                   "Instalar GUI.bat",
